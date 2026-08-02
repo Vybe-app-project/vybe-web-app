@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const {execFileSync} = require('child_process');
 const typescript = require('typescript');
 const ts = typescript.default || typescript;
 
@@ -22,6 +23,8 @@ const backendRoot = path.resolve(
 const requestMethods = new Set(['get', 'post', 'put', 'patch', 'delete']);
 const socketMethods = new Set(['on', 'off', 'emit']);
 const dynamicMarker = '__DYNAMIC__';
+const snapshotPath = path.join(webRoot, 'contracts', 'backend-routes.json');
+const writeSnapshot = process.argv.includes('--write-backend-snapshot');
 
 function walk(directory, predicate) {
   const results = [];
@@ -275,10 +278,10 @@ function joinRoute(mount, route) {
   return combined.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
 }
 
-function inventoryBackendRoutes() {
+function inventoryBackendSource() {
   const appPath = path.join(backendRoot, 'app.js');
   if (!fs.existsSync(appPath)) {
-    throw new Error(`Backend app.js not found at ${appPath}`);
+    return null;
   }
   const appSource = fs.readFileSync(appPath, 'utf8');
   const routes = [];
@@ -316,6 +319,74 @@ function inventoryBackendRoutes() {
     }
   }
   return routes;
+}
+
+function routeContract(routes) {
+  return routes.map(({method, path: routePath, file, order}) => ({
+    method,
+    path: routePath,
+    file,
+    order,
+  }));
+}
+
+function readBackendSnapshot() {
+  if (!fs.existsSync(snapshotPath)) {
+    throw new Error(
+      `Backend route snapshot not found at ${snapshotPath}. `
+      + 'Run npm run contracts:snapshot with the backend checkout present.',
+    );
+  }
+  const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+  if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.routes)) {
+    throw new Error(`Unsupported backend route snapshot at ${snapshotPath}`);
+  }
+  return snapshot;
+}
+
+function backendRevision() {
+  try {
+    return execFileSync('git', ['-C', backendRoot, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function writeBackendSnapshot(routes) {
+  fs.mkdirSync(path.dirname(snapshotPath), {recursive: true});
+  fs.writeFileSync(snapshotPath, `${JSON.stringify({
+    schemaVersion: 1,
+    backendRevision: backendRevision(),
+    routes: routeContract(routes),
+  }, null, 2)}\n`);
+  console.log(`Wrote ${routes.length} backend routes to ${snapshotPath}`);
+}
+
+function inventoryBackendRoutes() {
+  const sourceRoutes = inventoryBackendSource();
+  if (writeSnapshot) {
+    if (!sourceRoutes) {
+      throw new Error(`Backend app.js not found at ${path.join(backendRoot, 'app.js')}`);
+    }
+    writeBackendSnapshot(sourceRoutes);
+    return sourceRoutes;
+  }
+
+  const snapshot = readBackendSnapshot();
+  if (!sourceRoutes) return snapshot.routes;
+
+  const actual = JSON.stringify(routeContract(sourceRoutes));
+  const recorded = JSON.stringify(routeContract(snapshot.routes));
+  if (actual !== recorded) {
+    throw new Error(
+      'Backend routes changed after contracts/backend-routes.json was generated. '
+      + 'Review the change and run npm run contracts:snapshot.',
+    );
+  }
+  return sourceRoutes;
 }
 
 function escapeRegex(value) {
@@ -376,8 +447,9 @@ function printGroupedCalls(calls) {
 }
 
 function main() {
-  const {calls, socketCalls, fetchCalls} = inventoryWeb();
   const routes = inventoryBackendRoutes();
+  if (writeSnapshot) return;
+  const {calls, socketCalls, fetchCalls} = inventoryWeb();
   const dynamicCalls = calls.filter(call => call.endpoints.length === 0);
   const unmatched = [];
   const unresolvedBases = [];

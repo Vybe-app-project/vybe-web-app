@@ -24,6 +24,10 @@ npm run verify
 `verify` audits production dependencies, runs source-contract tests,
 type-checks the complete app, builds the production bundle, and inspects the
 result for missing assets, source maps, and embedded credential patterns.
+The committed `contracts/backend-routes.json` lets an isolated OVH build repeat
+the route audit without cloning another repository. When backend routes change,
+review them and run `npm run contracts:snapshot`; local verification rejects a
+stale snapshot before it can be released.
 
 ## OVH build
 

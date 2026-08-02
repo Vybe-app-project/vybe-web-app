@@ -8,6 +8,7 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
+    "contracts:snapshot": "node scripts/audit-api-contracts.cjs ../vybe-backend --write-backend-snapshot",
     "audit:contracts": "node scripts/audit-api-contracts.cjs ../vybe-backend",
     "build": "npm run typecheck && vite build",
     "verify:build": "node scripts/verify-build.mjs",
