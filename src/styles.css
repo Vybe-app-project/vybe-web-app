@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink: #07070c;
+  --color-surface: #101018;
+  --color-surface-2: #17171f;
+  --color-line: #262631;
+  --color-brand: #7c5cff;
+  --color-brand-2: #22d3ee;
+  --color-accent: #f472b6;
+  --color-muted: #9aa0ae;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--color-ink);
+  color: #f4f4f6;
+  font-family: ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+* { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 99px; }
+
+@utility card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+}
+
+@utility btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  border-radius: .75rem; padding: .55rem 1rem; font-weight: 600; font-size: .875rem;
+  transition: all .15s ease; cursor: pointer; border: 1px solid transparent;
+}
+@utility btn-primary {
+  background: linear-gradient(135deg, var(--color-brand), var(--color-brand-2));
+  color: #08080d;
+}
+@utility btn-ghost {
+  background: var(--color-surface-2); border-color: var(--color-line); color: #e8e8ee;
+}
+@utility input-base {
+  width: 100%; background: var(--color-surface-2); border: 1px solid var(--color-line);
+  border-radius: .75rem; padding: .6rem .85rem; color: #f4f4f6; outline: none; font-size: .9rem;
+}
+
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-ghost:hover:not(:disabled) { background: #1e1e28; }
+.input-base:focus { border-color: var(--color-brand); }
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: var(--color-surface-2); border-radius: .6rem; }
+.skeleton::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-top { padding-top: env(safe-area-inset-top); }

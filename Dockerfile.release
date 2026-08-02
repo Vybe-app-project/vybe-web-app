@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1.7
+FROM node:20.20.2-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS build
+
+WORKDIR /workspace
+ENV CI=true
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run verify
+
+FROM scratch AS artifact
+COPY --from=build /workspace/dist/ /site/

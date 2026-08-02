@@ -1,0 +1,42 @@
+{
+  "name": "vybe-consumer-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Installable browser client for the Vybe social fitness platform.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "audit:contracts": "node scripts/audit-api-contracts.cjs ../vybe-backend",
+    "build": "npm run typecheck && vite build",
+    "verify:build": "node scripts/verify-build.mjs",
+    "audit:release": "node scripts/audit-production.mjs",
+    "verify": "npm run audit:release && npm run audit:contracts && npm run test && npm run build && npm run verify:build"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.101.4",
+    "axios": "1.19.0",
+    "date-fns": "4.4.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2",
+    "recharts": "3.10.1",
+    "socket.io-client": "4.8.3",
+    "zustand": "5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "8.2.0"
+  },
+  "engines": {
+    "node": ">=20.19.4 <21"
+  },
+  "packageManager": "npm@10.8.2",
+  "license": "UNLICENSED"
+}
