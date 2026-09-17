@@ -13,7 +13,10 @@
     "build": "npm run typecheck && vite build",
     "verify:build": "node scripts/verify-build.mjs",
     "audit:release": "node scripts/audit-production.mjs",
-    "verify": "npm run audit:release && npm run audit:contracts && npm run test && npm run build && npm run verify:build"
+    "verify": "npm run scan && npm run audit:release && npm run audit:contracts && npm run test && npm run build && npm run verify:build",
+    "scan": "node scripts/scan-injected-code.mjs",
+    "setup:hooks": "git config core.hooksPath .githooks",
+    "pretest": "npm run scan"
   },
   "dependencies": {
     "@tanstack/react-query": "5.101.4",

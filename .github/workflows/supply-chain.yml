@@ -1,0 +1,50 @@
+name: Supply chain
+
+# Catches code hidden behind whitespace padding, known malware indicators, and
+# executable content smuggled into binary assets.
+#
+# Added after the 2026-09-17 incident: an obfuscated remote-code-execution
+# loader reached this repository's default branch inside an ordinary-looking
+# build config and sat there undetected, because the payload was pushed off the
+# right edge of the diff by ~270 characters of whitespace.
+#
+# This job intentionally installs nothing. The scanner has zero dependencies,
+# so the check cannot itself be compromised by the dependency tree it guards,
+# and it runs before any `npm ci` that would execute package lifecycle scripts.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.20.2
+
+      - name: Scan tracked files for injected code
+        run: node scripts/scan-injected-code.mjs
+
+      - name: Verify the scanner still detects the original technique
+        # A gate that cannot fail is not a gate. This plants the exact
+        # concealment pattern in a scratch directory and asserts a non-zero
+        # exit, so a future well-meaning "cleanup" of the scanner cannot
+        # silently disable it.
+        run: |
+          mkdir -p "$RUNNER_TEMP/negtest"
+          printf 'module.exports = {};%s const {spawn}=require("node:child_process");eval(await x);\n' \
+            "$(printf '\t%.0s' $(seq 1 120))" > "$RUNNER_TEMP/negtest/babel.config.js"
+          if node scripts/scan-injected-code.mjs "$RUNNER_TEMP/negtest"; then
+            echo "::error::scanner FAILED to detect a planted payload" >&2
+            exit 1
+          fi
+          echo "scanner correctly rejected the planted payload"

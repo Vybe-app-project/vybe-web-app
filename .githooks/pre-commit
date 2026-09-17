@@ -1,0 +1,39 @@
+#!/bin/sh
+# Blocks commits containing code hidden behind whitespace padding, known
+# malware indicators, or executable content smuggled into a binary asset.
+#
+# Installed after the 2026-09-17 incident, in which an obfuscated
+# remote-code-execution loader was appended to this repository's build config
+# behind ~270 characters of whitespace. It was invisible in an editor and in
+# GitHub's diff view, and it executed on every `npm test`, `npm run build`,
+# `npm run verify` and Metro start.
+#
+# Enable for your clone once:   npm run setup:hooks
+# Deliberate bypass:            git commit --no-verify
+#
+# If this hook fires, read the finding before bypassing it. The whole point of
+# the technique it detects is that the payload does not look like anything in a
+# normal diff.
+set -e
+
+TOPLEVEL=$(git rev-parse --show-toplevel)
+SCANNER="$TOPLEVEL/scripts/scan-injected-code.mjs"
+
+if [ ! -f "$SCANNER" ]; then
+  echo "pre-commit: $SCANNER is missing. Restore it; do not remove this gate." >&2
+  exit 1
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  # Fail closed. Node is required to work on this repository at all, so a
+  # missing node means a broken environment, not a reason to skip the check.
+  echo "pre-commit: node not found, cannot run the supply-chain scan." >&2
+  echo "Install Node 20 or bypass explicitly with --no-verify." >&2
+  exit 1
+fi
+
+if ! node "$SCANNER" --staged; then
+  echo "" >&2
+  echo "pre-commit BLOCKED: staged changes contain hidden or suspicious code." >&2
+  exit 1
+fi
