@@ -246,7 +246,7 @@ export default function AdminLayout() {
           </div>
         )}
 
-        <ThemeControl label="Console appearance" />
+        <ThemeControl label="Console appearance" iconOnly />
 
         <div className="flex items-center justify-between gap-2">
           <a

@@ -17,7 +17,7 @@
  *   dark  text-2 #a3afc0 on surface-1 #111721  8.1:1 · text-3 #7a879b 4.9:1
  *         brand-text #f2cf7f on surface-1 11.9:1 · on-brand on brand 9.2:1
  *         control-border #66768c on surface-2 3.5:1
- *   light text-2 #475569 on white 7.6:1 · text-3 #64748b 4.8:1
+ *   light text-2 #475569 on white 7.6:1 · text-3 #596577 5.9:1 (5.1:1 on surface-2)
  *         brand-text #6b4c05 on white 7.8:1 · on-brand on brand 6.2:1
  *         control-border #6b7a8f on surface-2 3.8:1
  * ------------------------------------------------------------------ */
@@ -35,6 +35,7 @@
   --ops-graphite-200: #dfe5ec;
   --ops-graphite-300: #b6c0cc;
   --ops-graphite-500: #64748b;
+  --ops-graphite-550: #596577; /* light text-3: 5.07:1 on graphite-100, 4.66:1 on graphite-200 (500 was 4.08 / 3.75) */
   --ops-graphite-600: #475569;
   --ops-graphite-900: #0f172a;
   --ops-graphite-950: #0b0f16;
@@ -51,7 +52,7 @@
   --control-border: #6b7a8f;
   --text-1: var(--ops-graphite-900);
   --text-2: var(--ops-graphite-600);
-  --text-3: var(--ops-graphite-500);
+  --text-3: var(--ops-graphite-550);
   --brand: var(--ops-amber-600);
   --brand-hover: var(--ops-amber-700);
   --on-brand: var(--ops-graphite-900);
@@ -192,6 +193,37 @@
   font-variant-numeric: tabular-nums lining-nums;
 }
 
+/*
+ * Wide tables scroll sideways inside their card. The wrapper keeps a painted
+ * scrollbar (overlay scrollbars are invisible until touched) and the actions
+ * column is pinned to the right edge so Edit/Delete are reachable at every
+ * width; while more columns hide beneath it, the pinned cell casts a shadow
+ * to say so (data-overflow is set by <ScrollX> in components/ui.tsx).
+ */
+.admin-table-wrap {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) var(--surface-2);
+  scrollbar-gutter: stable;
+}
+.admin-table-wrap::-webkit-scrollbar-track { background: var(--surface-2); }
+.admin-table .admin-sticky-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface-1);
+  transition: box-shadow var(--duration-2) var(--ease-out);
+}
+.admin-table thead th.admin-sticky-actions { z-index: 2; background: var(--surface-2); }
+.admin-table tbody tr:hover td.admin-sticky-actions { background: color-mix(in oklab, var(--surface-2) 60%, var(--surface-1)); }
+.admin-table-wrap[data-overflow='true'][data-fade~='r'] .admin-sticky-actions {
+  box-shadow: -12px 0 12px -10px rgba(15, 23, 42, 0.28);
+}
+.dark .admin-table-wrap[data-overflow='true'][data-fade~='r'] .admin-sticky-actions,
+.dark.admin-console .admin-table-wrap[data-overflow='true'][data-fade~='r'] .admin-sticky-actions {
+  box-shadow: -12px 0 12px -10px rgba(0, 0, 0, 0.7);
+}
+
 /* Rows dim while a refetch is in flight so stale data is legible but obvious. */
 .admin-fetching {
   opacity: 0.6;
@@ -255,7 +287,7 @@
 }
 .admin-status[data-state='ok'] { border-color: transparent; background: var(--success-soft); color: var(--brand-text); }
 .dark .admin-status[data-state='ok'], .dark.admin-console .admin-status[data-state='ok'] { color: var(--success); }
-.admin-status[data-state='bad'] { border-color: transparent; background: var(--danger-soft); color: var(--danger); }
+.admin-status[data-state='bad'] { border-color: transparent; background: var(--danger-soft); color: var(--danger-text); }
 
 /* Capability matrix cell (AdminSystem). */
 .admin-cap {

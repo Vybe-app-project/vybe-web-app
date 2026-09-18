@@ -12,6 +12,7 @@ import {
   ErrorState,
   IconButton,
   Input,
+  ScrollX,
   Select,
   Skeleton,
   cx,
@@ -19,6 +20,26 @@ import {
 } from '../../components/ui';
 import { Users, Trash, Check, X, Search } from '../../components/icons';
 import { AdminPageHeader, Pager } from './AdminLayout';
+
+/** Verified / Admin / Premium / Deleted — shared by the table and the phone list. */
+function UserStatusBadges({ u }: { u: AdminUser }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {u.isVerified ? (
+        <Badge tone="success"><Check size={12} /> Verified</Badge>
+      ) : (
+        <Badge tone="neutral">Unverified</Badge>
+      )}
+      {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
+      {u.isPremium ? <Badge tone="info">Premium</Badge> : null}
+      {u.isDeleted ? (
+        <Badge tone="danger">Deleted</Badge>
+      ) : u.isActive === false ? (
+        <Badge tone="danger">Inactive</Badge>
+      ) : null}
+    </div>
+  );
+}
 
 type AdminUser = {
   _id: string;
@@ -191,70 +212,89 @@ export default function AdminUsers() {
             action={search ? { label: 'Clear search', onClick: () => setSearchInput(''), variant: 'secondary' } : undefined}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="admin-table min-w-[760px]">
-              <thead>
-                <tr>
-                  <th scope="col">User</th>
-                  <th scope="col">Email</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Joined</th>
-                  <th scope="col" className="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className={cx(query.isFetching && 'admin-fetching')}>
-                {users.map((u) => (
-                  <tr key={u._id}>
-                    <td>
-                      <div className="flex items-center gap-3">
-                        <Avatar src={u.avatar} name={u.fullName || u.username} size="sm" />
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-text-1">
-                            {u.username ? `@${u.username}` : 'No username'}
-                          </p>
-                          <p className="truncate text-xs text-text-2">{u.fullName || '—'}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="text-sm break-all text-text-2">{u.email || '—'}</span>
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {u.isVerified ? (
-                          <Badge tone="success"><Check size={12} /> Verified</Badge>
-                        ) : (
-                          <Badge tone="neutral">Unverified</Badge>
-                        )}
-                        {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
-                        {u.isPremium ? <Badge tone="info">Premium</Badge> : null}
-                        {u.isDeleted ? (
-                          <Badge tone="danger">Deleted</Badge>
-                        ) : u.isActive === false ? (
-                          <Badge tone="danger">Inactive</Badge>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="tabular whitespace-nowrap text-text-2">
-                      {u.createdAt ? format(new Date(u.createdAt), 'MMM d, yyyy') : '—'}
-                    </td>
-                    <td className="text-right">
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        icon={<Trash size={16} />}
-                        onClick={() => setPending(u)}
-                        disabled={remove.isPending}
-                        aria-label={`Delete ${u.username ? `@${u.username}` : u.email || 'user'}`}
-                      >
-                        Delete
-                      </Button>
-                    </td>
+          <>
+            {/* Phones: one stacked row per member. A 760 px table in a 356 px card showed
+                two columns and no hint that the rest (including Delete) was off to the right. */}
+            <ul className={cx('divide-y divide-line md:hidden', query.isFetching && 'admin-fetching')} aria-label="Members">
+              {users.map((u) => (
+                <li key={u._id} className="flex items-start gap-3 px-4 py-3">
+                  <Avatar src={u.avatar} name={u.fullName || u.username} size="sm" className="mt-0.5" />
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-text-1">{u.username ? `@${u.username}` : 'No username'}</p>
+                      <p className="truncate text-xs text-text-2">{u.fullName || '—'}</p>
+                    </div>
+                    <p className="break-all text-xs text-text-2">{u.email || '—'}</p>
+                    <UserStatusBadges u={u} />
+                    <p className="tabular text-xs text-text-3">
+                      {u.createdAt ? `Joined ${format(new Date(u.createdAt), 'MMM d, yyyy')}` : 'Join date unknown'}
+                    </p>
+                  </div>
+                  <IconButton
+                    label={`Delete ${u.username ? `@${u.username}` : u.email || 'user'}`}
+                    variant="danger"
+                    onClick={() => setPending(u)}
+                    disabled={remove.isPending}
+                  >
+                    <Trash size={18} />
+                  </IconButton>
+                </li>
+              ))}
+            </ul>
+
+            {/* Tablets and up: the table, actions pinned to the right edge. */}
+            <ScrollX className="admin-table-wrap hidden md:block">
+              <table className="admin-table min-w-[640px]">
+                <thead>
+                  <tr>
+                    <th scope="col">User</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" className="hidden xl:table-cell">Joined</th>
+                    <th scope="col" className="admin-sticky-actions text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className={cx(query.isFetching && 'admin-fetching')}>
+                  {users.map((u) => (
+                    <tr key={u._id}>
+                      <td>
+                        <div className="flex items-center gap-3">
+                          <Avatar src={u.avatar} name={u.fullName || u.username} size="sm" />
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-text-1">
+                              {u.username ? `@${u.username}` : 'No username'}
+                            </p>
+                            <p className="truncate text-xs text-text-2">{u.fullName || '—'}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="text-sm break-all text-text-2">{u.email || '—'}</span>
+                      </td>
+                      <td>
+                        <UserStatusBadges u={u} />
+                      </td>
+                      <td className="tabular hidden whitespace-nowrap text-text-2 xl:table-cell">
+                        {u.createdAt ? format(new Date(u.createdAt), 'MMM d, yyyy') : '—'}
+                      </td>
+                      <td className="admin-sticky-actions text-right">
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          icon={<Trash size={16} />}
+                          onClick={() => setPending(u)}
+                          disabled={remove.isPending}
+                          aria-label={`Delete ${u.username ? `@${u.username}` : u.email || 'user'}`}
+                        >
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollX>
+          </>
         )}
 
         {users.length > 0 ? (

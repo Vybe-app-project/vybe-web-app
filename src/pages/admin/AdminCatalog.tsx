@@ -11,6 +11,7 @@ import {
   ErrorState,
   IconButton,
   Input,
+  ScrollX,
   Select,
   Skeleton,
   Tabs,
@@ -78,8 +79,8 @@ function WorkoutsTable({
   onDelete: (w: CatalogWorkout) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="admin-table min-w-[880px]">
+    <ScrollX className="admin-table-wrap">
+      <table className="admin-table min-w-[720px]">
         <caption className="sr-only">Premade workouts</caption>
         <thead>
           <tr>
@@ -88,9 +89,9 @@ function WorkoutsTable({
             <th scope="col">Level</th>
             <th scope="col" className="num">Exercises</th>
             <th scope="col" className="num">Duration</th>
-            <th scope="col" className="num">Calories</th>
-            <th scope="col">Created</th>
-            <th scope="col" className="text-right">Actions</th>
+            <th scope="col" className="num hidden xl:table-cell">Calories</th>
+            <th scope="col" className="hidden xl:table-cell">Created</th>
+            <th scope="col" className="admin-sticky-actions text-right">Actions</th>
           </tr>
         </thead>
         <tbody className={cx(busy && 'admin-fetching')}>
@@ -117,9 +118,9 @@ function WorkoutsTable({
               <td><LevelBadge level={w.level} /></td>
               <td className="num">{w.exercises?.length ?? 0}</td>
               <td className="num whitespace-nowrap text-text-2">{fmtMinutes(w.duration)}</td>
-              <td className="num whitespace-nowrap text-text-2">{fmtKcal(w.caloriesBurned)}</td>
-              <td className="tabular whitespace-nowrap text-text-2">{fmtDate(w.createdAt)}</td>
-              <td className="text-right">
+              <td className="num hidden whitespace-nowrap text-text-2 xl:table-cell">{fmtKcal(w.caloriesBurned)}</td>
+              <td className="tabular hidden whitespace-nowrap text-text-2 xl:table-cell">{fmtDate(w.createdAt)}</td>
+              <td className="admin-sticky-actions text-right">
                 <div className="inline-flex items-center gap-1">
                   <ButtonLink to={workoutEditorPath(w._id)} state={returnState} size="sm" variant="ghost" icon={<Edit size={16} />} aria-label={`Edit ${w.title}`}>
                     Edit
@@ -133,7 +134,7 @@ function WorkoutsTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollX>
   );
 }
 
@@ -149,8 +150,8 @@ function PlansTable({
   onDelete: (p: CatalogPlan) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="admin-table min-w-[820px]">
+    <ScrollX className="admin-table-wrap">
+      <table className="admin-table min-w-[680px]">
         <caption className="sr-only">Premade workout plans</caption>
         <thead>
           <tr>
@@ -158,9 +159,9 @@ function PlansTable({
             <th scope="col">Level</th>
             <th scope="col" className="num">Length</th>
             <th scope="col" className="num">Workouts</th>
-            <th scope="col" className="num">Calories</th>
-            <th scope="col">Created</th>
-            <th scope="col" className="text-right">Actions</th>
+            <th scope="col" className="num hidden xl:table-cell">Calories</th>
+            <th scope="col" className="hidden xl:table-cell">Created</th>
+            <th scope="col" className="admin-sticky-actions text-right">Actions</th>
           </tr>
         </thead>
         <tbody className={cx(busy && 'admin-fetching')}>
@@ -184,9 +185,9 @@ function PlansTable({
               <td><LevelBadge level={p.level} /></td>
               <td className="num whitespace-nowrap text-text-2">{plural(p.durationWeeks, 'week')}</td>
               <td className="num">{p.workouts?.length ?? 0}</td>
-              <td className="num whitespace-nowrap text-text-2">{fmtKcal(p.totalCaloriesBurned)}</td>
-              <td className="tabular whitespace-nowrap text-text-2">{fmtDate(p.createdAt)}</td>
-              <td className="text-right">
+              <td className="num hidden whitespace-nowrap text-text-2 xl:table-cell">{fmtKcal(p.totalCaloriesBurned)}</td>
+              <td className="tabular hidden whitespace-nowrap text-text-2 xl:table-cell">{fmtDate(p.createdAt)}</td>
+              <td className="admin-sticky-actions text-right">
                 <div className="inline-flex items-center gap-1">
                   <ButtonLink to={planEditorPath(p._id)} state={returnState} size="sm" variant="ghost" icon={<Edit size={16} />} aria-label={`Edit ${p.title}`}>
                     Edit
@@ -200,7 +201,7 @@ function PlansTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollX>
   );
 }
 
