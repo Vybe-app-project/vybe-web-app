@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useDebounced } from '../lib/hooks';
+import { PlaceImage } from '../components/PlaceImage';
 import {
   Avatar,
   Badge,
@@ -76,6 +77,8 @@ type Place = {
   rating?: number;
   user_ratings_total?: number;
   geometry?: { location?: { lat?: number; lng?: number } };
+  /** Signed same-origin picture link resolved by the API from public map data; null = draw a tile. */
+  photoUrl?: string | null;
   source?: string;
 };
 
@@ -914,9 +917,7 @@ export default function Gyms() {
                 const loc = p.geometry?.location;
                 return (
                   <li key={p.place_id || p.placeId || i} className="card flex items-center gap-3 p-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2">
-                      <MapPin size={20} />
-                    </span>
+                    <PlaceImage src={p.photoUrl} name={p.name} className="h-14 w-14 rounded-sm" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-text-1">{p.name || 'Place'}</p>
                       {address ? <p className="truncate text-xs text-text-2">{address}</p> : null}
