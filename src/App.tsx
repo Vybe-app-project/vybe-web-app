@@ -48,6 +48,8 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin'));
+const AdminForgotPassword = lazy(() => import('./pages/admin/AdminForgotPassword'));
+const AdminResetPassword = lazy(() => import('./pages/admin/AdminResetPassword'));
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
@@ -174,8 +176,10 @@ export default function App() {
           {/* Public help: works signed out, wears the app shell when signed in */}
           <Route path="/support" element={<SupportGate />} />
 
-          {/* Admin */}
+          {/* Admin: the three signed-out surfaces sit outside RequireAdmin */}
           <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
+          <Route path="/admin/reset-password" element={<AdminResetPassword />} />
           <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
             <Route index element={<AdminDashboard />} />
             <Route path="users" element={<AdminUsers />} />
