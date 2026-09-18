@@ -13,19 +13,24 @@ import {
   cx,
   humanize,
 } from './ui';
-import { Dumbbell, Flame, Heart, Plate, Timer, Utensils, Image as ImageIcon } from './icons';
+import { Bookmark, Dumbbell, Flame, Heart, Plate, Timer, Utensils, Image as ImageIcon } from './icons';
 import PostCard from './PostCard';
 
-export type ProfileTabKey = 'posts' | 'workouts' | 'meals';
+export type ProfileTabKey = 'posts' | 'workouts' | 'meals' | 'saved';
 
-export const PROFILE_TABS: { key: ProfileTabKey; label: string; icon: ReactNode }[] = [
+export const PROFILE_TABS: { key: ProfileTabKey; label: string; icon: ReactNode; ownOnly?: boolean }[] = [
   { key: 'posts', label: 'Posts', icon: <ImageIcon size={18} /> },
   { key: 'workouts', label: 'Workouts', icon: <Dumbbell size={18} /> },
   { key: 'meals', label: 'Meals', icon: <Utensils size={18} /> },
+  // Bookmarks are private: only the signed-in user's own profile lists them.
+  { key: 'saved', label: 'Saved', icon: <Bookmark size={18} />, ownOnly: true },
 ];
 
 export const isProfileTab = (v: string | null | undefined): v is ProfileTabKey =>
-  v === 'posts' || v === 'workouts' || v === 'meals';
+  v === 'posts' || v === 'workouts' || v === 'meals' || v === 'saved';
+
+/** Tabs another visitor may open on someone's profile. */
+export const PUBLIC_PROFILE_TABS = PROFILE_TABS.filter((t) => !t.ownOnly);
 
 /** Shape of `GET /workouts/my` items (SocialWorkout). */
 type WorkoutItem = {
@@ -129,6 +134,59 @@ export function ProfilePosts({ userId, isOwn = false, name }: PanelProps) {
     <div className="space-y-4">
       {data.map((post) => (
         <PostCard key={post._id} post={post} invalidate={[['user-posts', userId], ['feed']]} />
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ saved */
+
+/**
+ * The signed-in user's bookmarks (GET /posts/bookmarks). PostCard's save button
+ * invalidates ['bookmarks'], so a card removed here disappears on refetch and
+ * a post saved anywhere shows up on the next visit.
+ */
+export function ProfileSaved() {
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['bookmarks'],
+    queryFn: async () => {
+      const { data } = await api.get('/posts/bookmarks');
+      return (data.bookmarks || data.posts || []) as Post[];
+    },
+  });
+
+  if (isLoading)
+    return (
+      <div className="space-y-4" aria-busy="true" aria-label="Loading saved posts">
+        <SkeletonCard />
+        <SkeletonCard media={false} />
+      </div>
+    );
+
+  if (isError)
+    return (
+      <ErrorState
+        error={error}
+        title="Saved posts unavailable"
+        message={errMsg(error, 'Your saved posts did not load.')}
+        onRetry={() => refetch()}
+      />
+    );
+
+  if (!data?.length)
+    return (
+      <EmptyState
+        icon={<Bookmark size={26} />}
+        title="Nothing saved yet"
+        message="Tap the bookmark on any post to keep it here for later. Only you can see this list."
+        action={{ label: 'Back to your feed', to: '/' }}
+      />
+    );
+
+  return (
+    <div className="space-y-4" aria-label="Saved posts">
+      {data.map((post) => (
+        <PostCard key={post._id} post={post} invalidate={[['bookmarks'], ['feed']]} />
       ))}
     </div>
   );

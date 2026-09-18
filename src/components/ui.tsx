@@ -1584,7 +1584,8 @@ export function Chip({
 
 let lockCount = 0;
 let lockedOverflow = '';
-function useLockBody(active: boolean) {
+/** Body scroll lock shared by every overlay (nested overlays count once). */
+export function useLockBody(active: boolean) {
   useEffect(() => {
     if (!active) return;
     if (lockCount === 0) {
@@ -1602,7 +1603,8 @@ function useLockBody(active: boolean) {
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
-function useFocusTrap(active: boolean, ref: RefObject<HTMLElement | null>, initialFocus?: RefObject<HTMLElement | null>) {
+/** Keeps Tab inside `ref` while active and restores focus on release. */
+export function useFocusTrap(active: boolean, ref: RefObject<HTMLElement | null>, initialFocus?: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!active) return;
     const root = ref.current;

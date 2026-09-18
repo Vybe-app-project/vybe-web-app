@@ -16,6 +16,7 @@ const Feed = lazy(() => import('./pages/Feed'));
 const Discover = lazy(() => import('./pages/Discover'));
 const Search = lazy(() => import('./pages/Search'));
 const PostDetail = lazy(() => import('./pages/PostDetail'));
+const PublicPost = lazy(() => import('./pages/PublicPost'));
 const Profile = lazy(() => import('./pages/Profile'));
 const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -121,6 +122,25 @@ function SupportGate() {
   );
 }
 
+/**
+ * Shared post links (/p/:id) must open for people without an account: the
+ * link is what gets pasted into chats. Members get the full detail page in the
+ * app shell; everyone else gets the public post with a sign-in call to action,
+ * and login still bounces back here because the CTA carries the location.
+ */
+function PostGate() {
+  const { user, loading } = useAuth();
+  if (loading) return <FullPageSpinner />;
+  if (user) {
+    return (
+      <Layout>
+        <PostDetail />
+      </Layout>
+    );
+  }
+  return <PublicPost />;
+}
+
 /** Route changes should start at the top rather than inherit scroll. */
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -183,6 +203,9 @@ export default function App() {
           {/* The API's transactional emails link to support.html (the old static page). */}
           <Route path="/support.html" element={<Navigate to="/support" replace />} />
 
+          {/* Shared post links work signed out (public preview) and wear the shell when signed in */}
+          <Route path="/p/:postId" element={<PostGate />} />
+
           {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
           <Route path="/open.html" element={<OpenHandoff />} />
           <Route path="/open" element={<OpenHandoff />} />
@@ -214,7 +237,6 @@ export default function App() {
             <Route index element={<Feed />} />
             <Route path="discover" element={<Discover />} />
             <Route path="search" element={<Search />} />
-            <Route path="p/:postId" element={<PostDetail />} />
             <Route path="stories" element={<Stories />} />
             <Route path="profile" element={<Profile />} />
             <Route path="u/:id" element={<UserProfile />} />

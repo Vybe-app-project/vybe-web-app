@@ -71,5 +71,16 @@ export default defineConfig({
     }),
   ],
   server: { host: '127.0.0.1', port: 5180 },
-  build: { outDir: 'dist', sourcemap: false, chunkSizeWarningLimit: 1200 },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    chunkSizeWarningLimit: 1200,
+    // No <link rel="modulepreload"> hints. The service worker precaches every
+    // chunk and claims the page mid-load (clientsClaim), so Chrome fetched the
+    // hinted chunk once outside the worker and once through it and logged
+    // "preload … not used because of a cross-world service worker resource
+    // mismatch" on every navigation. Module graphs still load in parallel per
+    // depth; the SW serves repeat visits from cache regardless of hints.
+    modulePreload: false,
+  },
 });
