@@ -27,6 +27,7 @@ import { create } from 'zustand';
 import { errMsg, mediaUrl } from '../lib/api';
 import { describedByIds } from '../lib/a11y';
 import { useAuth } from '../lib/auth';
+import { toastViewportClass, upsertToast } from '../lib/toastPlacement';
 import { Brand, BrandMark, PairFigure } from './Brand';
 import {
   Alert as AlertIcon,
@@ -1612,8 +1613,21 @@ export function Chip({
 
 let lockCount = 0;
 let lockedOverflow = '';
+/**
+ * How many modals/sheets are mounted. The toast viewport reads this so that
+ * on a phone, while a sheet is open, toasts anchor to the top instead of
+ * covering the sheet footer and its primary button.
+ */
+export const useModalPresence = create<{ count: number; enter: () => void; leave: () => void }>((set) => ({
+  count: 0,
+  enter: () => set((s) => ({ count: s.count + 1 })),
+  leave: () => set((s) => ({ count: Math.max(0, s.count - 1) })),
+}));
+
 /** Body scroll lock shared by every overlay (nested overlays count once). */
 export function useLockBody(active: boolean) {
+  const enter = useModalPresence((s) => s.enter);
+  const leave = useModalPresence((s) => s.leave);
   useEffect(() => {
     if (!active) return;
     if (lockCount === 0) {
@@ -1621,11 +1635,13 @@ export function useLockBody(active: boolean) {
       document.body.style.overflow = 'hidden';
     }
     lockCount++;
+    enter();
     return () => {
       lockCount--;
+      leave();
       if (lockCount === 0) document.body.style.overflow = lockedOverflow;
     };
-  }, [active]);
+  }, [active, enter, leave]);
 }
 
 const FOCUSABLE =
@@ -2122,13 +2138,14 @@ export function Menu({
 
 export type ToastKind = 'success' | 'error' | 'info';
 export type ToastAction = { label: string; onClick: () => void };
-export type Toast = { id: number; kind: ToastKind; message: string; action?: ToastAction; duration: number };
-export type ToastOptions = { kind?: ToastKind; action?: ToastAction; duration?: number };
+export type Toast = { id: number; kind: ToastKind; message: string; action?: ToastAction; duration: number; key?: string };
+/** `key`: a later toast with the same key replaces the live one instead of stacking (validation errors). */
+export type ToastOptions = { kind?: ToastKind; action?: ToastAction; duration?: number; key?: string };
 
 type ToastApi = {
   toast: (message: string, kindOrOptions?: ToastKind | ToastOptions) => number;
   success: (message: string, options?: Omit<ToastOptions, 'kind'>) => number;
-  error: (e: unknown, fallback?: string) => number;
+  error: (e: unknown, fallback?: string, options?: Omit<ToastOptions, 'kind'>) => number;
   info: (message: string, options?: Omit<ToastOptions, 'kind'>) => number;
   dismiss: (id: number) => void;
 };
@@ -2199,10 +2216,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     if (!message) return -1;
     const opts: ToastOptions = typeof kindOrOptions === 'string' ? { kind: kindOrOptions } : kindOrOptions;
     const id = ++seq.current;
-    setToasts((list) => [
-      ...list.slice(-2),
-      { id, kind: opts.kind ?? 'info', message, action: opts.action, duration: opts.duration ?? (opts.action ? 6000 : 4000) },
-    ]);
+    setToasts((list) =>
+      upsertToast(list, {
+        id,
+        kind: opts.kind ?? 'info',
+        message,
+        action: opts.action,
+        duration: opts.duration ?? (opts.action ? 6000 : 4000),
+        key: opts.key,
+      }),
+    );
     return id;
   }, []);
 
@@ -2212,10 +2235,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       dismiss,
       success: (m, o) => toast(m, { ...o, kind: 'success' }),
       info: (m, o) => toast(m, { ...o, kind: 'info' }),
-      error: (e, fallback = 'Something went wrong') => toast(typeof e === 'string' ? e : errMsg(e, fallback), 'error'),
+      error: (e, fallback = 'Something went wrong', options) =>
+        toast(typeof e === 'string' ? e : errMsg(e, fallback), { ...options, kind: 'error' }),
     }),
     [toast, dismiss],
   );
+
+  const compact = useIsCompact();
+  const modalOpen = useModalPresence((s) => s.count > 0);
 
   return (
     <ToastCtx.Provider value={api}>
@@ -2223,10 +2250,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         aria-live="polite"
         aria-relevant="additions"
-        className={cx(
-          'pointer-events-none fixed inset-x-0 bottom-0 z-[200] flex flex-col items-center gap-2 px-4 pb-nav',
-          'lg:inset-x-auto lg:bottom-auto lg:right-4 lg:top-4 lg:items-end lg:px-0 lg:pb-0',
-        )}
+        className={toastViewportClass(compact, modalOpen)}
       >
         {toasts.map((t) => (
           <ToastItem key={t.id} t={t} onDismiss={dismiss} />

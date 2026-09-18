@@ -1,15 +1,19 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  differenceInCalendarDays,
-  format,
-  formatDistanceToNowStrict,
-  isValid,
-  parseISO,
-} from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import {
+  formatChallengeWindow,
+  pluralUnit,
+  remainingLabel,
+  timeBadgeFor,
+  unitLabel,
+  windowDays,
+  withUnit,
+  type TimeBadge,
+} from '../lib/challengeFormat';
 import {
   Avatar,
   Badge,
@@ -53,6 +57,7 @@ import {
   ChevronRight,
   Clock,
   Edit,
+  Lock,
   Flame,
   Medal,
   Plus,
@@ -115,6 +120,8 @@ export type Challenge = {
   category: ChallengeCategory;
   goal: number;
   goalUnit: GoalUnit;
+  /** What a `custom` unit is called; printed after every number. */
+  goalUnitLabel?: string;
   startDate: string;
   endDate: string;
   createdBy?: ChallengeUser | string | null;
@@ -151,7 +158,9 @@ type ChallengeStats = {
   completionRate: number;
   progressPercentage: number;
   duration: number;
+  /** Milliseconds (legacy). */
   timeRemaining: number;
+  timeRemainingDays?: number;
 };
 
 const CHALLENGE_TYPES: ChallengeType[] = [
@@ -201,23 +210,11 @@ const userOf = (value: ChallengeUser | string): ChallengeUser =>
 
 const displayName = (u: ChallengeUser) => u.fullName || u.username || 'Vybe athlete';
 
-const fmtDate = (iso?: string) => {
-  if (!iso) return '—';
-  const d = parseISO(iso);
-  return isValid(d) ? format(d, 'MMM d') : '—';
-};
+/** Time-left badge: Closed / Ended / Ends today / N days left (ember) / N weeks left / Ongoing. */
+const timeBadge = (c: Challenge): TimeBadge & { tone: BadgeTone } => timeBadgeFor(c);
 
-/** Time-left badge: closed / ended / ending soon (ember) / N left (mint). */
-function timeBadge(c: Challenge): { label: string; tone: BadgeTone; urgent: boolean } {
-  if (c.isActive === false) return { label: 'Closed', tone: 'neutral', urgent: false };
-  const d = parseISO(c.endDate);
-  if (!isValid(d)) return { label: 'Open', tone: 'success', urgent: false };
-  if (d.getTime() <= Date.now()) return { label: 'Ended', tone: 'neutral', urgent: false };
-  const days = differenceInCalendarDays(d, new Date());
-  if (days <= 0) return { label: 'Ends today', tone: 'accent', urgent: true };
-  if (days <= 2) return { label: `${days} ${days === 1 ? 'day' : 'days'} left`, tone: 'accent', urgent: true };
-  return { label: `${formatDistanceToNowStrict(d, { unit: days > 60 ? 'month' : 'day' })} left`, tone: 'success', urgent: false };
-}
+/** The unit word for a challenge: "workouts", the creator's label for a custom unit, or nothing. */
+const unitOf = (c: Pick<Challenge, 'goalUnit' | 'goalUnitLabel'>) => unitLabel(c.goalUnit, c.goalUnitLabel);
 
 const pctOf = (value: number, goal: number) => (goal > 0 ? Math.min((value / goal) * 100, 100) : 0);
 
@@ -252,7 +249,8 @@ function MyProgress({
 }: {
   value: number;
   goal: number;
-  unit: GoalUnit;
+  /** Already resolved with `unitOf`; empty when a custom unit has no label. */
+  unit: string;
   completed?: boolean;
   compact?: boolean;
 }) {
@@ -262,9 +260,7 @@ function MyProgress({
     <div className="space-y-1.5">
       <Progress value={pct} size={compact ? 'sm' : 'md'} tone={done ? 'success' : 'brand'} label="Your progress" />
       <p className="flex items-baseline justify-between gap-2 text-xs text-text-2">
-        <span className="tabular">
-          {formatStat(value)} / {formatStat(goal)} {humanize(unit).toLowerCase()}
-        </span>
+        <span className="tabular">{withUnit(`${formatStat(value)} / ${formatStat(goal)}`, unit)}</span>
         <span className={cx('tabular font-semibold', done ? 'text-brand-text' : 'text-text-1')}>
           {done ? 'Complete' : `${Math.round(pct)}%`}
         </span>
@@ -282,6 +278,7 @@ type ChallengeForm = {
   category: ChallengeCategory;
   goal: string;
   goalUnit: GoalUnit;
+  goalUnitLabel: string;
   startDate: string;
   endDate: string;
   maxParticipants: string;
@@ -300,6 +297,7 @@ const emptyForm = (): ChallengeForm => {
     category: 'weekly',
     goal: '5',
     goalUnit: 'workouts',
+    goalUnitLabel: '',
     startDate: toDateInput(now),
     endDate: toDateInput(end),
     maxParticipants: '100',
@@ -325,6 +323,12 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
 
   const allowedUnits = unitsForType(form.type);
 
+  /** Every edit clears that field's error, so a corrected field stops being flagged immediately. */
+  const setField = <K extends keyof ChallengeForm>(key: K, value: ChallengeForm[K]) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setFieldError((errors) => (errors[key] ? { ...errors, [key]: undefined } : errors));
+  };
+
   const create = useMutation({
     mutationFn: async () => {
       const errors: Partial<Record<keyof ChallengeForm, string>> = {};
@@ -342,8 +346,9 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
       const end = new Date(`${form.endDate}T23:59:59`);
       if (Number.isNaN(start.getTime())) errors.startDate = 'Pick a start date.';
       if (Number.isNaN(end.getTime()) || end <= start) errors.endDate = 'End date must be after the start.';
+      if (form.goalUnit === 'custom' && form.goalUnitLabel.trim().length > 30) errors.goalUnitLabel = 'Keep the unit under 30 characters.';
       setFieldError(errors);
-      if (Object.keys(errors).length) throw new Error('Check the highlighted fields.');
+      if (Object.keys(errors).length) throw Object.assign(new Error('Check the highlighted fields.'), { validation: true });
 
       const tags = form.tags
         .split(',')
@@ -358,6 +363,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
         category: form.category,
         goal,
         goalUnit: form.goalUnit,
+        ...(form.goalUnit === 'custom' && form.goalUnitLabel.trim() ? { goalUnitLabel: form.goalUnitLabel.trim() } : {}),
         startDate: start.toISOString(),
         endDate: end.toISOString(),
         maxParticipants,
@@ -372,7 +378,12 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
       qc.invalidateQueries({ queryKey: ['challenges'] });
       onClose();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not create the challenge')),
+    // Validation toasts share a key so repeated taps replace the toast
+    // rather than stacking three copies over the sheet footer.
+    onError: (e) =>
+      (e as { validation?: boolean })?.validation
+        ? toast.error(errMsg(e, 'Check the highlighted fields.'), undefined, { key: 'challenge-validation' })
+        : toast.error(errMsg(e, 'Could not create the challenge')),
   });
 
   return (
@@ -408,7 +419,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
           maxLength={120}
           value={form.title}
           error={fieldError.title}
-          onChange={(e) => setForm({ ...form, title: e.target.value })}
+          onChange={(e) => setField('title', e.target.value)}
         />
         <Textarea
           label="Description"
@@ -417,7 +428,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
           placeholder="What are people signing up for? Ground rules, how progress counts…"
           value={form.description}
           error={fieldError.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          onChange={(e) => setField('description', e.target.value)}
         />
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -439,16 +450,27 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
             label="Cadence"
             value={form.category}
             options={cadenceOptions(false)}
-            onChange={(v) => setForm({ ...form, category: v as ChallengeCategory })}
+            onChange={(v) => setField('category', v as ChallengeCategory)}
           />
           <Select
             label="Goal unit"
             value={form.goalUnit}
             options={allowedUnits.map((u) => ({ value: u, label: humanize(u) }))}
             hint={isTracked({ type: form.type } as Challenge) ? 'Tracked from logged activity' : undefined}
-            onChange={(v) => setForm({ ...form, goalUnit: v as GoalUnit })}
+            onChange={(v) => setField('goalUnit', v as GoalUnit)}
           />
         </div>
+        {form.goalUnit === 'custom' ? (
+          <Input
+            label="Unit name"
+            hint="What are people counting? Shown after every number, e.g. “40 / 100 pull-ups”."
+            placeholder="pull-ups"
+            maxLength={30}
+            value={form.goalUnitLabel}
+            error={fieldError.goalUnitLabel}
+            onChange={(e) => setField('goalUnitLabel', e.target.value)}
+          />
+        ) : null}
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Input
@@ -460,7 +482,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
             className="tabular"
             value={form.goal}
             error={fieldError.goal}
-            onChange={(e) => setForm({ ...form, goal: e.target.value })}
+            onChange={(e) => setField('goal', e.target.value)}
           />
           <Input
             label="Max participants"
@@ -472,20 +494,20 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
             className="tabular"
             value={form.maxParticipants}
             error={fieldError.maxParticipants}
-            onChange={(e) => setForm({ ...form, maxParticipants: e.target.value })}
+            onChange={(e) => setField('maxParticipants', e.target.value)}
           />
           <DateField
             label="Starts"
             value={form.startDate}
             error={fieldError.startDate}
-            onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+            onChange={(e) => setField('startDate', e.target.value)}
           />
           <DateField
             label="Ends"
             value={form.endDate}
             min={form.startDate}
             error={fieldError.endDate}
-            onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+            onChange={(e) => setField('endDate', e.target.value)}
           />
         </div>
 
@@ -494,14 +516,14 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
           hint="Comma separated, up to 20"
           placeholder="strength, beginner"
           value={form.tags}
-          onChange={(e) => setForm({ ...form, tags: e.target.value })}
+          onChange={(e) => setField('tags', e.target.value)}
         />
         <Input
           label="Rewards"
           placeholder="Bragging rights, a badge, a rest day…"
           maxLength={500}
           value={form.rewards}
-          onChange={(e) => setForm({ ...form, rewards: e.target.value })}
+          onChange={(e) => setField('rewards', e.target.value)}
         />
 
         <div className="flex items-center justify-between gap-3 rounded-md bg-surface-2 px-4 py-3">
@@ -512,7 +534,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
           <Switch
             label="Public challenge"
             checked={form.isPublic}
-            onChange={(next) => setForm({ ...form, isPublic: next })}
+            onChange={(next) => setField('isPublic', next)}
           />
         </div>
       </form>
@@ -536,6 +558,7 @@ function EditChallengeModal({
   const [description, setDescription] = useState('');
   const [endDate, setEndDate] = useState('');
   const [rewards, setRewards] = useState('');
+  const [goalUnitLabel, setGoalUnitLabel] = useState('');
   const [isPublic, setIsPublic] = useState(true);
 
   useEffect(() => {
@@ -545,6 +568,7 @@ function EditChallengeModal({
     const end = parseISO(challenge.endDate);
     setEndDate(isValid(end) ? toDateInput(end) : '');
     setRewards(challenge.rewards ?? '');
+    setGoalUnitLabel(challenge.goalUnitLabel ?? '');
     setIsPublic(challenge.isPublic !== false);
   }, [challenge]);
 
@@ -561,6 +585,9 @@ function EditChallengeModal({
         payload.endDate = new Date(`${endDate}T23:59:59`).toISOString();
       }
       if ((rewards.trim() || '') !== (challenge.rewards ?? '')) payload.rewards = rewards.trim();
+      if (challenge.goalUnit === 'custom' && goalUnitLabel.trim() !== (challenge.goalUnitLabel ?? '')) {
+        payload.goalUnitLabel = goalUnitLabel.trim();
+      }
       if (isPublic !== (challenge.isPublic !== false)) payload.isPublic = isPublic;
       if (Object.keys(payload).length === 0) throw new Error('Nothing has changed yet.');
 
@@ -617,6 +644,16 @@ function EditChallengeModal({
           onChange={(e) => setEndDate(e.target.value)}
         />
         <Input label="Rewards" maxLength={500} value={rewards} onChange={(e) => setRewards(e.target.value)} />
+        {challenge?.goalUnit === 'custom' ? (
+          <Input
+            label="Unit name"
+            hint="Shown after every number, e.g. “40 / 100 pull-ups”."
+            placeholder="pull-ups"
+            maxLength={30}
+            value={goalUnitLabel}
+            onChange={(e) => setGoalUnitLabel(e.target.value)}
+          />
+        ) : null}
         <div className="flex items-center justify-between gap-3 rounded-md bg-surface-2 px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-text-1">Public challenge</p>
@@ -714,9 +751,11 @@ function LeaderboardList({ challenge, myId }: { challenge: Challenge; myId: stri
               </div>
               <span className="type-stat shrink-0 text-lg text-text-1">
                 {formatStat(entry.progress)}
-                <span className="ml-1 text-2xs font-semibold tracking-normal text-text-3 [font-variation-settings:'wdth'_100]">
-                  {humanize(challenge.goalUnit).toLowerCase()}
-                </span>
+                {unitOf(challenge) ? (
+                  <span className="ml-1 text-2xs font-semibold tracking-normal text-text-3 [font-variation-settings:'wdth'_100]">
+                    {unitOf(challenge)}
+                  </span>
+                ) : null}
               </span>
             </li>
           );
@@ -779,7 +818,12 @@ function ChallengeDetailModal({
   const joined = !!myParticipation;
   const isOwner =
     !!challenge && challenge.ownership === 'user' && idOf(challenge.createdBy) === myId;
-  const closed = !!challenge && (challenge.isActive === false || timeBadge(challenge).label === 'Ended');
+  const closed = !!challenge && ['closed', 'ended'].includes(timeBadge(challenge).state);
+  // isActive false means the owner already closed it: the history is kept and
+  // there is nothing left for the owner to edit or remove.
+  const archived = challenge?.isActive === false;
+  const hasParticipants = (challenge?.participants?.length ?? 0) > 0;
+  const unit = challenge ? unitOf(challenge) : '';
   const participantCount =
     stats.data?.totalParticipants ??
     challenge?.stats?.totalParticipants ??
@@ -852,7 +896,7 @@ function ChallengeDetailModal({
       return data.progress;
     },
     onSuccess: (progress) => {
-      toast.success(`Synced: ${formatStat(progress)} ${humanize(challenge?.goalUnit).toLowerCase()} logged`);
+      toast.success(`Synced: ${withUnit(formatStat(progress), unit ? pluralUnit(unit, progress) : 'logged')}${unit ? ' logged' : ''}`);
       pulse();
       invalidate();
     },
@@ -861,6 +905,7 @@ function ChallengeDetailModal({
 
   const time = challenge ? timeBadge(challenge) : null;
   const myPct = challenge ? pctOf(myParticipation?.progress ?? 0, challenge.goal) : 0;
+  const left = Math.max(0, (challenge?.goal ?? 0) - (myParticipation?.progress ?? 0));
   const myDone = !!myParticipation?.completed || myPct >= 100;
 
   return (
@@ -874,15 +919,22 @@ function ChallengeDetailModal({
         challenge && !detail.isLoading ? (
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap gap-2">
-              {isOwner ? (
+              {isOwner && !archived ? (
                 <>
                   <Button variant="secondary" onClick={() => onEdit(challenge)} icon={<Edit size={16} />}>
                     Edit
                   </Button>
-                  <Button variant="danger" onClick={() => onDelete(challenge)} icon={<Trash size={16} />}>
-                    Delete
+                  {/* A joined challenge is closed, never deleted; the button says which. */}
+                  <Button
+                    variant="danger"
+                    onClick={() => onDelete(challenge)}
+                    icon={hasParticipants ? <Lock size={16} /> : <Trash size={16} />}
+                  >
+                    {hasParticipants ? 'Close challenge' : 'Delete'}
                   </Button>
                 </>
+              ) : isOwner ? (
+                <p className="text-sm text-text-3">Closed. Participants keep their history.</p>
               ) : null}
             </div>
             {joined ? (
@@ -969,7 +1021,7 @@ function ChallengeDetailModal({
                 <StatTile
                   label="Goal"
                   value={formatStat(challenge.goal)}
-                  unit={humanize(challenge.goalUnit).toLowerCase()}
+                  unit={unit || undefined}
                   icon={<Target size={20} />}
                   tone="brand"
                 />
@@ -983,7 +1035,7 @@ function ChallengeDetailModal({
                 <StatTile
                   label="Average progress"
                   value={formatStat(stats.data?.averageProgress ?? challenge.stats?.averageProgress ?? 0)}
-                  unit={humanize(challenge.goalUnit).toLowerCase()}
+                  unit={unit || undefined}
                   icon={<TrendingUp size={20} />}
                   loading={stats.isLoading && !challenge.stats}
                 />
@@ -999,15 +1051,16 @@ function ChallengeDetailModal({
 
               <ul className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-text-2">
                 <li className="inline-flex items-center gap-1.5">
-                  <Calendar size={14} /> {fmtDate(challenge.startDate)} to {fmtDate(challenge.endDate)}
+                  <Calendar size={14} /> {formatChallengeWindow(challenge.startDate, challenge.endDate)}
                 </li>
                 <li className="inline-flex items-center gap-1.5 tabular">
                   <Clock size={14} />
-                  {stats.data
-                    ? `${stats.data.duration} ${stats.data.duration === 1 ? 'day' : 'days'}${
-                        stats.data.timeRemaining > 0 ? `, ${formatStat(stats.data.timeRemaining)} remaining` : ''
-                      }`
-                    : 'Duration pending'}
+                  {(() => {
+                    const days = stats.data?.duration ?? windowDays(challenge.startDate, challenge.endDate);
+                    const left = remainingLabel(challenge.endDate);
+                    const span = days >= 365 ? `${Math.round(days / 365)}-year window` : `${formatStat(days)} ${days === 1 ? 'day' : 'days'}`;
+                    return left ? `${span}, ${left}` : span;
+                  })()}
                 </li>
                 {challenge.tags?.length ? (
                   <li className="inline-flex flex-wrap items-center gap-1">
@@ -1043,14 +1096,14 @@ function ChallengeDetailModal({
                       <p className="type-stat mt-1 text-2xl text-text-1">
                         {formatStat(myParticipation?.progress ?? 0)}
                         <span className="text-text-3"> / {formatStat(challenge.goal)}</span>
-                        <span className="ml-1.5 text-xs font-semibold tracking-normal text-text-2 [font-variation-settings:'wdth'_100]">
-                          {humanize(challenge.goalUnit).toLowerCase()}
-                        </span>
+                        {unit ? (
+                          <span className="ml-1.5 text-xs font-semibold tracking-normal text-text-2 [font-variation-settings:'wdth'_100]">{unit}</span>
+                        ) : null}
                       </p>
                       <p className="mt-1 text-xs text-text-2">
                         {myDone
                           ? 'Goal reached. Keep logging to climb the board.'
-                          : `${formatStat(Math.max(0, challenge.goal - (myParticipation?.progress ?? 0)))} ${humanize(challenge.goalUnit).toLowerCase()} to go.`}
+                          : `${withUnit(formatStat(left), pluralUnit(unit, left))} to go.`}
                       </p>
                     </div>
                   </div>
@@ -1058,7 +1111,7 @@ function ChallengeDetailModal({
                   {isTracked(challenge) ? (
                     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
                       <p className="text-xs text-text-2">
-                        Counts your logged {humanize(challenge.goalUnit).toLowerCase()} automatically.
+                        Counts your logged {unit || 'activity'} automatically. Saving a session updates this for you.
                       </p>
                       <Button
                         variant="secondary"
@@ -1079,7 +1132,7 @@ function ChallengeDetailModal({
                       }}
                     >
                       <Input
-                        label={`Progress in ${humanize(challenge.goalUnit).toLowerCase()}`}
+                        label={unit ? `Progress in ${unit}` : 'Your progress'}
                         type="number"
                         inputMode="decimal"
                         min={0}
@@ -1172,14 +1225,14 @@ function ChallengeCard({
         <MyProgress
           value={mine.progress ?? 0}
           goal={challenge.goal}
-          unit={challenge.goalUnit}
+          unit={unitOf(challenge)}
           completed={mine.completed}
           compact
         />
       ) : (
         <p className="tabular text-xs text-text-2">
-          Goal: <span className="font-semibold text-text-1">{formatStat(challenge.goal)}</span>{' '}
-          {humanize(challenge.goalUnit).toLowerCase()}
+          Goal: <span className="font-semibold text-text-1">{formatStat(challenge.goal)}</span>
+          {unitOf(challenge) ? ` ${unitOf(challenge)}` : ''}
         </p>
       )}
 
@@ -1244,6 +1297,7 @@ export default function Challenges() {
   }, [searchParams]);
   const [editing, setEditing] = useState<Challenge | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Challenge | null>(null);
+  const pendingHasParticipants = (pendingDelete?.participants?.length ?? 0) > 0;
 
   const debouncedTerm = useDebounced(term, 400);
   const searching = debouncedTerm.trim().length > 0;
@@ -1295,34 +1349,25 @@ export default function Challenges() {
     enabled: tab === 'mine' || tab === 'created',
   });
 
+  /* Everything I created, including closed challenges the active list drops. */
   const createdByMe = useQuery({
     queryKey: ['challenges', 'created', myId],
     queryFn: async (): Promise<Challenge[]> => {
-      const collected: Challenge[] = [];
-      let current = 1;
-      let pages = 1;
-      do {
-        const { data } = await api.get<ChallengeListResponse>('/challenges', {
-          params: { page: current, limit: 50 },
-        });
-        collected.push(...(data.challenges ?? []));
-        pages = data.pagination?.pages ?? 1;
-        current += 1;
-      } while (current <= pages && current <= 5);
-      return collected.filter(
-        (c) => c.ownership === 'user' && idOf(c.createdBy) === myId,
-      );
+      const { data } = await api.get<ChallengeListResponse>('/challenges/created');
+      return data.challenges ?? [];
     },
     enabled: tab === 'created' && !!myId,
   });
 
   const remove = useMutation({
     mutationFn: async (challenge: Challenge) => {
-      await api.delete(`/challenges/${challenge._id}`);
-      return challenge._id;
+      // 200 { closed: true } when participants exist (history kept), 204 when removed.
+      const { data, status } = await api.delete<{ closed?: boolean } | ''>(`/challenges/${challenge._id}`);
+      const closed = status === 200 && typeof data === 'object' && data !== null && data.closed === true;
+      return { id: challenge._id, closed };
     },
-    onSuccess: (id) => {
-      toast.success('Challenge deleted');
+    onSuccess: ({ id, closed }) => {
+      toast.success(closed ? 'Challenge closed. Participants keep their history.' : 'Challenge deleted');
       qc.invalidateQueries({ queryKey: ['challenges'] });
       setPendingDelete(null);
       if (detailId === id) setDetailId(null);
@@ -1355,7 +1400,7 @@ export default function Challenges() {
       const pct = pctOf(p?.progress ?? 0, c.goal);
       const done = !!p?.completed || pct >= 100;
       const t = timeBadge(c);
-      const open = c.isActive !== false && t.label !== 'Ended';
+      const open = !['closed', 'ended'].includes(t.state);
       if (done) completed += 1;
       else if (open) {
         active += 1;
@@ -1663,13 +1708,15 @@ export default function Challenges() {
       <ConfirmDialog
         open={!!pendingDelete}
         destructive
-        title="Delete this challenge?"
+        title={pendingHasParticipants ? 'Close this challenge?' : 'Delete this challenge?'}
         message={
           pendingDelete
-            ? `“${pendingDelete.title}” will be deleted. If it already has participants it is closed out instead, so their history is kept.`
+            ? pendingHasParticipants
+              ? `“${pendingDelete.title}” closes for everyone. Participants keep their progress and it stays under Created by me with a Closed badge.`
+              : `“${pendingDelete.title}” will be deleted. Nobody has joined, so nothing else is lost.`
             : undefined
         }
-        confirmLabel="Delete challenge"
+        confirmLabel={pendingHasParticipants ? 'Close challenge' : 'Delete challenge'}
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => {

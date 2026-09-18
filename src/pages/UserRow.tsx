@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { compactNumber, displayName, followerCount, type PublicUser } from '../lib/hooks';
-import { Avatar, Badge, Button, Card, SkeletonRow, Skeleton, useToast, type ButtonSize } from './ui';
+import { Avatar, Badge, Button, Card, SkeletonRow, Skeleton, humanize, useToast, type ButtonSize } from './ui';
 import { BadgeCheck, Check, Lock, UserPlus } from './icons';
 
 export type FollowState = 'none' | 'following' | 'requested';
@@ -185,6 +185,22 @@ export default function UserRow({ user, trailing }: { user: PublicUser; trailing
             </span>
           ) : null}
         </div>
+        {(user.isCoach || user.isTrainer) && user.fields?.length ? (
+          <ul className="mt-1.5 flex flex-wrap gap-1" aria-label="Coaching specialties">
+            {user.fields.slice(0, 4).map((f) => (
+              <li key={f}>
+                <Badge tone="info" size="sm">
+                  {humanize(f)}
+                </Badge>
+              </li>
+            ))}
+            {user.fields.length > 4 ? (
+              <li>
+                <Badge size="sm">+{user.fields.length - 4}</Badge>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
         {user.bio ? <p className="mt-1 line-clamp-2 text-xs text-text-2">{user.bio}</p> : null}
       </div>
       <div className="shrink-0">{trailing ?? <FollowButton user={user} size="sm" />}</div>

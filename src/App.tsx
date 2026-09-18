@@ -37,6 +37,7 @@ const OpenHandoff = lazy(() => import('./pages/OpenHandoff'));
 
 const Workouts = lazy(() => import('./pages/Workouts'));
 const WorkoutDetail = lazy(() => import('./pages/WorkoutDetail'));
+const WorkoutPlanDetail = lazy(() => import('./pages/WorkoutPlanDetail'));
 const WorkoutLogs = lazy(() => import('./pages/WorkoutLogs'));
 const Meals = lazy(() => import('./pages/Meals'));
 const MealDetail = lazy(() => import('./pages/MealDetail'));
@@ -275,6 +276,7 @@ export default function App() {
 
               <Route path="workouts" element={<Workouts />} />
               <Route path="workouts/logs" element={<WorkoutLogs />} />
+              <Route path="workouts/plans/:planId" element={<WorkoutPlanDetail />} />
               <Route path="workouts/:workoutId" element={<WorkoutDetail />} />
               <Route path="meals" element={<Meals />} />
               {/* Community meals live on the Meals page as a tab; keep the noun URL working. */}

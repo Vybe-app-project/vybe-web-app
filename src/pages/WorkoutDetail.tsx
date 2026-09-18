@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatDistanceToNow } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { secondsParts } from '../lib/duration';
+import { timeAgo } from '../lib/hooks';
 import {
   Avatar,
   Badge,
@@ -13,6 +14,7 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
   Menu,
   PageHeader,
@@ -28,8 +30,8 @@ import {
   type MenuItem,
   useToast,
 } from './ui';
-import { Activity, Clock, Copy, Dumbbell, Edit, Flag, Flame, Heart, MessageCircle, Send, ShareUp, Trash } from './icons';
-import { LikeButton, WorkoutModal, shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise, type WorkoutPlan } from './Workouts';
+import { Activity, Clock, Copy, Dumbbell, Edit, Flag, Flame, Layers, MessageCircle, Send, ShareUp, Trash } from './icons';
+import { AddToPlanModal, LikeButton, WorkoutModal, shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise, type WorkoutPlan } from './Workouts';
 import { useReportModal } from './Report';
 
 type WorkoutComment = {
@@ -39,13 +41,20 @@ type WorkoutComment = {
   user?: WorkoutAuthor | string;
 };
 
-type WorkoutDetailData = SocialWorkout & { comments?: WorkoutComment[] };
+type WorkoutDetailData = Omit<SocialWorkout, 'comments'> & { comments?: WorkoutComment[] };
 
-const safeDate = (value?: string) => {
-  if (!value) return '';
+/** Compact relative time ("2m", "16h") with the full date on hover, matching the feed. */
+function When({ value, prefix }: { value?: string; prefix?: string }) {
+  if (!value) return null;
   const d = new Date(value);
-  return Number.isFinite(d.getTime()) ? formatDistanceToNow(d, { addSuffix: true }) : '';
-};
+  if (!Number.isFinite(d.getTime())) return null;
+  return (
+    <time dateTime={value} title={d.toLocaleString()}>
+      {prefix ? `${prefix} ` : ''}
+      {timeAgo(value)}
+    </time>
+  );
+}
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatStat(n)} ${n === 1 ? one : many}`;
 
@@ -79,20 +88,20 @@ function DetailSkeleton() {
   );
 }
 
-/** Exercise prescription as labelled facts, not a dotted string. */
+/** Exercise prescription as labelled facts, not a dotted string. Durations are seconds. */
 function Prescription({ ex }: { ex: WorkoutExercise }) {
   const facts: Array<[string, string]> = [];
   if (ex.sets) facts.push([formatStat(ex.sets), ex.sets === 1 ? 'set' : 'sets']);
   if (ex.reps) facts.push([formatStat(ex.reps), ex.reps === 1 ? 'rep' : 'reps']);
   if (ex.weight) facts.push([formatStat(ex.weight), 'kg']);
-  if (ex.duration) facts.push([formatStat(ex.duration), 'min']);
+  if (ex.duration) facts.push(...secondsParts(ex.duration));
   if (ex.distance) facts.push([formatStat(ex.distance), 'km']);
-  if (ex.rest) facts.push([formatStat(ex.rest), 's rest']);
+  if (ex.rest) facts.push(...secondsParts(ex.rest).map(([v, u], i, all) => [v, i === all.length - 1 ? `${u} rest` : u] as [string, string]));
   if (!facts.length) return <p className="text-xs text-text-3">No prescription</p>;
   return (
     <ul className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-      {facts.map(([value, unit]) => (
-        <li key={unit} className="flex items-baseline gap-1">
+      {facts.map(([value, unit], i) => (
+        <li key={`${unit}-${i}`} className="flex items-baseline gap-1">
           <span className="type-stat text-md text-text-1">{value}</span>
           <span className="text-xs font-medium text-text-2">{unit}</span>
         </li>
@@ -111,6 +120,8 @@ export default function WorkoutDetail() {
   const [comment, setComment] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [addToPlan, setAddToPlan] = useState(false);
+  const [pendingComment, setPendingComment] = useState<WorkoutComment | null>(null);
   const { report, reportModal } = useReportModal();
   const composerRef = useRef<HTMLFormElement>(null);
   const commentsRef = useRef<HTMLElement | null>(null);
@@ -205,6 +216,33 @@ export default function WorkoutDetail() {
     },
   });
 
+  const removeComment = useMutation({
+    mutationFn: async (c: WorkoutComment) => {
+      await api.delete(`/workouts/interaction/${workoutId}/comment/${c._id}`);
+      return c._id;
+    },
+    onMutate: async (c) => {
+      // Optimistic removal; the snapshot restores the row if the server says no.
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<WorkoutDetailData>(queryKey);
+      if (previous) {
+        const remaining = (previous.comments ?? []) as WorkoutComment[];
+        qc.setQueryData<WorkoutDetailData>(queryKey, { ...previous, comments: remaining.filter((x) => x._id !== c._id) });
+      }
+      return { previous };
+    },
+    onSuccess: () => toast.success('Comment deleted'),
+    onError: (e, _c, ctx) => {
+      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+      toast.error(errMsg(e, 'Could not delete this comment'));
+    },
+    onSettled: () => {
+      setPendingComment(null);
+      qc.invalidateQueries({ queryKey });
+      qc.invalidateQueries({ queryKey: ['workouts'] });
+    },
+  });
+
   const remove = useMutation({
     mutationFn: async () => {
       await api.delete(`/workouts/${workoutId}`);
@@ -223,6 +261,7 @@ export default function WorkoutDetail() {
   const menu: MenuItem[] = data
     ? [
         ...(isOwn ? [{ label: 'Edit', icon: <Edit size={18} />, onSelect: () => setEditOpen(true) }] : []),
+        { label: 'Add to plan', description: 'Schedule it into one of your plans', icon: <Layers size={18} />, onSelect: () => setAddToPlan(true) },
         { label: 'Share', icon: <ShareUp size={18} />, onSelect: () => void shareWorkout(data, toast, 'share') },
         { label: 'Copy link', icon: <Copy size={18} />, onSelect: () => void shareWorkout(data, toast, 'copy') },
         ...(!isOwn
@@ -257,7 +296,9 @@ export default function WorkoutDetail() {
         </>
       );
     }
-    if (plan.data) return <PlanDetail plan={plan.data} />;
+    // Canonical plan pages live under /workouts/plans/:planId; older share
+    // links used the workout path, so send them on.
+    if (plan.data) return <Navigate to={`/workouts/plans/${plan.data._id}`} replace />;
     return (
       <>
         <PageHeader title="Workout" />
@@ -315,7 +356,7 @@ export default function WorkoutDetail() {
             <ul className="flex flex-wrap gap-1.5" aria-label="Hashtags">
               {(data.hashtags ?? []).map((tag) => (
                 <li key={tag}>
-                  <Chip to={`/search?q=${encodeURIComponent(`#${tag}`)}`}>#{tag}</Chip>
+                  <Chip to={`/search?q=${encodeURIComponent(`#${tag}`)}&type=workouts`}>#{tag}</Chip>
                 </li>
               ))}
             </ul>
@@ -337,7 +378,11 @@ export default function WorkoutDetail() {
             ) : (
               <p className="inline-flex min-h-11 items-center text-sm text-text-2">{data.isPremade ? 'Premade by Vybe' : 'Vybe member'}</p>
             )}
-            {data.createdAt ? <p className="text-xs text-text-3">Added {safeDate(data.createdAt)}</p> : null}
+            {data.createdAt ? (
+              <p className="text-xs text-text-3">
+                <When value={data.createdAt} prefix="Added" />
+              </p>
+            ) : null}
           </div>
         </div>
       </Card>
@@ -421,6 +466,9 @@ export default function WorkoutDetail() {
             {comments.map((c) => {
               const who = typeof c.user === 'object' && c.user ? c.user : undefined;
               const name = who?.fullName || who?.username || 'Vybe member';
+              const authorId = who?._id ?? (typeof c.user === 'string' ? c.user : undefined);
+              // Your own comments, and every comment on your workout, can be removed.
+              const canDelete = Boolean(user && (isOwn || (authorId && authorId === user._id)));
               return (
                 <li key={c._id} className="card flex gap-3 p-4">
                   <Avatar src={who?.avatar} name={name} alt="" size="sm" className="shrink-0" />
@@ -437,12 +485,24 @@ export default function WorkoutDetail() {
                       ) : (
                         <span className="text-sm font-semibold text-text-1">{name}</span>
                       )}
-                      <time className="text-xs text-text-3" dateTime={c.createdAt}>
-                        {safeDate(c.createdAt)}
-                      </time>
+                      <span className="text-xs text-text-3">
+                        <When value={c.createdAt} />
+                      </span>
                     </div>
                     <p className="prose-measure mt-0.5 break-words text-sm text-text-1">{c.text}</p>
                   </div>
+                  {canDelete ? (
+                    <IconButton
+                      label={`Delete comment by ${name}`}
+                      variant="ghost"
+                      size={40}
+                      className="-mr-2 -mt-1.5 shrink-0 text-text-2 hover:text-danger"
+                      disabled={removeComment.isPending}
+                      onClick={() => setPendingComment(c)}
+                    >
+                      <Trash size={18} />
+                    </IconButton>
+                  ) : null}
                 </li>
               );
             })}
@@ -455,6 +515,17 @@ export default function WorkoutDetail() {
       </p>
 
       <WorkoutModal open={editOpen} editing={data} onClose={() => setEditOpen(false)} />
+      <AddToPlanModal workout={addToPlan ? data : null} onClose={() => setAddToPlan(false)} />
+      <ConfirmDialog
+        open={Boolean(pendingComment)}
+        title="Delete comment?"
+        message="The comment is removed for everyone. This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        loading={removeComment.isPending}
+        onCancel={() => setPendingComment(null)}
+        onConfirm={() => pendingComment && removeComment.mutate(pendingComment)}
+      />
       <ConfirmDialog
         open={confirmDelete}
         title="Delete workout?"
@@ -467,67 +538,5 @@ export default function WorkoutDetail() {
       />
       {reportModal}
     </div>
-  );
-}
-
-/** Read view for a shared workout plan: the schedule, week by week. */
-function PlanDetail({ plan }: { plan: WorkoutPlan }) {
-  const cover = plan.image?.uri ? mediaUrl(plan.image.uri) : '';
-  const byWeek = new Map<number, NonNullable<WorkoutPlan['workouts']>>();
-  for (const entry of plan.workouts ?? []) {
-    if (!entry.workout) continue;
-    const list = byWeek.get(entry.week) ?? [];
-    list.push(entry);
-    byWeek.set(entry.week, list);
-  }
-  const weeks = [...byWeek.keys()].sort((a, b) => a - b);
-  const author = plan.createdBy?.fullName || plan.createdBy?.username;
-  return (
-    <>
-      <PageHeader title={plan.title} back="/workouts" />
-      <div className="space-y-4">
-        {cover ? <img src={cover} alt="" className="aspect-[16/9] w-full rounded-lg object-cover" /> : null}
-        <div className="flex flex-wrap items-center gap-2">
-          {plan.level ? <Badge>{plan.level}</Badge> : null}
-          {plan.durationWeeks ? <Badge tone="neutral">{plan.durationWeeks} weeks</Badge> : null}
-          {plan.goal ? <Badge tone="neutral">{plan.goal}</Badge> : null}
-          {author ? <span className="text-xs text-text-2">Plan by {author}</span> : null}
-        </div>
-        {plan.description ? <p className="text-sm text-text-2">{plan.description}</p> : null}
-        {weeks.length === 0 ? (
-          <EmptyState icon={<Dumbbell size={26} />} title="No sessions yet" message="This plan has no workouts scheduled." />
-        ) : (
-          weeks.map((week) => (
-            <Card key={week} className="p-0">
-              <h2 className="type-heading px-4 pt-4 text-sm text-text-1">Week {week}</h2>
-              <ul className="divide-y divide-line">
-                {(byWeek.get(week) ?? [])
-                  .slice()
-                  .sort((a, b) => a.day - b.day || (a.order ?? 0) - (b.order ?? 0))
-                  .map((entry) => (
-                    <li key={`${entry.week}-${entry.day}-${entry.workout?._id}`}>
-                      <Link
-                        to={`/workouts/${entry.workout?._id}`}
-                        viewTransition
-                        className="flex min-h-12 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold text-text-1">{entry.workout?.title}</span>
-                          <span className="block text-xs text-text-2">
-                            Day {entry.day}
-                            {entry.workout?.duration ? ` · ${entry.workout.duration} min` : ''}
-                            {entry.workout?.category ? ` · ${entry.workout.category}` : ''}
-                          </span>
-                        </span>
-                        <Activity size={16} className="shrink-0 text-text-3" />
-                      </Link>
-                    </li>
-                  ))}
-              </ul>
-            </Card>
-          ))
-        )}
-      </div>
-    </>
   );
 }
