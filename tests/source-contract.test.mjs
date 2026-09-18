@@ -93,6 +93,9 @@ test('admin sessions are tab-scoped and legacy paths still resolve', () => {
   assert.match(appSrc, /path=["']\/open\.html["']/);
   assert.match(read('src/lib/shareLinks.ts'), /'meal-template': .*shared=|case 'meal-template':\s*return `\/meals\/templates\?shared=/s);
   assert.match(read('src/pages/Gyms.tsx'), /params\.get\('gym'\)/);
+  // API-emitted links: emails carry /support.html, meal shares carry /meals/shared/<token>.
+  assert.match(appSrc, /path=["']\/support\.html["']/);
+  assert.match(appSrc, /path=["']meals\/shared\/:token["']/);
   assert.match(read('src/pages/WeeklyPlans.tsx'), /params\.get\('shared'\)/);
 
   const app = read('src/App.tsx');

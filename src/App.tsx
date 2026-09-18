@@ -34,6 +34,7 @@ const WorkoutDetail = lazy(() => import('./pages/WorkoutDetail'));
 const WorkoutLogs = lazy(() => import('./pages/WorkoutLogs'));
 const Meals = lazy(() => import('./pages/Meals'));
 const MealDetail = lazy(() => import('./pages/MealDetail'));
+const SharedMeal = lazy(() => import('./pages/SharedMeal'));
 const MealTemplates = lazy(() => import('./pages/MealTemplates'));
 const WeeklyPlans = lazy(() => import('./pages/WeeklyPlans'));
 const Health = lazy(() => import('./pages/Health'));
@@ -174,6 +175,8 @@ export default function App() {
 
           {/* Public help: works signed out, wears the app shell when signed in */}
           <Route path="/support" element={<SupportGate />} />
+          {/* The API's transactional emails link to support.html (the old static page). */}
+          <Route path="/support.html" element={<Navigate to="/support" replace />} />
 
           {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
           <Route path="/open.html" element={<OpenHandoff />} />
@@ -218,6 +221,7 @@ export default function App() {
             <Route path="meals" element={<Meals />} />
             <Route path="meals/templates" element={<MealTemplates />} />
             <Route path="meals/plans" element={<WeeklyPlans />} />
+            <Route path="meals/shared/:token" element={<SharedMeal />} />
             <Route path="meals/:id" element={<MealDetail />} />
             <Route path="health" element={<Health />} />
             <Route path="health/goals" element={<HealthGoals />} />
