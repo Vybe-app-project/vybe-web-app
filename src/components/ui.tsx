@@ -860,8 +860,8 @@ export function Input({
   id,
   leading,
   trailing,
-  'aria-describedby': describedBy,
   ref,
+  'aria-describedby': describedBy,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & FieldProps & { leading?: ReactNode; trailing?: ReactNode; ref?: Ref<HTMLInputElement> }) {
   const auto = useId();

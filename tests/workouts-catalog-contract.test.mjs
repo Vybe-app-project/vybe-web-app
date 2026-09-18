@@ -127,10 +127,10 @@ test('web members can apply to coach from Settings, with the mobile field list',
 
 test('search indexes workouts and notifications link workout events to the workout', () => {
   assert.match(search, /\{ key: 'workouts', label: 'Workouts' \}/);
-  assert.match(search, /results\?\.workouts/);
-  assert.match(notifications, /from '\.\.\/lib\/notificationRoutes'/);
-  assert.match(notifications, /workout_like: \{ icon/);
-  assert.match(read('src/components/Layout.tsx'), /placeholder="Search people, posts, workouts…"/);
+  assert.match(search, /r\?\.workouts \|\| \[\]/);
+  assert.match(notifications, /from '\.\.\/lib\/notificationCopy'/);
+  assert.match(read('src/lib/notificationCopy.ts'), /workout_like: \{ text: 'liked your workout'/);
+  assert.match(read('src/components/Layout.tsx'), /placeholder="Search people, posts, workouts, meals…"/);
 });
 
 test('toasts never cover a sheet footer on phones and validation toasts do not stack', () => {

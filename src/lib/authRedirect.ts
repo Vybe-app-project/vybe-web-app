@@ -56,7 +56,7 @@ export function sessionExpiredLoginUrl(pathname: string, search = ''): string {
   return `/login?${params.toString()}`;
 }
 
-export type LoginNotice = { kind: 'expired' | 'reset'; tone: 'warning' | 'success'; text: string };
+export type LoginNotice = { kind: 'expired' | 'reset' | 'signed-out-all'; tone: 'warning' | 'success'; text: string };
 
 /** The one notice the sign-in page shows on arrival, if any. */
 export function loginNoticeFor(params: { get(name: string): string | null }): LoginNotice | null {

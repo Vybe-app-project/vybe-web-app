@@ -15,6 +15,8 @@ export type PublicUser = {
   isVerified?: boolean;
   /** Staff-granted public "Verified" check; the only flag the badge keys on. */
   isIdentityVerified?: boolean;
+  /** Private account (settings.privacy === 'private'); the directory and blocked list send it flat. */
+  isPrivate?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
   isPremium?: boolean;
@@ -124,6 +126,30 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   comments: true,
   friendRequests: true,
 };
+
+/**
+ * Email preferences are a separate store on the API
+ * (GET/PUT /users/email-preferences -> settings.emailNotifications), not a
+ * view over the push switches; the keys overlap on purpose, the values do not.
+ */
+export const EMAIL_SETTING_KEYS = ['newFollowers', 'workoutPosts', 'likes', 'comments', 'friendRequests'] as const;
+export type EmailSettingKey = (typeof EMAIL_SETTING_KEYS)[number];
+export type EmailSettings = Record<EmailSettingKey, boolean>;
+export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
+  newFollowers: true,
+  workoutPosts: true,
+  likes: true,
+  comments: true,
+  friendRequests: true,
+};
+
+export function pickEmailSettings(raw: any): EmailSettings {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  return EMAIL_SETTING_KEYS.reduce((acc, key) => {
+    acc[key] = typeof source[key] === 'boolean' ? source[key] : DEFAULT_EMAIL_SETTINGS[key];
+    return acc;
+  }, {} as EmailSettings);
+}
 
 /** Keep only the exact boolean keys the API accepts. */
 export function pickNotificationSettings(raw: any): NotificationSettings {
@@ -464,3 +490,5 @@ export const followingCount = (u?: PublicUser | null) =>
   u?.followingCount ?? u?.stats?.following ?? 0;
 
 export const postCount = (u?: PublicUser | null) => u?.stats?.totalPosts ?? 0;
+
+export { useIsCompact } from '../components/ui';

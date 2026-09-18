@@ -46,7 +46,6 @@ export function ReportModal({
   onReported?: () => void;
 }) {
   const toast = useToast();
-  const what = (targetLabel || humanize(targetType)).toLowerCase();
   const [reason, setReason] = useState(REPORT_REASONS[0].value);
   const [detail, setDetail] = useState('');
   const [detailError, setDetailError] = useState<string | undefined>();

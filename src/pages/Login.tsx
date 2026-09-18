@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+
+import { signOutReason } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   loginFailure,
@@ -176,12 +178,24 @@ export default function Login() {
   const [remember, setRemember] = useState(true);
   const [fieldError, setFieldError] = useState<{ email?: string; password?: string }>({});
   const [error, setError] = useState<LoginFailure | null>(null);
-  const [notice, setNotice] = useState<LoginNotice | null>(() => loginNoticeFor(params));
+  // Read once on mount: the 401 interceptor and "Sign out of all devices"
+  // leave a note explaining why the user is looking at this page.
+  const [reason] = useState(() => signOutReason.take());
+  const [notice, setNotice] = useState<LoginNotice | null>(
+    () => loginNoticeFor(params)
+      ?? (reason === 'signed-out-all'
+        ? { kind: 'signed-out-all', tone: 'success', text: 'Signed out of all devices. Sign in again on the ones you still use.' }
+        : null),
+  );
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     writeDraftEmail(sessionStorage, email.trim());
   }, [email]);
+  const sessionNotice =
+    reason === 'session-ended'
+      ? 'You were signed out. This happens after a password change, after “Sign out of all devices” on another device, or when a session expires. Sign in again to continue.'
+      : null;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -230,6 +244,11 @@ export default function Login() {
       {notice ? (
         <Callout tone={notice.tone} className="mb-5">
           {notice.text}
+        </Callout>
+      ) : null}
+      {sessionNotice ? (
+        <Callout tone="warning" title="Signed out on this device" className="mb-5">
+          {sessionNotice}
         </Callout>
       ) : null}
 

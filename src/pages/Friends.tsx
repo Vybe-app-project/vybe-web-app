@@ -191,7 +191,20 @@ export default function Friends() {
     onError: (e) => toast.error(errMsg(e, 'Could not accept the request.')),
   });
 
+  // The receiver declines an incoming request through /friends/incoming/:id;
+  // the sender withdraws one through /friends/requests/:id. Declining used to
+  // call the sender's route, which answered 404 and left the request pending.
   const declineFriend = useMutation({
+    mutationFn: async (requestId: string) => {
+      await api.delete(`/friends/incoming/${requestId}`);
+    },
+    onSuccess: () => {
+      toast.success('Request removed');
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not remove the request.')),
+  });
+  const withdrawRequest = useMutation({
     mutationFn: async (requestId: string) => {
       await api.delete(`/friends/requests/${requestId}`);
     },
@@ -324,8 +337,8 @@ export default function Friends() {
                 <Button
                   variant="secondary"
                   title="Withdraw request"
-                  loading={declineFriend.isPending && declineFriend.variables === rel?.requestId}
-                  onClick={() => rel?.requestId && declineFriend.mutate(rel.requestId)}
+                  loading={withdrawRequest.isPending && withdrawRequest.variables === rel?.requestId}
+                  onClick={() => rel?.requestId && withdrawRequest.mutate(rel.requestId)}
                 >
                   Requested
                 </Button>
@@ -371,7 +384,7 @@ export default function Friends() {
                   ) : (
                     <EmptyState
                       title="No friends yet"
-                      message="Search for people above, or explore who is training near you. Friends see each other’s private posts."
+                      message="Search for people above, or explore who is training near you."
                       action={{ label: 'Explore people', to: '/discover', icon: <Compass size={18} /> }}
                     />
                   )
@@ -466,8 +479,8 @@ export default function Friends() {
                   actions={
                     <Button
                       variant="secondary"
-                      loading={declineFriend.isPending && declineFriend.variables === r._id}
-                      onClick={() => declineFriend.mutate(r._id)}
+                      loading={withdrawRequest.isPending && withdrawRequest.variables === r._id}
+                      onClick={() => withdrawRequest.mutate(r._id)}
                     >
                       Withdraw
                     </Button>
@@ -487,7 +500,7 @@ export default function Friends() {
                   icon={<Users size={26} />}
                   title="No follow requests"
                   message="When your profile is private, people asking to follow you appear here for approval."
-                  action={{ label: 'Privacy settings', to: '/settings', variant: 'secondary' }}
+                  action={{ label: 'Privacy settings', to: '/settings#privacy', variant: 'secondary' }}
                 />
               }
             >

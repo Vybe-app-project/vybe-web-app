@@ -246,7 +246,7 @@ test('an expired session hands off to /login with the page preserved, and both g
 
   // Bootstrap only ends a session on an auth answer, never on a network blip.
   const auth = read('src/lib/auth.ts');
-  assert.match(auth, /if \(status === 401 \|\| status === 403\) tokenStore\.clear\(\);/);
+  assert.match(auth, /if \(isSessionRejected\(error\)\) \{\s*tokenStore\.clear\(\);/);
 });
 
 test('"Keep me signed in" is on by default and, when off, the token lives in the tab only', () => {

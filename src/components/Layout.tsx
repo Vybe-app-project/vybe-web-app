@@ -8,6 +8,8 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { PublicUser } from '../lib/hooks';
 import { getSocket } from '../lib/socket';
+import { UNREAD_COUNT_KEY, useLiveNotifications } from '../lib/notificationsLive';
+import type { UnreadCount } from '../lib/notificationInbox';
 import {
   Avatar,
   Brand,
@@ -259,18 +261,17 @@ export function useUnreadChats(enabled = true) {
 }
 
 /**
- * The API has no unread-count endpoint for notifications, so the first page
- * is counted. Invalidating `['notifications']` (what the page does when it
- * marks read) refreshes this too.
+ * Exact unread total from GET /notifications/unread-count. The key sits under
+ * `['notifications']`, so invalidating that (what the page does when it marks
+ * read) refreshes this too. The socket subscription in Layout bumps it live;
+ * the 60 s poll is the fallback for a socket that never connected.
  */
 export function useUnreadNotifications(enabled = true) {
-  return useQuery({
-    queryKey: ['notifications', 'unread-count'],
+  return useQuery<UnreadCount>({
+    queryKey: UNREAD_COUNT_KEY,
     queryFn: async () => {
-      const { data } = await api.get('/notifications', { params: { page: 1, limit: 20 } });
-      const list: Array<{ isRead?: boolean; read?: boolean }> = data.notifications || [];
-      const count = list.filter((n) => !(n.isRead ?? n.read ?? false)).length;
-      return { count, more: !!data.hasNextPage && count === list.length && count > 0 };
+      const { data } = await api.get('/notifications/unread-count');
+      return { count: Number(data.count || 0), more: false };
     },
     refetchInterval: 60_000,
     enabled,
@@ -375,11 +376,12 @@ function SkipLink() {
 
 function OfflineBanner() {
   const online = useOnline();
-  if (online) return null;
+  const sessionStale = useAuth((s) => s.sessionStale);
+  if (online && !sessionStale) return null;
   return (
     <div role="status" className="flex items-center justify-center gap-2 bg-warning-soft px-4 py-2 text-xs font-semibold text-warning-text">
       <WifiOff size={16} />
-      You’re offline — showing what’s already loaded.
+      {online ? 'Can’t reach Vybe right now — showing what’s already loaded. Reconnecting…' : 'You’re offline — showing what’s already loaded.'}
     </div>
   );
 }
@@ -407,7 +409,7 @@ function SearchBox({ className }: { className?: string }) {
         hideLabel
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search people, posts, workouts…"
+        placeholder="Search people, posts, workouts, meals…"
         className="h-10 min-h-10"
       />
     </form>
@@ -864,10 +866,22 @@ export default function Layout({ children }: { children?: ReactNode }) {
   const storedChrome = usePageChromeStore((s) => s.chrome);
   const chrome = storedChrome && storedChrome.path === pathname ? storedChrome : null;
   const { user } = useAuth();
+  const sessionStale = useAuth((s) => s.sessionStale);
+  const qc = useQueryClient();
 
   const unreadChats = useUnreadChats(!!user);
   const unreadNotifs = useUnreadNotifications(!!user);
   useRealtimeSync(!!user, user?._id);
+  // Open the shared socket for the whole session so likes, comments and
+  // follows land in the inbox and on the bell as they happen.
+  useLiveNotifications(!!user);
+  // When a session restored from the offline snapshot is verified again, every
+  // query that failed while the API was unreachable is retried at once rather
+  // than on its next poll, so the shell fills back in without a "Try again".
+  useEffect(() => {
+    if (sessionStale) return;
+    void qc.invalidateQueries({ predicate: (query) => query.state.status === 'error' });
+  }, [sessionStale, qc]);
   const chats = badgeText(unreadChats.data);
   const notifications = badgeText(unreadNotifs.data?.count, unreadNotifs.data?.more);
   const homeTotal = (unreadChats.data ?? 0) + (unreadNotifs.data?.count ?? 0);

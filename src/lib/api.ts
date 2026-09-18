@@ -8,6 +8,10 @@ export const ORIGIN_BASE = API_BASE.replace(/\/api\/?$/, '');
 
 const TOKEN_KEY = 'vybe.token';
 const ADMIN_TOKEN_KEY = 'vybe.adminToken';
+// A minimal copy of the signed-in user (id, username, name, avatar) kept
+// beside the token so the shell can paint offline. Never anything sensitive.
+const USER_SNAPSHOT_KEY = 'vybe.user';
+const SIGN_OUT_REASON_KEY = 'vybe.signOutReason';
 
 // Consumer sessions live in localStorage so the installed PWA survives a
 // relaunch -- unless the person unticks "Keep me signed in", in which case
@@ -25,6 +29,15 @@ try {
 }
 
 export type SessionPersistence = 'local' | 'session';
+export type UserSnapshot = { _id: string; username: string; fullName?: string; avatar?: string };
+
+const safe = <T,>(fn: () => T, fallback: T): T => {
+  try {
+    return fn();
+  } catch {
+    return fallback;
+  }
+};
 
 const readStorage = (storage: Storage, key: string): string | null => {
   try {
@@ -45,6 +58,7 @@ export const tokenStore = {
   clear: () => {
     localStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
+    safe(() => localStorage.removeItem(USER_SNAPSHOT_KEY), undefined);
   },
   /** Which store currently holds the session, for anything that re-issues it. */
   persistence: (): SessionPersistence | null =>
@@ -52,6 +66,37 @@ export const tokenStore = {
   getAdmin: () => sessionStorage.getItem(ADMIN_TOKEN_KEY),
   setAdmin: (t: string) => sessionStorage.setItem(ADMIN_TOKEN_KEY, t),
   clearAdmin: () => sessionStorage.removeItem(ADMIN_TOKEN_KEY),
+  getUser: (): UserSnapshot | null =>
+    safe(() => {
+      const raw = localStorage.getItem(USER_SNAPSHOT_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Partial<UserSnapshot>) : null;
+      return parsed && typeof parsed._id === 'string' && typeof parsed.username === 'string' ? (parsed as UserSnapshot) : null;
+    }, null),
+  setUser: (u: { _id: string; username: string; fullName?: string; avatar?: string }) =>
+    safe(
+      () =>
+        localStorage.setItem(
+          USER_SNAPSHOT_KEY,
+          JSON.stringify({ _id: u._id, username: u.username, fullName: u.fullName, avatar: u.avatar } satisfies UserSnapshot),
+        ),
+      undefined,
+    ),
+};
+
+/**
+ * Why the last session ended, for the sign-in page to explain. Set right
+ * before the hard redirect below and read once by Login; sessionStorage so it
+ * survives the navigation and nothing else.
+ */
+export type SignOutReason = 'session-ended' | 'signed-out-all';
+export const signOutReason = {
+  set: (reason: SignOutReason) => safe(() => sessionStorage.setItem(SIGN_OUT_REASON_KEY, reason), undefined),
+  take: (): SignOutReason | null =>
+    safe(() => {
+      const value = sessionStorage.getItem(SIGN_OUT_REASON_KEY);
+      sessionStorage.removeItem(SIGN_OUT_REASON_KEY);
+      return value === 'session-ended' || value === 'signed-out-all' ? value : null;
+    }, null),
 };
 
 /**
@@ -100,19 +145,22 @@ const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'
 
 /**
  * Session-version invalidation: the API revokes tokens on password change,
- * sign-out on another device, or the 30-day expiry. This runs outside React
- * and the token is already gone, so it is a hard navigation; the path the
- * person was on travels in `?next=` and `?expired=1` tells the sign-in page
- * to say why they are there (it used to bounce to a bare /login and drop the
- * RequireAuth `from` state on the floor).
+ * "Sign out of all devices" on another device, or the 30-day expiry. This
+ * runs outside React and the token is already gone, so it is a hard
+ * navigation; the path the person was on travels in `?next=`, `?expired=1`
+ * tells the sign-in page to say why they are there, and signOutReason keeps
+ * the finer reason for the same page (it used to bounce to a bare /login and
+ * drop the RequireAuth `from` state on the floor).
  */
 function onUnauthorized(kind: 'user' | 'admin') {
   if (kind === 'admin') {
     tokenStore.clearAdmin();
     if (!location.pathname.startsWith('/admin/login')) location.href = '/admin/login';
   } else {
+    const hadSession = !!tokenStore.get();
     tokenStore.clear();
     if (!AUTH_PATHS.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))) {
+      if (hadSession) signOutReason.set('session-ended');
       location.href = sessionExpiredLoginUrl(location.pathname, location.search);
     }
   }

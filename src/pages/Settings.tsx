@@ -2,21 +2,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { UnitsControl } from '../components/UnitsControl';
 import {
-  DEFAULT_NOTIFICATION_SETTINGS,
-  NOTIFICATION_SETTING_KEYS,
-  displayName,
-  isPasswordValid,
-  passwordRules,
-  pickNotificationSettings,
-  usernameError,
-  type NotificationSettingKey,
-  type NotificationSettings,
-  type PublicUser,
-} from '../lib/hooks';
-import {
-  Avatar,
   MAX_CREDENTIAL_URLS,
   MAX_TRAINER_FIELDS,
   SUMMARY_MAX,
@@ -28,28 +15,43 @@ import {
   type TrainerApplicationErrors,
   type TrainerApplicationStatus,
 } from '../lib/trainerApplication';
+import { useAuth } from '../lib/auth';
 import {
+  DEFAULT_EMAIL_SETTINGS,
+  DEFAULT_NOTIFICATION_SETTINGS,
+  EMAIL_SETTING_KEYS,
+  NOTIFICATION_SETTING_KEYS,
+  displayName,
+  isPasswordValid,
+  passwordRules,
+  pickEmailSettings,
+  pickNotificationSettings,
+  usernameError,
+  type EmailSettingKey,
+  type EmailSettings,
+  type NotificationSettingKey,
+  type NotificationSettings,
+  type PublicUser,
+} from '../lib/hooks';
+import {
+  Avatar,
   Badge,
   Button,
   Callout,
   Card,
-  Chip,
   ConfirmDialog,
   ErrorState,
   IconButton,
   Input,
   PageHeader,
   Skeleton,
-  SkeletonRow,
   Switch,
   Textarea,
   ThemeControl,
   cx,
   useToast,
 } from './ui';
-import { UnitsControl } from '../components/UnitsControl';
-import { Award, ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Shield } from './icons';
-import { ROW_LINK } from './UserRow';
+import { Award, ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Monitor, Shield } from './icons';
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
 
@@ -668,9 +670,11 @@ function PasswordSection() {
 
 /* ------------------------------------------------------------------ notifications */
 
+const NOTIFICATION_SETTINGS_KEY = ['notification-settings'] as const;
+
 function useNotificationSettings() {
   return useQuery({
-    queryKey: ['notification-settings'],
+    queryKey: NOTIFICATION_SETTINGS_KEY,
     queryFn: async () => {
       const { data } = await api.get('/notifications/settings');
       return pickNotificationSettings(data.settings || data);
@@ -678,33 +682,30 @@ function useNotificationSettings() {
   });
 }
 
+/**
+ * Push preferences. Every switch reads from and writes to the shared query:
+ * there is no per-card draft, and a save sends only the key that changed, so
+ * nothing here can replay a stale value over another card's work.
+ */
 function NotificationsSection() {
   const toast = useToast();
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<NotificationSettings | null>(null);
   const settingsQuery = useNotificationSettings();
 
-  useEffect(() => {
-    if (settingsQuery.data && !draft) setDraft(settingsQuery.data);
-  }, [settingsQuery.data, draft]);
-
   const save = useMutation({
-    mutationFn: async (next: NotificationSettings) => {
-      const payload = pickNotificationSettings(next);
-      const { data } = await api.put('/notifications/settings', payload);
-      return pickNotificationSettings(data.settings || payload);
+    mutationFn: async (patch: Partial<NotificationSettings>) => {
+      const { data } = await api.put('/notifications/settings', patch);
+      return pickNotificationSettings(data.settings || { ...settingsQuery.data, ...patch });
     },
-    onMutate: (next) => {
-      const prev = draft;
-      setDraft(next);
-      return prev;
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: NOTIFICATION_SETTINGS_KEY });
+      const previous = qc.getQueryData<NotificationSettings>(NOTIFICATION_SETTINGS_KEY);
+      qc.setQueryData<NotificationSettings>(NOTIFICATION_SETTINGS_KEY, (old) => ({ ...(old ?? DEFAULT_NOTIFICATION_SETTINGS), ...patch }));
+      return { previous };
     },
-    onSuccess: (settings) => {
-      setDraft(settings);
-      qc.setQueryData(['notification-settings'], settings);
-    },
-    onError: (e, _v, ctx) => {
-      if (ctx) setDraft(ctx as NotificationSettings);
+    onSuccess: (settings) => qc.setQueryData(NOTIFICATION_SETTINGS_KEY, settings),
+    onError: (e, _patch, ctx) => {
+      if (ctx?.previous) qc.setQueryData(NOTIFICATION_SETTINGS_KEY, ctx.previous);
       toast.error(errMsg(e, 'Could not save your notification preferences.'));
     },
   });
@@ -725,7 +726,7 @@ function NotificationsSection() {
     );
   }
 
-  const value = draft || settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
+  const value = settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
   const paused = value.pauseAll === true;
   const rest = NOTIFICATION_SETTING_KEYS.filter((k) => k !== 'pauseAll');
 
@@ -736,7 +737,7 @@ function NotificationsSection() {
         hint={NOTIFICATION_LABELS.pauseAll.hint}
         checked={paused}
         disabled={save.isPending}
-        onChange={(checked) => save.mutate({ ...value, pauseAll: checked })}
+        onChange={(checked) => save.mutate({ pauseAll: checked })}
       />
       {paused ? (
         <Callout tone="warning" className="my-2">
@@ -751,7 +752,7 @@ function NotificationsSection() {
             hint={NOTIFICATION_LABELS[key].hint}
             checked={value[key]}
             disabled={save.isPending || paused}
-            onChange={(checked) => save.mutate({ ...value, [key]: checked })}
+            onChange={(checked) => save.mutate({ [key]: checked } as Partial<NotificationSettings>)}
           />
         ))}
       </div>
@@ -761,32 +762,49 @@ function NotificationsSection() {
 
 /* ------------------------------------------------------------------ email */
 
-const EMAIL_KEYS: NotificationSettingKey[] = ['newFollowers', 'likes', 'comments', 'friendRequests', 'workoutPosts'];
+const EMAIL_SETTINGS_KEY = ['email-preferences'] as const;
 
+/**
+ * Email is its own store on the API (settings.emailNotifications). Until it
+ * was, this card wrote the push object with every key from a draft taken at
+ * page load, so "Save email preferences" silently flipped push switches back.
+ * The draft here holds only the keys the user touched.
+ */
 function EmailPreferencesSection() {
   const toast = useToast();
-  const [draft, setDraft] = useState<NotificationSettings | null>(null);
-  const settingsQuery = useNotificationSettings();
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState<Partial<EmailSettings>>({});
 
-  useEffect(() => {
-    if (settingsQuery.data && !draft) setDraft(settingsQuery.data);
-  }, [settingsQuery.data, draft]);
+  const settingsQuery = useQuery({
+    queryKey: EMAIL_SETTINGS_KEY,
+    queryFn: async () => {
+      const { data } = await api.get('/users/email-preferences');
+      return pickEmailSettings(data.settings || data);
+    },
+  });
+
+  const base = settingsQuery.data || DEFAULT_EMAIL_SETTINGS;
+  const value: EmailSettings = { ...base, ...draft };
+  const changed = Object.fromEntries(
+    EMAIL_SETTING_KEYS.filter((k) => value[k] !== base[k]).map((k) => [k, value[k]]),
+  ) as Partial<EmailSettings>;
+  const dirty = Object.keys(changed).length > 0;
 
   const save = useMutation({
-    mutationFn: async (next: NotificationSettings) => {
-      await api.put('/users/email-preferences', { notifications: pickNotificationSettings(next) });
-      return next;
+    mutationFn: async (patch: Partial<EmailSettings>) => {
+      const { data } = await api.put('/users/email-preferences', { notifications: patch });
+      return pickEmailSettings(data.settings || { ...base, ...patch });
     },
-    onSuccess: () => toast.success('Email preferences saved'),
+    onSuccess: (settings) => {
+      qc.setQueryData(EMAIL_SETTINGS_KEY, settings);
+      setDraft({});
+      toast.success('Email preferences saved');
+    },
     onError: (e) => toast.error(errMsg(e, 'Could not save your email preferences.')),
   });
 
-  const value = draft || settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
-  const base = settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
-  const dirty = EMAIL_KEYS.some((k) => value[k] !== base[k]);
-
   return (
-    <SettingsCard id="email" title="Email preferences" description="Which of these updates you also receive by email.">
+    <SettingsCard id="email" title="Email preferences" description="Which of these updates you also receive by email. Separate from push notifications.">
       {settingsQuery.isLoading ? (
         <RowsSkeleton rows={4} height="h-12" />
       ) : settingsQuery.isError ? (
@@ -794,20 +812,22 @@ function EmailPreferencesSection() {
       ) : (
         <>
           <div className="divide-y divide-line">
-            {EMAIL_KEYS.map((key) => (
+            {EMAIL_SETTING_KEYS.map((key: EmailSettingKey) => (
               <ToggleRow
                 key={key}
                 title={NOTIFICATION_LABELS[key].title}
                 hint={NOTIFICATION_LABELS[key].hint}
                 checked={value[key]}
                 disabled={save.isPending}
-                onChange={(checked) => setDraft({ ...value, [key]: checked })}
+                onChange={(checked) => setDraft((d) => ({ ...d, [key]: checked }))}
               />
             ))}
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-xs text-text-3">{dirty ? 'You have unsaved changes.' : 'Up to date.'}</p>
-            <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate(value)}>
+            <p className="text-xs text-text-3" aria-live="polite">
+              {dirty ? 'You have unsaved changes.' : 'Up to date.'}
+            </p>
+            <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate(changed)}>
               Save email preferences
             </Button>
           </div>
@@ -819,9 +839,20 @@ function EmailPreferencesSection() {
 
 /* ------------------------------------------------------------------ privacy */
 
-function useMe() {
+type BlockedUser = Pick<PublicUser, '_id' | 'username' | 'fullName' | 'avatar'>;
+
+/**
+ * Account privacy, which the page subtitle promised and the mobile app has had
+ * all along. The switch mirrors mobile's Account privacy screen and writes
+ * PUT /users/settings { privacy }; the list underneath is GET /users/blocked.
+ */
+function PrivacySection() {
+  const toast = useToast();
+  const qc = useQueryClient();
   const authUser = useAuth((s) => s.user);
-  return useQuery({
+  const setUser = useAuth((s) => s.setUser);
+
+  const meQuery = useQuery({
     queryKey: ['me'],
     queryFn: async () => {
       const { data } = await api.get('/users/me');
@@ -829,159 +860,131 @@ function useMe() {
     },
     initialData: (authUser as PublicUser) ?? undefined,
   });
-}
-
-/**
- * Account privacy. The mobile app has had this switch since launch; on the web
- * the only way to go private was a raw API call, and the Friends page's
- * "Privacy settings" call to action landed on a page without it.
- */
-function PrivacySection() {
-  const setUser = useAuth((s) => s.setUser);
-  const qc = useQueryClient();
-  const toast = useToast();
-  const meQuery = useMe();
   const isPrivate = meQuery.data?.settings?.privacy === 'private';
 
-  const save = useMutation({
-    mutationFn: async (nextPrivate: boolean) => {
-      const { data } = await api.put('/users/settings', { privacy: nextPrivate ? 'private' : 'public' });
+  const savePrivacy = useMutation({
+    mutationFn: async (privacy: 'public' | 'private') => {
+      const { data } = await api.put('/users/settings', { privacy });
       return (data.user || data) as PublicUser;
     },
-    onMutate: (nextPrivate) => {
-      const previous = meQuery.data;
-      if (previous) {
-        qc.setQueryData(['me'], { ...previous, settings: { ...previous.settings, privacy: nextPrivate ? 'private' : 'public' } });
-      }
-      return previous;
+    onMutate: async (privacy) => {
+      await qc.cancelQueries({ queryKey: ['me'] });
+      const previous = qc.getQueryData<PublicUser>(['me']);
+      qc.setQueryData<PublicUser>(['me'], (old) => (old ? { ...old, settings: { ...(old.settings ?? {}), privacy } } : old));
+      return { previous };
     },
-    onSuccess: (user, nextPrivate) => {
-      setUser(user as any);
+    onSuccess: (user) => {
       qc.setQueryData(['me'], user);
-      qc.invalidateQueries({ queryKey: ['me'] });
-      qc.invalidateQueries({ queryKey: ['followRequests'] });
-      toast.success(nextPrivate ? 'Your account is now private' : 'Your account is now public');
+      setUser(user as any);
+      toast.success(user.settings?.privacy === 'private' ? 'Your account is now private' : 'Your account is now public');
     },
-    onError: (e, _next, previous) => {
-      if (previous) qc.setQueryData(['me'], previous);
+    onError: (e, _privacy, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['me'], ctx.previous);
       toast.error(errMsg(e, 'Could not update your privacy setting.'));
     },
   });
 
-  return (
-    <SettingsCard
-      id="privacy"
-      title="Privacy"
-      description="Who can see what you share."
-    >
-      {meQuery.isLoading && !meQuery.data ? (
-        <RowsSkeleton rows={1} height="h-12" />
-      ) : (
-        <>
-          <ToggleRow
-            title="Private account"
-            hint="Only approved followers see your posts, workouts and meals. New followers must ask first."
-            checked={isPrivate}
-            disabled={save.isPending || !meQuery.data}
-            onChange={(checked) => save.mutate(checked)}
-          />
-          <p className="mt-2 flex items-start gap-2 text-xs text-text-3">
-            <Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>
-              {isPrivate
-                ? 'People who already follow you keep access. Requests wait for you under Friends › Follow requests.'
-                : 'Anyone on Vybe can see your profile and follow you without asking.'}
-              {' '}
-              <Link to="/friends?tab=follows" viewTransition className="font-semibold text-text-2 hover:underline">
-                Follow requests
-              </Link>
-            </span>
-          </p>
-        </>
-      )}
-    </SettingsCard>
-  );
-}
-
-/* ------------------------------------------------------------------ blocked accounts */
-
-/**
- * The way back from a block. Blocking removed every trace of the person
- * (profile 404, hidden from search), so without this list a block could not
- * be undone from the app at all.
- */
-function BlockedAccountsSection() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const blocked = useQuery({
-    queryKey: ['blocked'],
+  const blockedQuery = useQuery({
+    queryKey: ['blocked-users'],
     queryFn: async () => {
       const { data } = await api.get('/users/blocked');
-      return (data.users || []) as PublicUser[];
+      return (data.users || []) as BlockedUser[];
     },
   });
 
   const unblock = useMutation({
-    mutationFn: async (user: PublicUser) => {
-      await api.post('/users/unblock', { userId: user._id });
-      return user;
+    mutationFn: async (userId: string) => {
+      await api.post('/users/unblock', { userId });
     },
-    onMutate: (user) => {
-      const previous = blocked.data;
-      qc.setQueryData<PublicUser[]>(['blocked'], (list) => (list || []).filter((u) => u._id !== user._id));
-      return previous;
+    onMutate: async (userId) => {
+      await qc.cancelQueries({ queryKey: ['blocked-users'] });
+      const previous = qc.getQueryData<BlockedUser[]>(['blocked-users']);
+      qc.setQueryData<BlockedUser[]>(['blocked-users'], (old) => (old ?? []).filter((u) => u._id !== userId));
+      return { previous };
     },
-    onSuccess: (user) => {
-      toast.success(`${displayName(user)} unblocked`);
-      qc.invalidateQueries({ queryKey: ['blocked'] });
-      qc.invalidateQueries({ queryKey: ['user', user._id] });
-      qc.invalidateQueries({ queryKey: ['feed'] });
-      qc.invalidateQueries({ queryKey: ['search'] });
-    },
-    onError: (e, _user, previous) => {
-      if (previous) qc.setQueryData(['blocked'], previous);
+    onSuccess: () => toast.success('Unblocked'),
+    onError: (e, _id, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['blocked-users'], ctx.previous);
       toast.error(errMsg(e, 'Could not unblock this account.'));
     },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['blocked-users'] }),
   });
 
   return (
-    <SettingsCard
-      id="blocked"
-      title="Blocked accounts"
-      description="People you have blocked cannot see your profile or message you, and you will not see them. Unblocking does not restore a follow or friendship."
-      padded={false}
-    >
-      {blocked.isLoading ? (
-        <div className="space-y-1 px-2 pb-2" aria-busy="true">
-          <SkeletonRow />
-          <SkeletonRow />
+    <SettingsCard id="privacy" title="Privacy" description="Who can see what you share and who cannot reach you at all.">
+      <ToggleRow
+        title="Private account"
+        hint={isPrivate ? 'Only followers you approve can see your posts, workouts and meals.' : 'Anyone on Vybe can see your posts, workouts and meals.'}
+        checked={isPrivate}
+        disabled={savePrivacy.isPending || !meQuery.data}
+        onChange={(checked) => savePrivacy.mutate(checked ? 'private' : 'public')}
+      />
+      <div className="mt-2 border-t border-line pt-4">
+        <h3 className="text-sm font-semibold text-text-1">Blocked accounts</h3>
+        <p className="text-xs text-text-2">Blocked accounts cannot follow, message or find you. You can unblock them here.</p>
+        <div className="mt-3">
+          {blockedQuery.isLoading ? (
+            <RowsSkeleton rows={2} />
+          ) : blockedQuery.isError ? (
+            <ErrorState title="Could not load blocked accounts" error={blockedQuery.error} retry={() => void blockedQuery.refetch()} />
+          ) : blockedQuery.data && blockedQuery.data.length > 0 ? (
+            <ul className="divide-y divide-line" aria-label="Blocked accounts">
+              {blockedQuery.data.map((u) => (
+                <li key={u._id} className="flex min-h-14 items-center gap-3 py-2">
+                  <Avatar src={u.avatar} name={displayName(u as PublicUser)} size="md" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-text-1">{displayName(u as PublicUser)}</span>
+                    <span className="block truncate text-xs text-text-2">@{u.username}</span>
+                  </span>
+                  <Button variant="secondary" size="sm" disabled={unblock.isPending} onClick={() => unblock.mutate(u._id)} aria-label={`Unblock ${displayName(u as PublicUser)}`}>
+                    Unblock
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-sm bg-surface-2 px-3 py-3 text-sm text-text-2">You haven’t blocked anyone. Block someone from the menu on their profile.</p>
+          )}
         </div>
-      ) : blocked.isError ? (
-        <ErrorState title="Blocked accounts unavailable" error={blocked.error} retry={() => void blocked.refetch()} className="py-6" />
-      ) : !blocked.data?.length ? (
-        <p className="px-3 pb-3 text-sm text-text-2">You haven’t blocked anyone. Block someone from the ⋯ menu on their profile.</p>
-      ) : (
-        <ul className="divide-y divide-line" aria-label="Blocked accounts">
-          {blocked.data.map((u) => (
-            <li key={u._id} className="flex min-h-16 items-center gap-3 px-3 py-2.5 sm:px-4">
-              <Avatar src={u.avatar} name={displayName(u)} size={44} />
-              <div className="min-w-0 flex-1">
-                <p className={cx(ROW_LINK, 'hover:no-underline')}>{displayName(u)}</p>
-                <p className="truncate text-xs text-text-2">@{u.username}</p>
-              </div>
-              <Button
-                variant="secondary"
-                loading={unblock.isPending && unblock.variables?._id === u._id}
-                disabled={unblock.isPending}
-                onClick={() => unblock.mutate(u)}
-                aria-label={`Unblock ${displayName(u)}`}
-              >
-                Unblock
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
+      </div>
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ sessions */
+
+/**
+ * "Sign out" at the top of the page ends this device only (POST /auth/logout
+ * revokes the presenting session). Ending every session is a different,
+ * deliberate action, so it lives here behind a confirmation.
+ */
+function SessionsSection() {
+  const logoutEverywhere = useAuth((s) => s.logoutEverywhere);
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <SettingsCard id="sessions" title="Devices" description="Signing out from the top of this page only signs out this device.">
+      <div className="flex min-h-11 flex-wrap items-center gap-4 py-2">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2">
+          <Monitor size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-text-1">Sign out of all devices</p>
+          <p className="text-xs text-text-2">Ends every session on every phone, tablet and computer, including this one. Use it if you left yourself signed in somewhere.</p>
+        </div>
+        <Button variant="secondary" icon={<Lock size={18} />} onClick={() => setConfirming(true)}>
+          Sign out everywhere
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirming}
+        title="Sign out of all devices?"
+        message="Every device signed in to your account will be signed out, including this one. You can sign back in straight away."
+        confirmLabel="Sign out everywhere"
+        cancelLabel="Keep me signed in"
+        destructive
+        onConfirm={() => logoutEverywhere()}
+        onCancel={() => setConfirming(false)}
+      />
     </SettingsCard>
   );
 }
@@ -1135,14 +1138,14 @@ export default function Settings() {
       />
       <div className="w-full max-w-form space-y-4">
         <AccountSection />
-        <PrivacySection />
-        <CoachingSection />
         <AppearanceSection />
         <UnitsSection />
+        <PrivacySection />
+        <CoachingSection />
         <PasswordSection />
+        <SessionsSection />
         <NotificationsSection />
         <EmailPreferencesSection />
-        <BlockedAccountsSection />
         <AboutSection />
         <DangerZone />
       </div>

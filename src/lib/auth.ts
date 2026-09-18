@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import { AxiosError } from 'axios';
-import { api, tokenStore, adminApi, revokeSession } from './api';
+import type { AxiosError } from 'axios';
+import { api, tokenStore, adminApi, revokeSession, signOutReason } from './api';
 import { disposeSocket } from './socket';
 
 /**
@@ -36,6 +36,12 @@ export type LoginOptions = {
 type AuthState = {
   user: User | null;
   loading: boolean;
+  /**
+   * The session could not be verified with the API (offline, or the API is
+   * down) and `user` was restored from the local snapshot. The shell paints and
+   * says so; bootstrap runs again when the connection returns.
+   */
+  sessionStale: boolean;
   admin: any | null;
   adminLoading: boolean;
   bootstrap: () => Promise<void>;
@@ -49,9 +55,11 @@ type AuthState = {
    * Throttled so a page full of avatars failing at once costs one request.
    */
   refreshUser: (options?: { force?: boolean }) => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
   adminLogin: (email: string, password: string) => Promise<void>;
+  /** End this device's session only. */
   logout: () => void;
+  /** End every session on every device (POST /auth/logout-all), then this one. */
+  logoutEverywhere: () => void;
   adminLogout: () => void;
   /** Drop the local admin session only; used when the API has already revoked it. */
   forgetAdminSession: () => void;
@@ -61,27 +69,50 @@ const USER_REFRESH_THROTTLE_MS = 30_000;
 let lastUserRefreshAt = 0;
 let userRefreshInFlight: Promise<void> | null = null;
 
+/** A 401/403 means the session itself is bad; anything else is the network or the server. */
+const isSessionRejected = (error: unknown): boolean => {
+  const status = (error as AxiosError | undefined)?.response?.status;
+  return status === 401 || status === 403;
+};
+
+/** Identity-only snapshot so an offline reload can paint the shell. */
+const rememberSnapshot = (u: User | null) => {
+  if (u && u._id && u.username) tokenStore.setUser({ _id: u._id, username: u.username, fullName: u.fullName, avatar: u.avatar });
+};
+
 export const useAuth = create<AuthState>((set, get) => ({
   user: null,
   loading: true,
+  sessionStale: false,
   admin: null,
   adminLoading: true,
 
   bootstrap: async () => {
-    if (!tokenStore.get()) return set({ user: null, loading: false });
+    if (!tokenStore.get()) return set({ user: null, loading: false, sessionStale: false });
     try {
       const { data } = await api.get('/users/me');
       lastUserRefreshAt = Date.now();
-      set({ user: data.user || data, loading: false });
-    } catch (e) {
+      const user = (data.user || data) as User;
+      rememberSnapshot(user);
+      set({ user, loading: false, sessionStale: false });
+    } catch (error) {
       // Only an answer from the API can end the session. A 401 has already
       // been handled by the interceptor (token cleared, hand-off to /login
-      // with the path preserved); a 403 means unverified or suspended. A
-      // network failure keeps the token so a reload with connectivity back
-      // signs the person straight in instead of logging them out.
-      const status = (e as AxiosError)?.response?.status;
-      if (status === 401 || status === 403) tokenStore.clear();
-      set({ user: null, loading: false });
+      // with the path preserved); a 403 means unverified or suspended.
+      if (isSessionRejected(error)) {
+        tokenStore.clear();
+        return set({ user: null, loading: false, sessionStale: false });
+      }
+      // Offline, or the API is unreachable: this is not a sign-in problem, so
+      // the token stays and the shell paints from the snapshot; a reload with
+      // connectivity back signs the person straight in.
+      const snapshot = tokenStore.getUser();
+      const current = get().user;
+      set({
+        user: current ?? (snapshot ? (snapshot as User) : null),
+        loading: false,
+        sessionStale: true,
+      });
     }
   },
 
@@ -115,14 +146,18 @@ export const useAuth = create<AuthState>((set, get) => ({
     }
   },
 
-  setUser: (u) => set({ user: u }),
+  setUser: (u) => {
+    rememberSnapshot(u);
+    set({ user: u });
+  },
 
   login: async (email, password, { remember = true }: LoginOptions = {}) => {
     // remember:false asks the API for a one-day token and keeps it in
     // sessionStorage, so closing the tab on a shared computer ends the session.
     const { data } = await api.post('/auth/login', { email, password, remember });
     tokenStore.set(data.token, remember ? 'local' : 'session');
-    set({ user: data.user, loading: false });
+    rememberSnapshot(data.user);
+    set({ user: data.user, loading: false, sessionStale: false });
   },
 
   adminLogin: async (email, password) => {
@@ -147,8 +182,8 @@ export const useAuth = create<AuthState>((set, get) => ({
     // Revoke on the server before forgetting the token locally. Sessions are
     // long-lived bearer tokens; clearing localStorage alone left a valid
     // 30-day token alive in whatever browser issued it. POST /auth/logout
-    // bumps the account's tokenVersion, which the API checks on every
-    // request, so every outstanding token dies -- not only this tab's.
+    // revokes this token's own session id, so only this device signs out;
+    // other devices keep working (logoutEverywhere is the wide version).
     // Best-effort and fire-and-forget: signing out must never be blocked by
     // the network, and a failed revocation still leaves the user signed out
     // locally, which is the pre-existing behaviour. revokeSession() carries
@@ -158,7 +193,16 @@ export const useAuth = create<AuthState>((set, get) => ({
     // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
     tokenStore.clear();
-    set({ user: null });
+    set({ user: null, sessionStale: false });
+    location.href = '/login';
+  },
+
+  logoutEverywhere: () => {
+    revokeSession('/auth/logout-all', tokenStore.get());
+    disposeSocket();
+    tokenStore.clear();
+    set({ user: null, sessionStale: false });
+    signOutReason.set('signed-out-all');
     location.href = '/login';
   },
 
