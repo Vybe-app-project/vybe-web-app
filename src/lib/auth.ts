@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { create } from 'zustand';
 import { api, tokenStore, adminApi, revokeSession } from './api';
 import { disposeSocket } from './socket';
@@ -31,6 +32,13 @@ type AuthState = {
   bootstrap: () => Promise<void>;
   bootstrapAdmin: () => Promise<void>;
   setUser: (u: User | null) => void;
+  /**
+   * Re-read the session user from the API. The stored user carries signed
+   * media URLs (avatar, cover) that expire after a while; components mounting
+   * later with the stale copy would show initials instead of the photo.
+   * Throttled so a page full of avatars failing at once costs one request.
+   */
+  refreshUser: (options?: { force?: boolean }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   adminLogin: (email: string, password: string) => Promise<void>;
   logout: () => void;
@@ -39,7 +47,11 @@ type AuthState = {
   forgetAdminSession: () => void;
 };
 
-export const useAuth = create<AuthState>((set) => ({
+const USER_REFRESH_THROTTLE_MS = 30_000;
+let lastUserRefreshAt = 0;
+let userRefreshInFlight: Promise<void> | null = null;
+
+export const useAuth = create<AuthState>((set, get) => ({
   user: null,
   loading: true,
   admin: null,
@@ -49,11 +61,31 @@ export const useAuth = create<AuthState>((set) => ({
     if (!tokenStore.get()) return set({ user: null, loading: false });
     try {
       const { data } = await api.get('/users/me');
+      lastUserRefreshAt = Date.now();
       set({ user: data.user || data, loading: false });
     } catch {
       tokenStore.clear();
       set({ user: null, loading: false });
     }
+  },
+
+  refreshUser: async ({ force = false } = {}) => {
+    if (!tokenStore.get() || !get().user) return;
+    if (userRefreshInFlight) return userRefreshInFlight;
+    if (!force && Date.now() - lastUserRefreshAt < USER_REFRESH_THROTTLE_MS) return;
+    userRefreshInFlight = (async () => {
+      try {
+        const { data } = await api.get('/users/me');
+        lastUserRefreshAt = Date.now();
+        set({ user: data.user || data });
+      } catch {
+        // A 401 is handled by the API interceptor; anything else keeps the
+        // current copy, which is still the best information we have.
+      } finally {
+        userRefreshInFlight = null;
+      }
+    })();
+    return userRefreshInFlight;
   },
 
   bootstrapAdmin: async () => {
@@ -131,3 +163,41 @@ export const useAuth = create<AuthState>((set) => ({
     set({ admin: null, adminLoading: false });
   },
 }));
+
+/** How long a tab may sit hidden before its session user counts as stale. */
+export const SESSION_STALE_AFTER_MS = 10 * 60 * 1000;
+
+/**
+ * Keep the session user fresh while the app is open: on returning to the tab
+ * after a long absence and on a slow interval while it stays visible. Signed
+ * media URLs in the stored user expire after roughly fifteen minutes, so a
+ * tab left alone came back with an avatar that 403'd into initials.
+ */
+export function useSessionRefresh(onStale?: () => void) {
+  const refreshUser = useAuth((s) => s.refreshUser);
+  const signedIn = useAuth((s) => !!s.user);
+  useEffect(() => {
+    if (!signedIn) return;
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = null;
+      if (away >= SESSION_STALE_AFTER_MS) {
+        void refreshUser({ force: true });
+        onStale?.();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshUser({ force: true });
+    }, SESSION_STALE_AFTER_MS);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearInterval(interval);
+    };
+  }, [signedIn, refreshUser, onStale]);
+}
