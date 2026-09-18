@@ -1692,6 +1692,7 @@ export function useFocusTrap(active: boolean, ref: RefObject<HTMLElement | null>
     const previous = document.activeElement as HTMLElement | null;
     const focusables = () => Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement);
     const t = setTimeout(() => {
+      if (root.contains(document.activeElement)) return;
       const target = initialFocus?.current || focusables().find((el) => !el.hasAttribute('data-autofocus-skip')) || root;
       target.focus({ preventScroll: true });
     }, 10);

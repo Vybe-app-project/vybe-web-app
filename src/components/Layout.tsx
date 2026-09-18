@@ -1013,12 +1013,12 @@ export function DefaultRail() {
 const TAB_ROOT_PATHS = TABS.map((t) => t.to);
 
 export default function Layout({ children }: { children?: ReactNode }) {
+  const sessionStale = useAuth((s) => s.sessionStale);
   const { pathname } = useLocation();
   const meta = useMemo(() => routeMeta(pathname), [pathname]);
   const storedChrome = usePageChromeStore((s) => s.chrome);
-  const chrome = storedChrome && storedChrome.path === pathname ? storedChrome : null;
+  const chrome = !sessionStale && storedChrome && storedChrome.path === pathname ? storedChrome : null;
   const { user } = useAuth();
-  const sessionStale = useAuth((s) => s.sessionStale);
   const qc = useQueryClient();
 
   // Route-change feedback: the destination a nav control was activated for,
@@ -1054,12 +1054,12 @@ export default function Layout({ children }: { children?: ReactNode }) {
   const capabilities = useCapabilities();
   const liveEnabled = liveVideoEnabled(capabilities.data);
 
-  const unreadChats = useUnreadChats(!!user);
-  const unreadNotifs = useUnreadNotifications(!!user);
-  useRealtimeSync(!!user, user?._id);
+  const unreadChats = useUnreadChats(!!user && !sessionStale);
+  const unreadNotifs = useUnreadNotifications(!!user && !sessionStale);
+  useRealtimeSync(!!user && !sessionStale, user?._id);
   // Open the shared socket for the whole session so likes, comments and
   // follows land in the inbox and on the bell as they happen.
-  useLiveNotifications(!!user);
+  useLiveNotifications(!!user && !sessionStale);
   // When a session restored from the offline snapshot is verified again, every
   // query that failed while the API was unreachable is retried at once rather
   // than on its next poll, so the shell fills back in without a "Try again".
@@ -1067,9 +1067,9 @@ export default function Layout({ children }: { children?: ReactNode }) {
     if (sessionStale) return;
     void qc.invalidateQueries({ predicate: (query) => query.state.status === 'error' });
   }, [sessionStale, qc]);
-  const chats = badgeText(unreadChats.data);
-  const notifications = badgeText(unreadNotifs.data?.count, unreadNotifs.data?.more);
-  const homeTotal = (unreadChats.data ?? 0) + (unreadNotifs.data?.count ?? 0);
+  const chats = sessionStale ? null : badgeText(unreadChats.data);
+  const notifications = sessionStale ? null : badgeText(unreadNotifs.data?.count, unreadNotifs.data?.more);
+  const homeTotal = sessionStale ? 0 : (unreadChats.data ?? 0) + (unreadNotifs.data?.count ?? 0);
   const homeBadge = badgeText(homeTotal, unreadNotifs.data?.more);
 
   const title = shellChrome?.title || shellMeta.title;
@@ -1078,7 +1078,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
   }, [title, shellPath]);
 
   const hub = shellMeta.hub && !shellMeta.hideTabs && !shellChrome?.hideSectionTabs ? shellMeta.hub : null;
-  const rail: ReactNode = shellChrome && 'rail' in shellChrome && shellChrome.rail !== undefined ? shellChrome.rail : shellMeta.rail ? <DefaultRail /> : null;
+  const rail: ReactNode = sessionStale ? null : shellChrome && 'rail' in shellChrome && shellChrome.rail !== undefined ? shellChrome.rail : shellMeta.rail ? <DefaultRail /> : null;
   const feedWidth = !!rail && !shellChrome?.wide;
 
   return (
@@ -1114,7 +1114,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
       </div>
 
       {!shellChrome?.hideBottomNav ? <BottomNav meta={navMeta} homeBadge={homeBadge} /> : null}
-      <LogSheet />
+      {!sessionStale ? <LogSheet /> : null}
     </div>
   );
 }

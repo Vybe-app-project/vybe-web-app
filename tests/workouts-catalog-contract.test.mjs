@@ -39,7 +39,8 @@ test('exercise durations are seconds on screen and in the editor', () => {
   assert.doesNotMatch(workouts, /label="Minutes"/);
   assert.match(detail, /secondsParts\(ex\.duration\)/);
   assert.doesNotMatch(detail, /formatStat\(ex\.duration\), 'min'/);
-  assert.match(logs, /formatSeconds\(ex\.duration\)/);
+  assert.match(logs, /formatSeconds\(ex\.duration \* 60\)/, 'private logs retain their historical minute entry/storage unit');
+  assert.match(logs, /duration: e\.duration == null \? undefined : e\.duration \/ 60/, 'catalog seconds convert only when seeding a private log');
   assert.doesNotMatch(logs, /\$\{formatStat\(ex\.duration\)\} min/);
 });
 

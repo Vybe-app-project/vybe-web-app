@@ -70,7 +70,7 @@ test('shared post links open signed out with a public preview and a sign-in CTA'
   assert.ok(publicRoute < guardedTree, '/p/:postId must be declared outside RequireAuth');
   assert.doesNotMatch(app, /path="p\/:postId"/, 'the old guarded post route must be gone');
   assert.match(app, /import\('\.\/pages\/PublicPost'\)/);
-  assert.match(app, /if \(user\) \{\s*return \(\s*<Layout>\s*<PostDetail \/>\s*<\/Layout>/s);
+  assert.match(app, /if \(user && verifiedToken\) \{\s*return \(\s*<Layout>\s*<PostDetail \/>\s*<\/Layout>/s);
 
   const page = read('src/pages/PublicPost.tsx');
   assert.match(page, /api\.get\(`\/public\/posts\/\$\{postId\}`\)/);

@@ -69,7 +69,7 @@ test('the staff console exposes password recovery without a session', () => {
 
 test('the production client defaults to same-origin API routing', () => {
   const api = read('src/lib/api.ts');
-  assert.match(api, /import\.meta\.env\.VITE_API_BASE/);
+  assert.match(api, /import\.meta\.env\??\.VITE_API_BASE/);
   assert.match(api, /\|\| '\/api'/);
   assert.match(api, /timeout:\s*30000/);
 });
@@ -100,7 +100,7 @@ test('admin sessions are tab-scoped and legacy paths still resolve', () => {
   // The admin console shares the consumer origin; its token must not persist
   // past the tab (item 14 of the post-rebuild audit).
   assert.match(api, /getAdmin: \(\) => sessionStorage\.getItem\(ADMIN_TOKEN_KEY\)/);
-  assert.match(api, /setAdmin: \(t: string\) => sessionStorage\.setItem\(ADMIN_TOKEN_KEY, t\)/);
+  assert.match(api, /setAdmin: \(t: string\) => \{ sessionStorage\.setItem\(ADMIN_TOKEN_KEY, t\)/);
   assert.doesNotMatch(api, /localStorage\.setItem\(ADMIN_TOKEN_KEY/);
   // Sign-out must revoke on the server: the request has to carry the token
   // explicitly and survive the navigation that follows (fetch keepalive).
@@ -202,6 +202,31 @@ test('the Gyms places search asks the API for fitness places only', () => {
   // Without kind=gym the OpenStreetMap fallback offers any named place
   // (farms, helipads, cafés) as a gym to join.
   assert.match(gyms, /api\.get\('\/gyms\/place-search',\s*\{\s*params:\s*\{[^}]*kind:\s*'gym'/s);
+});
+
+test('capability-gated features share one hook and one honest disabled state', () => {
+  // The shared hook reads the same report the livestream page does, so every
+  // gated page shares one cached query; unreported keys stay disabled.
+  const hook = read('src/lib/capabilities.ts');
+  assert.match(hook, /queryKey: \['capabilities'\]/);
+  assert.match(hook, /api\.get\('\/capabilities'\)/);
+  assert.match(hook, /staleTime: 5 \* 60 \* 1000/);
+  assert.match(hook, /export function useCapabilities\(\)/);
+  assert.match(hook, /export function useCapability\(/);
+  assert.match(hook, /export function capabilityEnabled\(/);
+  for (const key of ['wearables', 'smartInsights', 'aiCoach']) {
+    assert.match(hook, new RegExp(`\\b${key}: false`), `${key} must default to false`);
+  }
+  // Strict read: only an explicit `true` from the server enables a feature.
+  assert.match(hook, /\?\.(\[key\]|\[k\])[^;]*=== true/s);
+  assert.match(hook, /DEFAULT_CAPABILITIES/);
+  // The disabled state keeps the livestream page's honest framing: a server
+  // setting, never the user's device. Pages pass the feature sentence; the
+  // component appends the shared tail.
+  const disabled = read('src/components/CapabilityDisabled.tsx');
+  assert.match(disabled, /export function CapabilityDisabled\(/);
+  assert.match(disabled, /not something on your device, and the rest of the app is unaffected/);
+  assert.match(disabled, /bg-brand-soft text-brand-text/);
 });
 
 test('OVH release scripts require clean immutable commit artifacts', () => {
@@ -336,8 +361,8 @@ test('search: every API bucket renders, the typeahead is keyboard-navigable and 
   assert.match(css, /input\[type='search'\]::-webkit-search-cancel-button,\s*input\[type='search'\]::-webkit-search-decoration \{[^}]*display: none;/);
 
   // 4xx answers are final: no retry (the skeleton no longer lingers 3 s on a 400).
-  const main = read('src/main.tsx');
-  assert.match(main, /if \(typeof s === 'number' && s < 500\) return false;/);
+  const main = read('src/lib/queryClient.ts');
+  assert.match(main, /if \(typeof status === 'number' && status < 500\) return false;/);
   assert.doesNotMatch(main, /s === 401 \|\| s === 403 \|\| s === 404/);
 });
 
@@ -433,7 +458,7 @@ test('an offline reload keeps the session and paints the shell', () => {
   const api = read('src/lib/api.ts');
   assert.match(api, /USER_SNAPSHOT_KEY/);
   // The snapshot holds identity only.
-  assert.match(api, /JSON\.stringify\(\{ _id: u\._id, username: u\.username, fullName: u\.fullName, avatar: u\.avatar \}/);
+  assert.match(api, /sessionHash, user: \{ _id: u\._id, username: u\.username, fullName: u\.fullName, avatar: u\.avatar \}/);
   const app = read('src/App.tsx');
   assert.match(app, /window\.addEventListener\('online', retry\)/, 'bootstrap must re-run when the connection returns');
   assert.match(read('src/components/Layout.tsx'), /Can’t reach Vybe right now/);

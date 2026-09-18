@@ -230,13 +230,13 @@ test('drafts never hold a password and survive corrupt or unavailable storage', 
 test('an expired session hands off to /login with the page preserved, and both guards agree on the target', () => {
   const api = read('src/lib/api.ts');
   assert.match(api, /import \{ sessionExpiredLoginUrl \} from '\.\/authRedirect'/);
-  assert.match(api, /location\.href = sessionExpiredLoginUrl\(location\.pathname, location\.search\)/);
+  assert.match(api, /location\.href = sessionExpiredLoginUrl\(location\.pathname, location\.search \?\? ''\)/);
   assert.doesNotMatch(api, /location\.href = '\/login'/, 'the consumer 401 path must not drop the intended page');
   // Admin sessions keep their own, unchanged hand-off.
   assert.match(api, /location\.href = '\/admin\/login'/);
 
   const app = read('src/App.tsx');
-  assert.match(app, /import \{ postLoginTarget \} from '\.\/lib\/authRedirect'/);
+  assert.match(app, /import \{ postLoginTarget, sessionExpiredLoginUrl \} from '\.\/lib\/authRedirect'/);
   assert.match(app, /<Navigate to=\{postLoginTarget\(\{ from, next: params\.get\('next'\) \}\)\} replace \/>/);
   const login = read('src/pages/Login.tsx');
   assert.match(login, /postLoginTarget\(\{ from: state\?\.from, next: params\.get\('next'\) \}\)/);
@@ -246,7 +246,7 @@ test('an expired session hands off to /login with the page preserved, and both g
 
   // Bootstrap only ends a session on an auth answer, never on a network blip.
   const auth = read('src/lib/auth.ts');
-  assert.match(auth, /if \(isSessionRejected\(error\)\) \{\s*tokenStore\.clear\(\);/);
+  assert.match(auth, /if \(isSessionRejected\(error\)\) \{\s*tokenStore\.clear\(true\);/);
 });
 
 test('"Keep me signed in" is on by default and, when off, the token lives in the tab only', () => {
@@ -256,10 +256,11 @@ test('"Keep me signed in" is on by default and, when off, the token lives in the
   assert.match(login, /login\(trimmed, password, \{ remember \}\)/);
   const auth = read('src/lib/auth.ts');
   assert.match(auth, /api\.post\('\/auth\/login', \{ email, password, remember \}\)/);
-  assert.match(auth, /tokenStore\.set\(data\.token, remember \? 'local' : 'session'\)/);
+  assert.match(auth, /tokenStore\.set\(token, remember \? 'local' : 'session'\)/);
   const api = read('src/lib/api.ts');
   assert.match(api, /set: \(t: string, persistence: SessionPersistence = 'local'\)/);
-  assert.match(api, /readStorage\(localStorage, TOKEN_KEY\) \?\? readStorage\(sessionStorage, TOKEN_KEY\)/);
+  assert.match(api, /get: readConsumerToken/);
+  assert.match(read('src/lib/consumerSession.ts'), /for \(const persistence of \['local', 'session'\]/);
   // Admin tokens are untouched by this (the admin contract test pins them too).
   assert.match(api, /getAdmin: \(\) => sessionStorage\.getItem\(ADMIN_TOKEN_KEY\)/);
 });
@@ -337,7 +338,7 @@ test('sign-up names the field in a 409, checks availability while typing, persis
   // First run: the welcome marker is set before the store update (GuestOnly's
   // redirect fires the moment the store has a user), then the shared target rule lands the person.
   const created = register.slice(register.indexOf("throw new Error('Registration did not return a session token.')"));
-  assert.ok(created.indexOf('markWelcomePending(sessionStorage)') < created.indexOf('setUser(data.user)'), 'marker must precede setUser');
+  assert.ok(created.indexOf('markWelcomePending(sessionStorage)') < created.indexOf('acceptSession(data.user, data.token)'), 'marker must precede accepting the verified registration response');
   assert.match(created, /navigate\(target, \{ replace: true \}\)/);
   assert.doesNotMatch(register, /welcome=1/, 'sign-up must not depend on a URL param GuestOnly can drop');
   // Step handlers validate into field errors, not just the top callout.

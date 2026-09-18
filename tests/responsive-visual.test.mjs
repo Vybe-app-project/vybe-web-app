@@ -387,8 +387,9 @@ test('the stories tray shows one tile for the viewer, with the "+" as its own co
 test('a revoked session lands on sign-in with a reason and a way back', async () => {
   const api = read('src/lib/api.ts');
   assert.match(api, /import \{ sessionExpiredLoginUrl \} from '\.\/authRedirect';/);
-  assert.match(api, /const hadSession = !!tokenStore\.get\(\);\s+tokenStore\.clear\(\);/, 'remember whether there was a session before clearing it');
-  assert.match(api, /location\.href = sessionExpiredLoginUrl\(location\.pathname, location\.search\)/);
+  assert.match(api, /if \(!current \|\| authorization !==/, 'only the matching active credential can be rejected');
+  assert.match(api, /signOutReason\.set\('session-ended'\);\s+tokenStore\.clear\(true\);/, 'record the reason before clearing the matching session');
+  assert.match(api, /location\.href = sessionExpiredLoginUrl\(location\.pathname, location\.search \?\? ''\)/);
   const login = read('src/pages/Login.tsx');
   assert.match(login, /loginNoticeFor\(params\)/);
   assert.match(login, /title="Signed out on this device"/);

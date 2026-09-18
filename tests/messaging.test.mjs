@@ -286,7 +286,7 @@ test('the shell keeps the unread badge live on every page and renders the rich t
     assert.match(layout, new RegExp(`socket\\.on\\('${event}'`), `Layout must listen for ${event}`);
   }
   assert.match(layout, /qc\.invalidateQueries\(\{ queryKey: \['unreadChats'\] \}\)/);
-  assert.match(layout, /useRealtimeSync\(!!user, user\?\._id\)/);
+  assert.match(layout, /useRealtimeSync\(!!user && !sessionStale, user\?\._id\)/);
   assert.match(layout, /\{titleNode \?\? title\}/);
   assert.match(read('src/components/ui.tsx'), /titleNode\?: ReactNode;/);
   assert.match(read('src/pages/Messages.tsx'), /usePageChrome\(\{ title, titleNode, back: true, actions, hideBottomNav: true, hideSectionTabs: true \}\)/);

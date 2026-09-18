@@ -1,13 +1,10 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import type { AxiosError } from 'axios';
-import { api, tokenStore, adminApi, revokeSession, signOutReason } from './api';
+import { api, tokenStore, adminApi, revokeSession, signOutReason, isSessionRejected } from './api';
+import { onSessionChange, sessionEpoch, verifyConsumerToken } from './consumerSession';
 import { disposeSocket } from './socket';
+import { purgeRevokedWorkoutDrafts } from './workoutDrafts';
 
-/**
- * Field names follow the backend `User` model: the photo is `avatar`
- * (there is no `profilePicture` virtual), the cover is `coverPicture`.
- */
 export type User = {
   _id: string;
   username: string;
@@ -16,9 +13,8 @@ export type User = {
   avatar?: string;
   coverPicture?: string;
   bio?: string;
-  /** Auth policy only (email or provider identity proven); never a badge. */
+  /** Auth policy only; the staff-granted public badge is isIdentityVerified. */
   isVerified?: boolean;
-  /** Staff-granted public "Verified" check. */
   isIdentityVerified?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
@@ -27,220 +23,213 @@ export type User = {
   followingCount?: number;
   [k: string]: any;
 };
-
-export type LoginOptions = {
-  /** false = a one-day, tab-scoped session for a shared computer. Default true. */
-  remember?: boolean;
-};
-
+export type LoginOptions = { remember?: boolean };
 type AuthState = {
   user: User | null;
+  verifiedToken: string | null;
   loading: boolean;
-  /**
-   * The session could not be verified with the API (offline, or the API is
-   * down) and `user` was restored from the local snapshot. The shell paints and
-   * says so; bootstrap runs again when the connection returns.
-   */
+  bootstrapError: string | null;
   sessionStale: boolean;
+  sessionRejected: boolean;
   admin: any | null;
   adminLoading: boolean;
-  bootstrap: () => Promise<void>;
+  adminBootstrapError: string | null;
+  bootstrap: (options?: { preserveVerified?: boolean }) => Promise<void>;
   bootstrapAdmin: () => Promise<void>;
+  refreshUser: (options?: { force?: boolean }) => Promise<void>;
   setUser: (u: User | null) => void;
   login: (email: string, password: string, options?: LoginOptions) => Promise<void>;
-  /**
-   * Re-read the session user from the API. The stored user carries signed
-   * media URLs (avatar, cover) that expire after a while; components mounting
-   * later with the stale copy would show initials instead of the photo.
-   * Throttled so a page full of avatars failing at once costs one request.
-   */
-  refreshUser: (options?: { force?: boolean }) => Promise<void>;
+  acceptSession: (user: User, token: string, options?: LoginOptions) => Promise<void>;
   adminLogin: (email: string, password: string) => Promise<void>;
-  /** End this device's session only. */
   logout: () => void;
-  /** End every session on every device (POST /auth/logout-all), then this one. */
   logoutEverywhere: () => void;
   adminLogout: () => void;
-  /** Drop the local admin session only; used when the API has already revoked it. */
   forgetAdminSession: () => void;
 };
-
+const hasIdentity = (value: unknown): value is { _id: string } =>
+  typeof value === 'object' && value !== null && '_id' in value && typeof value._id === 'string' && !!value._id;
+const isUser = (value: unknown): value is User =>
+  hasIdentity(value) && 'username' in value && typeof value.username === 'string';
+type Check = { token: string; epoch: number; promise: Promise<void> };
+let userCheck: Check | null = null;
+let adminCheck: Check | null = null;
+let loginAttempt = 0;
+let adminLoginAttempt = 0;
+let refreshed: { token: string; epoch: number; at: number } | null = null;
 const USER_REFRESH_THROTTLE_MS = 30_000;
-let lastUserRefreshAt = 0;
-let userRefreshInFlight: Promise<void> | null = null;
-
-/** A 401/403 means the session itself is bad; anything else is the network or the server. */
-const isSessionRejected = (error: unknown): boolean => {
-  const status = (error as AxiosError | undefined)?.response?.status;
-  return status === 401 || status === 403;
-};
-
-/** Identity-only snapshot so an offline reload can paint the shell. */
-const rememberSnapshot = (u: User | null) => {
-  if (u && u._id && u.username) tokenStore.setUser({ _id: u._id, username: u.username, fullName: u.fullName, avatar: u.avatar });
-};
+const recoveryMessage = 'Your saved sign-in is still on this device. Check your connection and try again.';
 
 export const useAuth = create<AuthState>((set, get) => ({
-  user: null,
-  loading: true,
-  sessionStale: false,
-  admin: null,
-  adminLoading: true,
+  user: null, verifiedToken: null, loading: true, bootstrapError: null,
+  sessionStale: false, sessionRejected: false,
+  admin: null, adminLoading: true, adminBootstrapError: null,
 
-  bootstrap: async () => {
-    if (!tokenStore.get()) return set({ user: null, loading: false, sessionStale: false });
-    try {
-      const { data } = await api.get('/users/me');
-      lastUserRefreshAt = Date.now();
-      const user = (data.user || data) as User;
-      rememberSnapshot(user);
-      set({ user, loading: false, sessionStale: false });
-    } catch (error) {
-      // Only an answer from the API can end the session. A 401 has already
-      // been handled by the interceptor (token cleared, hand-off to /login
-      // with the path preserved); a 403 means unverified or suspended.
-      if (isSessionRejected(error)) {
-        tokenStore.clear();
-        return set({ user: null, loading: false, sessionStale: false });
-      }
-      // Offline, or the API is unreachable: this is not a sign-in problem, so
-      // the token stays and the shell paints from the snapshot; a reload with
-      // connectivity back signs the person straight in.
-      const snapshot = tokenStore.getUser();
-      const current = get().user;
-      set({
-        user: current ?? (snapshot ? (snapshot as User) : null),
-        loading: false,
-        sessionStale: true,
+  bootstrap: ({ preserveVerified = false } = {}) => {
+    const token = tokenStore.get();
+    const epoch = sessionEpoch();
+    if (!token) {
+      verifyConsumerToken(null);
+      set({ user: null, verifiedToken: null, loading: true, bootstrapError: null, sessionStale: false });
+      return purgeRevokedWorkoutDrafts().then(() => {
+        if (sessionEpoch() === epoch && !tokenStore.get()) set({ loading: false });
       });
     }
+    if (userCheck?.token === token && userCheck.epoch === epoch) return userCheck.promise;
+    const ownsCheck = () => tokenStore.get() === token && sessionEpoch() === epoch;
+    if (get().verifiedToken !== token) set({ user: null, verifiedToken: null, loading: true, bootstrapError: null });
+    const promise = (async () => {
+      try {
+        const { data } = await api.get('/users/me', { sessionVerification: true });
+        if (!ownsCheck()) return;
+        const user: unknown = data?.user ?? data;
+        if (!isUser(user)) throw new Error('Session response has no user identity.');
+        // The same credential returning a different principal must not reuse private queries.
+        if (get().user && get().user!._id !== user._id) {
+          tokenStore.clear(true);
+          return;
+        }
+        verifyConsumerToken(token);
+        await tokenStore.setUser(user, token);
+        if (!ownsCheck()) return;
+        refreshed = { token, epoch, at: Date.now() };
+        set({ user, verifiedToken: token, loading: false, bootstrapError: null, sessionStale: false, sessionRejected: false });
+      } catch (error) {
+        if (!ownsCheck()) return;
+        if (isSessionRejected(error)) {
+          tokenStore.clear(true);
+          return;
+        }
+        // A refresh outage must not tear down an already-verified editor and
+        // lose input that a storage failure has left only in memory.
+        if (preserveVerified && get().verifiedToken === token) return;
+        verifyConsumerToken(null);
+        const snapshot = await tokenStore.getUser();
+        if (!ownsCheck()) return;
+        set({
+          user: snapshot, verifiedToken: null, loading: false, sessionStale: true,
+          bootstrapError: snapshot ? null : recoveryMessage,
+        });
+      }
+    })().finally(() => {
+      if (userCheck?.promise === promise) userCheck = null;
+    });
+    userCheck = { token, epoch, promise };
+    return promise;
   },
 
   refreshUser: async ({ force = false } = {}) => {
-    if (!tokenStore.get() || !get().user) return;
-    if (userRefreshInFlight) return userRefreshInFlight;
-    if (!force && Date.now() - lastUserRefreshAt < USER_REFRESH_THROTTLE_MS) return;
-    userRefreshInFlight = (async () => {
-      try {
-        const { data } = await api.get('/users/me');
-        lastUserRefreshAt = Date.now();
-        set({ user: data.user || data });
-      } catch {
-        // A 401 is handled by the API interceptor; anything else keeps the
-        // current copy, which is still the best information we have.
-      } finally {
-        userRefreshInFlight = null;
-      }
-    })();
-    return userRefreshInFlight;
+    const token = tokenStore.get();
+    if (!token || !get().user) return;
+    if (!force && refreshed?.token === token && refreshed.epoch === sessionEpoch()
+        && Date.now() - refreshed.at < USER_REFRESH_THROTTLE_MS) return;
+    await get().bootstrap({ preserveVerified: true });
   },
 
-  bootstrapAdmin: async () => {
-    if (!tokenStore.getAdmin()) return set({ admin: null, adminLoading: false });
-    try {
-      const { data } = await adminApi.get('/admins/me');
-      // GET /admins/me answers with the same envelope as login:
-      // { success, message, data: { admin } }. Reading `data.admin || data`
-      // stored the whole envelope, so after any page reload `admin.role` was
-      // undefined and a super admin saw the "Super admin only" callout on the
-      // Administrators page. Unwrap every shape the API has used.
-      const admin = data?.data?.admin ?? data?.admin ?? data;
-      set({ admin: admin && typeof admin === 'object' ? admin : null, adminLoading: false });
-    } catch {
-      tokenStore.clearAdmin();
-      set({ admin: null, adminLoading: false });
+  bootstrapAdmin: () => {
+    const token = tokenStore.getAdmin();
+    const epoch = sessionEpoch('admin');
+    if (!token) {
+      set({ admin: null, adminLoading: false, adminBootstrapError: null });
+      return Promise.resolve();
     }
+    if (adminCheck?.token === token && adminCheck.epoch === epoch) return adminCheck.promise;
+    const ownsCheck = () => tokenStore.getAdmin() === token && sessionEpoch('admin') === epoch;
+    set({ adminLoading: true, adminBootstrapError: null });
+    const promise = (async () => {
+      try {
+        const { data } = await adminApi.get('/admins/me', { sessionVerification: true });
+        if (!ownsCheck()) return;
+        const admin: unknown = data?.data?.admin ?? data?.admin ?? data;
+        if (!hasIdentity(admin)) throw new Error('Session response has no administrator identity.');
+        set({ admin, adminLoading: false, adminBootstrapError: null });
+      } catch {
+        if (!ownsCheck()) return;
+        set({ adminLoading: false, adminBootstrapError: 'Your administrator sign-in is still in this tab. Check your connection and try again.' });
+      }
+    })().finally(() => {
+      if (adminCheck?.promise === promise) adminCheck = null;
+    });
+    adminCheck = { token, epoch, promise };
+    return promise;
   },
 
-  setUser: (u) => {
-    rememberSnapshot(u);
-    set({ user: u });
+  setUser: (user) => {
+    if (!user) {
+      if (tokenStore.get()) return;
+      verifyConsumerToken(null);
+      set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
+      return;
+    }
+    if (get().verifiedToken !== tokenStore.get() || !get().verifiedToken || get().user?._id !== user._id) return;
+    void tokenStore.setUser(user, get().verifiedToken);
+    set({ user });
   },
 
   login: async (email, password, { remember = true }: LoginOptions = {}) => {
-    // remember:false asks the API for a one-day token and keeps it in
-    // sessionStorage, so closing the tab on a shared computer ends the session.
+    const attempt = ++loginAttempt;
+    const epoch = sessionEpoch();
     const { data } = await api.post('/auth/login', { email, password, remember });
-    tokenStore.set(data.token, remember ? 'local' : 'session');
-    rememberSnapshot(data.user);
-    set({ user: data.user, loading: false, sessionStale: false });
+    if (attempt !== loginAttempt || epoch !== sessionEpoch()) throw new Error('Your account changed. Sign in again to continue.');
+    await get().acceptSession(data.user, data.token, { remember });
+  },
+  acceptSession: async (user, token, { remember = true }: LoginOptions = {}) => {
+    if (typeof token !== 'string' || !token || !isUser(user)) throw new Error('Sign-in did not return a valid session.');
+    tokenStore.set(token, remember ? 'local' : 'session');
+    const newEpoch = sessionEpoch();
+    verifyConsumerToken(token);
+    await tokenStore.setUser(user, token);
+    if (newEpoch !== sessionEpoch() || tokenStore.get() !== token) return;
+    set({ user, verifiedToken: token, loading: false, bootstrapError: null, sessionStale: false, sessionRejected: false });
   },
 
   adminLogin: async (email, password) => {
+    const attempt = ++adminLoginAttempt;
+    const epoch = sessionEpoch('admin');
     const { data: body } = await adminApi.post('/admins/login', { email, password });
-    // POST /admins/login answers with an envelope -- { success, message,
-    // data: { admin, token } } -- unlike the consumer login, which returns
-    // { token, user } at the top level. This read `body.token`, which was
-    // always undefined, so it stored an undefined token and no administrator
-    // could ever sign in to the console. Accept both shapes and fail loudly
-    // rather than "succeeding" with no session.
+    if (attempt !== adminLoginAttempt || epoch !== sessionEpoch('admin')) throw new Error('Your administrator account changed.');
     const payload = body?.data && typeof body.data === 'object' ? body.data : body;
     const token: unknown = payload?.token;
     const admin = payload?.admin ?? payload?.user;
-    if (typeof token !== 'string' || !token || !admin) {
-      throw new Error(body?.message || 'Sign-in did not return an admin session.');
-    }
+    if (typeof token !== 'string' || !token || !hasIdentity(admin)) throw new Error(body?.message || 'Sign-in did not return an admin session.');
     tokenStore.setAdmin(token);
-    set({ admin, adminLoading: false });
+    set({ admin, adminLoading: false, adminBootstrapError: null });
   },
 
   logout: () => {
-    // Revoke on the server before forgetting the token locally. Sessions are
-    // long-lived bearer tokens; clearing localStorage alone left a valid
-    // 30-day token alive in whatever browser issued it. POST /auth/logout
-    // revokes this token's own session id, so only this device signs out;
-    // other devices keep working (logoutEverywhere is the wide version).
-    // Best-effort and fire-and-forget: signing out must never be blocked by
-    // the network, and a failed revocation still leaves the user signed out
-    // locally, which is the pre-existing behaviour. revokeSession() carries
-    // the token explicitly and survives the navigation below; see api.ts.
     revokeSession('/auth/logout', tokenStore.get());
-    // The shared realtime socket authenticated with this token; drop it so it
-    // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
     tokenStore.clear();
-    set({ user: null, sessionStale: false });
     location.href = '/login';
   },
-
   logoutEverywhere: () => {
     revokeSession('/auth/logout-all', tokenStore.get());
     disposeSocket();
     tokenStore.clear();
-    set({ user: null, sessionStale: false });
     signOutReason.set('signed-out-all');
     location.href = '/login';
   },
-
   adminLogout: () => {
-    // Same reasoning, via the admin-side route. This matters more for the
-    // console, which shares the consumer origin: one leaked admin token is the
-    // whole moderation surface.
     revokeSession('/admins/logout', tokenStore.getAdmin());
     tokenStore.clearAdmin();
-    set({ admin: null });
     location.href = '/admin/login';
   },
-
-  forgetAdminSession: () => {
-    // After a password reset the API has bumped tokenVersion, so any admin
-    // token this tab still holds is already dead. Forgetting it here means the
-    // next visit to /admin/login shows the form straight away instead of first
-    // failing a /admins/me call with the stale bearer.
-    tokenStore.clearAdmin();
-    set({ admin: null, adminLoading: false });
-  },
+  forgetAdminSession: () => { tokenStore.clearAdmin(); },
 }));
 
-/** How long a tab may sit hidden before its session user counts as stale. */
-export const SESSION_STALE_AFTER_MS = 10 * 60 * 1000;
+onSessionChange((kind, rejected, external) => {
+  if (kind === 'admin') {
+    useAuth.setState({ admin: null, adminLoading: false, adminBootstrapError: null });
+    return;
+  }
+  disposeSocket();
+  useAuth.setState({
+    user: null, verifiedToken: null, loading: external && !!tokenStore.get(),
+    bootstrapError: null, sessionStale: false, sessionRejected: rejected,
+  });
+  if (external) queueMicrotask(() => { void useAuth.getState().bootstrap(); });
+});
 
-/**
- * Keep the session user fresh while the app is open: on returning to the tab
- * after a long absence and on a slow interval while it stays visible. Signed
- * media URLs in the stored user expire after roughly fifteen minutes, so a
- * tab left alone came back with an avatar that 403'd into initials.
- */
+export const SESSION_STALE_AFTER_MS = 10 * 60 * 1000;
 export function useSessionRefresh(onStale?: () => void) {
   const refreshUser = useAuth((s) => s.refreshUser);
   const signedIn = useAuth((s) => !!s.user);

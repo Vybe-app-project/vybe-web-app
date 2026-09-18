@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -13,7 +13,13 @@ import {
   startOfDay,
   subDays,
 } from 'date-fns';
-import { api, errMsg } from '../lib/api';
+import { api, errMsg, tokenStore } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import {
+  bindWorkoutDraftAccount, loadWorkoutDraft, persistWorkoutDraft, removeWorkoutDraft,
+  workoutDraftSessionToken, emptyRestTimer, WorkoutDraftConflict, type WorkoutDraft, type WorkoutDraftHandle,
+} from '../lib/workoutDrafts';
+import { WorkoutRestTimer } from './WorkoutRestTimer';
 import { formatSeconds } from '../lib/duration';
 import {
   Badge,
@@ -47,26 +53,17 @@ import {
 import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, Zap } from './icons';
 import {
   CATEGORY_OPTIONS,
-  ExerciseRows,
   MetaList,
-  emptyExercise,
-  exerciseDraftFrom,
-  toExercisePayload,
-  type ExerciseDraft,
   type SocialWorkout,
 } from './Workouts';
+import { WorkoutSetEditor } from './WorkoutSetEditor';
+import {
+  emptyLogExercise, logExerciseDraftFrom, toLogExercisePayload, repeatedExercises, sessionVolume,
+  type LogExercise, type LogExerciseDraft,
+} from './workout-set-records';
+export { sessionVolume } from './workout-set-records';
 
 /* ------------------------------------------------------------------ types */
-
-type LogExercise = {
-  name: string;
-  sets?: number;
-  reps?: number;
-  weight?: number;
-  duration?: number;
-  distance?: number;
-  notes?: string;
-};
 
 type WorkoutLog = {
   _id: string;
@@ -80,6 +77,8 @@ type WorkoutLog = {
   hashtags?: string[];
   isCompleted?: boolean;
   createdAt?: string;
+  setRecordsVersion?: number;
+  revision?: number;
 };
 
 type LogsResponse = {
@@ -90,7 +89,7 @@ type LogsResponse = {
 };
 
 /** A session seeded from a workout or a previous log; no `_id` means it will be created. */
-type LogSeed = Partial<Omit<WorkoutLog, '_id'>>;
+type LogSeed = Partial<Omit<WorkoutLog, '_id'>> & { previousExercises?: LogExercise[] };
 
 /* -------------------------------------------------------------- utilities */
 
@@ -99,16 +98,6 @@ const num = (v: string): number | undefined => {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 };
-
-/** Total tonnage for a session: sum of sets x reps x weight per exercise. */
-export function sessionVolume(log: Pick<WorkoutLog, 'exercises'>): number {
-  return (log.exercises ?? []).reduce((sum, ex) => {
-    const sets = Number(ex.sets) || 0;
-    const reps = Number(ex.reps) || 0;
-    const weight = Number(ex.weight) || 0;
-    return sum + sets * reps * weight;
-  }, 0);
-}
 
 const parseDate = (value?: string): Date | null => {
   if (!value) return null;
@@ -131,7 +120,7 @@ type FormState = {
   duration: string;
   caloriesBurned: string;
   notes: string;
-  exercises: ExerciseDraft[];
+  exercises: LogExerciseDraft[];
 };
 
 const formFrom = (log?: LogSeed | null): FormState => {
@@ -143,13 +132,13 @@ const formFrom = (log?: LogSeed | null): FormState => {
     duration: log?.duration != null && log.duration !== 0 ? String(log.duration) : '',
     caloriesBurned: log?.caloriesBurned != null && log.caloriesBurned !== 0 ? String(log.caloriesBurned) : '',
     notes: log?.notes ?? '',
-    exercises: log?.exercises?.length ? log.exercises.map(exerciseDraftFrom) : [emptyExercise()],
+    exercises: log?.exercises?.length ? log.exercises.map(logExerciseDraftFrom) : [emptyLogExercise()],
   };
 };
 
 /**
  * Seed a fresh session from a library workout ("Log this workout"). Exercise
- * durations stay in seconds on both sides; the session `duration` is minutes.
+ * prescriptions are seconds; private exercise and session durations are minutes.
  */
 const seedFromWorkout = (w: SocialWorkout): LogSeed => ({
   name: w.title,
@@ -161,112 +150,216 @@ const seedFromWorkout = (w: SocialWorkout): LogSeed => ({
     sets: e.sets,
     reps: e.reps,
     weight: e.weight,
-    duration: e.duration,
+    duration: e.duration == null ? undefined : e.duration / 60,
     notes: e.notes,
   })),
 });
 
 /** Seed a fresh session from a past one ("Log again"): same content, dated now. */
-const seedFromLog = (log: WorkoutLog): LogSeed => ({
-  name: log.name,
-  type: log.type,
-  duration: log.duration,
-  caloriesBurned: log.caloriesBurned,
-  notes: log.notes,
-  exercises: log.exercises,
-});
+const seedFromLog = (log: WorkoutLog): LogSeed => {
+  const exercises = repeatedExercises(log.exercises);
+  return {
+    name: log.name, type: log.type, duration: log.duration,
+    caloriesBurned: log.caloriesBurned, notes: log.notes, exercises,
+    previousExercises: log.exercises.map((exercise, i) => ({
+      ...exercise, exerciseId: exercises[i].exerciseId,
+      ...(exercise.setRecords === undefined ? {} : { setRecords: exercise.setRecords.map((set, j) => ({
+        ...set, id: exercises[i].setRecords![j].id,
+      })) }),
+    })),
+    setRecordsVersion: log.setRecordsVersion,
+  };
+};
 
 /* --------------------------------------------------------------- log modal */
 
 function LogModal({
-  open,
-  editing,
-  seed,
-  seedKey,
+  initialDraft,
+  handle,
+  initiallyStored,
   onClose,
+  onReload,
 }: {
-  open: boolean;
-  /** Existing log → PATCH. */
-  editing: WorkoutLog | null;
-  /** Prefill for a new log → POST. */
-  seed?: LogSeed | null;
-  /** Changes whenever `seed` changes so the form re-seeds. */
-  seedKey?: string;
-  onClose: () => void;
+  initialDraft: WorkoutDraft;
+  handle: WorkoutDraftHandle;
+  initiallyStored: boolean;
+  onClose: (draft: WorkoutDraft | null) => void;
+  onReload: () => void;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
   const formId = useId();
-  const [form, setForm] = useState<FormState>(() => formFrom(editing ?? seed));
-  const [formKey, setFormKey] = useState('');
-  const [errors, setErrors] = useState<{ date?: string; exercises?: string }>({});
-
-  const key = `${open ? 'open' : 'closed'}:${editing?._id ?? 'new'}:${seedKey ?? ''}`;
-  if (key !== formKey) {
-    setFormKey(key);
-    setForm(formFrom(editing ?? seed));
-    setErrors({});
-  }
-
-  const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const [draft, setDraft] = useState(initialDraft);
+  const form = draft.form as FormState;
+  const editing = draft.editing as WorkoutLog | null;
+  const seed = draft.seed as LogSeed | null;
+  const [errors, setErrors] = useState<{ date?: string; exercises?: string; duration?: string; calories?: string }>({});
+  const [saveError, setSaveError] = useState('');
+  const [storageError, setStorageError] = useState('');
+  const [stored, setStored] = useState(initiallyStored);
+  const [conflicted, setConflicted] = useState(false);
+  const [confirmReload, setConfirmReload] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const finished = useRef(false);
+  const latest = useRef(draft);
+  latest.current = draft;
+  const storageFailed = (error: unknown) => {
+    if (error instanceof WorkoutDraftConflict) setConflicted(true);
+    setStorageError(errMsg(error, 'Could not store this local workout.'));
+  };
+  useEffect(() => {
+    if (finished.current || conflicted || (initiallyStored && draft === initialDraft)) return;
+    let current = true;
+    setStored(false);
+    void persistWorkoutDraft(draft, handle).then(() => {
+      if (current) { setStored(true); setStorageError(''); }
+    }, error => {
+      if (current) storageFailed(error);
+    });
+    return () => { current = false; };
+  }, [draft, handle, initiallyStored, initialDraft, conflicted]);
+  const change = (patch: Partial<WorkoutDraft>) => {
+    const next = { ...latest.current, ...patch, updatedAt: Date.now() };
+    latest.current = next;
+    setStored(false);
+    setDraft(next);
+  };
+  const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
+    change({ form: { ...latest.current.form, [k]: v } });
+  const closeForLater = async () => {
+    if (save.isPending || conflicted) return;
+    try {
+      let snapshot: WorkoutDraft;
+      do {
+        snapshot = latest.current;
+        await persistWorkoutDraft(snapshot, handle);
+      } while (latest.current !== snapshot);
+      onClose(snapshot);
+    } catch (error) { storageFailed(error); }
+  };
 
   const save = useMutation({
     mutationFn: async () => {
-      const exercises: LogExercise[] = form.exercises.map(toExercisePayload).filter((e) => e.name.length > 0);
+      setSaveError('');
+      if (conflicted) throw new WorkoutDraftConflict();
+      const draft = latest.current;
+      const form = draft.form as FormState;
+      const editing = draft.editing as WorkoutLog | null;
+      const seed = draft.seed as LogSeed | null;
+      const sessionToken = workoutDraftSessionToken(draft.ownerId);
+      if (acknowledged) {
+        await removeWorkoutDraft(handle);
+        return;
+      }
+      let pending = draft.pending;
+      if (!pending) {
+      if ((editing?.setRecordsVersion ?? seed?.setRecordsVersion ?? 1) !== 1) {
+        throw new Error('This session uses a newer set format. Update the app before editing it.');
+      }
+      let exercises: LogExercise[];
+      try { exercises = form.exercises.map(toLogExercisePayload); }
+      catch (error) {
+        setErrors({ exercises: (error as Error).message });
+        throw Object.assign(new Error('validation'), { silent: true });
+      }
       const parsed = new Date(form.date);
+      const duration = num(form.duration);
+      const caloriesBurned = num(form.caloriesBurned);
       const next: typeof errors = {};
       if (!exercises.length) next.exercises = 'Add at least one exercise with a name.';
       if (!isValid(parsed)) next.date = 'Enter a valid date and time.';
+      if (form.duration.trim() && (duration === undefined || duration > 1440)) next.duration = 'Enter a duration from 0 to 1440 minutes.';
+      if (form.caloriesBurned.trim() && (caloriesBurned === undefined || caloriesBurned > 100000)) next.calories = 'Enter calories from 0 to 100000.';
       setErrors(next);
-      if (next.exercises || next.date) throw Object.assign(new Error('validation'), { silent: true });
+      if (Object.keys(next).length) throw Object.assign(new Error('validation'), { silent: true });
 
       const payload = {
         name: form.name.trim() || 'Workout',
         type: form.type,
         date: parsed.toISOString(),
-        duration: num(form.duration) ?? 0,
-        caloriesBurned: num(form.caloriesBurned) ?? 0,
-        notes: form.notes.trim() || undefined,
+        duration: duration ?? 0,
+        caloriesBurned: caloriesBurned ?? 0,
+        notes: form.notes.trim(),
         exercises,
-        isCompleted: true,
+        isCompleted: editing?.isCompleted ?? true,
+        ...(editing?.setRecordsVersion === 1 || seed?.setRecordsVersion === 1 || exercises.some(ex => ex.setRecords !== undefined)
+          ? { setRecordsVersion: 1 } : {}),
+        ...(editing ? { expectedRevision: editing.revision ?? 0 } : {}),
+        ...(!editing ? { clientRequestId: draft.clientRequestId } : {}),
       };
-
-      if (editing) {
-        const { data } = await api.patch(`/workouts/logs/${editing._id}`, payload);
-        return data;
+      pending = { payload, targetId: editing?._id ?? null };
       }
-      const { data } = await api.post('/workouts/logs', payload);
-      return data;
+      const locked = { ...draft, pending, updatedAt: Date.now() };
+      latest.current = locked;
+      setStored(false);
+      setDraft(locked);
+      await persistWorkoutDraft(locked, handle);
+      const config = { workoutSessionToken: sessionToken };
+      let data: { workout?: WorkoutLog & { user?: string } };
+      try {
+        const response = pending.targetId
+          ? await api.patch(`/workouts/logs/${pending.targetId}`, pending.payload, config)
+          : await api.post('/workouts/logs', pending.payload, config);
+        data = response.data;
+      } catch (error) {
+        const status = (error as { response?: { status?: number } }).response?.status;
+        if (status === 400) change({ pending: null });
+        throw error;
+      }
+      workoutDraftSessionToken(draft.ownerId);
+      if (!data?.workout?._id || data.workout.user !== draft.ownerId
+          || (pending.targetId && data.workout._id !== pending.targetId)) {
+        throw new Error('Save acknowledgement was incomplete. Your original request is kept for safe retry.');
+      }
+      finished.current = true;
+      setAcknowledged(true);
+      await removeWorkoutDraft(handle);
     },
     onSuccess: () => {
       toast.success(editing ? 'Session saved' : 'Session logged');
       qc.invalidateQueries({ queryKey: ['workout-logs'] });
-      onClose();
+      onClose(null);
     },
     onError: (e) => {
       if ((e as { silent?: boolean })?.silent) return;
-      toast.error(errMsg(e, 'Could not save session'));
+      if (e instanceof WorkoutDraftConflict) storageFailed(e);
+      if ((e as { response?: { status?: number } }).response?.status === 409) {
+        qc.invalidateQueries({ queryKey: ['workout-logs'] });
+      }
+      const message = errMsg(e, 'Could not save session');
+      setSaveError(message);
+      toast.error(message);
     },
   });
 
   return (
     <Modal
-      open={open}
-      onClose={onClose}
+      open
+      onClose={() => { void closeForLater(); }}
       title={editing ? 'Edit session' : 'Log a session'}
       description={editing ? undefined : seed?.name ? `Based on ${seed.name}. Adjust what you actually did.` : 'What you did, when, and how much you moved.'}
       size="lg"
       footer={
         <>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={save.isPending}>
-            Cancel
+          <Button type="button" variant="ghost" onClick={() => { void closeForLater(); }} disabled={save.isPending || conflicted}>
+            Save for later
           </Button>
-          <Button type="submit" form={formId} variant="primary" loading={save.isPending}>
-            {editing ? 'Save changes' : 'Log session'}
+          <Button type="button" variant="ghost" onClick={() => setDiscarding(true)} disabled={save.isPending}>Discard draft</Button>
+          <Button type="submit" form={formId} variant="primary" loading={save.isPending} disabled={conflicted}>
+            {acknowledged ? 'Retry local cleanup' : draft.pending ? 'Retry save' : editing ? 'Save changes' : 'Log session'}
           </Button>
         </>
       }
     >
+      <p role="status" className="text-sm text-text-2">
+        {acknowledged ? 'Saved on server. Clearing the local copy.'
+          : storageError ? 'Local only · unsynced · not saved on this device'
+            : stored ? 'Local only · unsynced · saved on this device' : 'Local only · unsynced · storing on this device…'}
+      </p>
+      {storageError ? <p role="alert" className="text-sm text-danger">{storageError}</p> : null}
+      {conflicted ? <Button variant="secondary" onClick={() => setConfirmReload(true)}>Reload latest draft</Button> : null}
+      {draft.pending && !acknowledged ? <p className="text-sm text-text-2">A save may already have reached the server. Retry the same request to check safely; authoring is locked until it is resolved or explicitly discarded.</p> : null}
       <form
         id={formId}
         className="space-y-5"
@@ -276,6 +369,7 @@ function LogModal({
           save.mutate();
         }}
       >
+        <fieldset disabled={Boolean(draft.pending) || acknowledged || save.isPending} className="space-y-5">
         <Input
           label="Session name"
           hint="Optional. Defaults to “Workout”."
@@ -306,6 +400,7 @@ function LogModal({
             max={1440}
             placeholder="45"
             value={form.duration}
+            error={errors.duration}
             onChange={(e) => set('duration', e.target.value)}
           />
           <Input
@@ -315,19 +410,28 @@ function LogModal({
             min={0}
             placeholder="350"
             value={form.caloriesBurned}
+            error={errors.calories}
             onChange={(e) => set('caloriesBurned', e.target.value)}
           />
         </div>
 
-        <ExerciseRows
+        <WorkoutSetEditor
           value={form.exercises}
-          showNotes={false}
+          previous={editing?.exercises ?? seed?.previousExercises ?? seed?.exercises}
+          allowSetEntry={!editing}
+          disabled={save.isPending || Boolean(draft.pending) || acknowledged}
           error={errors.exercises}
           onChange={(v) => {
             set('exercises', v);
             if (errors.exercises) setErrors((er) => ({ ...er, exercises: undefined }));
           }}
         />
+        {saveError ? (
+          <div role="alert" className="space-y-2 rounded-md border border-border-1 p-3 text-sm text-danger">
+            <p>{saveError}</p>
+            <p>Your draft is retained. Create retries reuse the same request ID. For an edit conflict, review history and explicitly discard this local copy before reopening the latest revision.</p>
+          </div>
+        ) : null}
 
         <Textarea
           label="Notes"
@@ -338,7 +442,22 @@ function LogModal({
           value={form.notes}
           onChange={(e) => set('notes', e.target.value)}
         />
+        </fieldset>
+        <WorkoutRestTimer timer={draft.timer} exercises={form.exercises} onChange={timer => change({ timer })} />
       </form>
+      <ConfirmDialog open={discarding} title="Discard local workout draft?"
+        message="This removes only this device’s unsynced draft and rest timer. A save already received by the server is not deleted."
+        confirmLabel="Discard draft" destructive onCancel={() => setDiscarding(false)}
+        onConfirm={() => {
+          finished.current = true;
+          void removeWorkoutDraft(handle).then(() => onClose(null), error => {
+            finished.current = false; storageFailed(error); setDiscarding(false);
+          });
+        }} />
+      <ConfirmDialog open={confirmReload} title="Reload latest workout draft?"
+        message="Copy any unsaved input from this tab first. Reloading replaces this editor with the latest local recovery state; it does not merge or publish your edits."
+        confirmLabel="Reload latest draft" onCancel={() => setConfirmReload(false)}
+        onConfirm={() => { finished.current = true; onReload(); }} />
     </Modal>
   );
 }
@@ -397,14 +516,23 @@ function SessionCard({
           {exercises.map((ex, i) => {
             const facts = [
               ex.sets ? `${formatStat(ex.sets)} × ${formatStat(ex.reps ?? 0)}` : ex.reps ? `${formatStat(ex.reps)} reps` : null,
-              ex.weight ? `${formatStat(ex.weight)} kg` : null,
-              ex.duration ? formatSeconds(ex.duration) : null,
+              ex.weight ? `${formatStat(ex.weight)} ${ex.weightUnit ?? 'kg'}` : null,
+              ex.duration ? formatSeconds(ex.duration * 60) : null,
               ex.distance ? `${formatStat(ex.distance)} km` : null,
             ].filter(Boolean) as string[];
             return (
               <li key={`${log._id}-${i}`} className="flex min-h-10 items-center justify-between gap-3 rounded-sm bg-surface-2 px-3 py-1.5 text-sm">
                 <span className="truncate font-medium text-text-1">{ex.name}</span>
-                {facts.length ? (
+                {ex.setRecords !== undefined ? (
+                  <details className="min-w-0 text-sm text-text-2">
+                    <summary className="min-h-11 cursor-pointer py-2">{ex.setRecords.filter(set => set.completed).length}/{ex.setRecords.length} sets completed</summary>
+                    <ol className="space-y-1">
+                      {ex.setRecords.map((set, setIndex) => <li key={set.id}>
+                        Set {setIndex + 1}: {set.reps} × {set.weight} {set.weightUnit} · {set.completed ? 'completed' : 'not completed'}
+                      </li>)}
+                    </ol>
+                  </details>
+                ) : facts.length ? (
                   <span className="type-stat shrink-0 text-sm text-text-2">
                     {facts.map((f, j) => (
                       <span key={f} className={cx(j > 0 && 'ml-2.5')}>
@@ -451,7 +579,7 @@ function WeekChart({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="type-heading text-lg text-text-1">Last 7 days</h2>
-          <p className="text-xs text-text-2">{meta.key === 'volume' ? 'Sets × reps × weight, per day' : meta.key === 'minutes' ? 'Time trained per day' : 'Sessions per day'}</p>
+          <p className="text-xs text-text-2">{meta.key === 'volume' ? 'Completed sets plus legacy aggregates, converted to kg' : meta.key === 'minutes' ? 'Time trained per day' : 'Sessions per day'}</p>
         </div>
         <SegmentedControl
           aria-label="Chart metric"
@@ -496,15 +624,39 @@ export default function WorkoutLogs() {
   const qc = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const [modal, setModal] = useState(false);
-  const [editing, setEditing] = useState<WorkoutLog | null>(null);
-  const [seed, setSeed] = useState<{ key: string; value: LogSeed } | null>(null);
+  const ownerId = useAuth(state => state.user?._id);
+  const ownerToken = useAuth(state => state.verifiedToken);
+  const [activeDraft, setActiveDraft] = useState<WorkoutDraft | null>(null);
+  const [draftHandle, setDraftHandle] = useState<WorkoutDraftHandle | null>(null);
+  const [initiallyStored, setInitiallyStored] = useState(false);
+  const [recoverable, setRecoverable] = useState<WorkoutDraft | null>(null);
+  const [storageLoading, setStorageLoading] = useState(true);
+  const [recoveryError, setRecoveryError] = useState('');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<WorkoutLog | null>(null);
   const [metric, setMetric] = useState<Metric>('volume');
   const compact = useIsCompact();
+  const loadRecovery = useCallback(async () => {
+    setStorageLoading(true);
+    setRecoveryError('');
+    setActiveDraft(null);
+    setDraftHandle(null);
+    setRecoverable(null);
+    try {
+      if (!ownerId || !ownerToken || tokenStore.get() !== ownerToken) throw new Error('Your account changed. Reload before recovering a workout.');
+      await bindWorkoutDraftAccount(ownerId, ownerToken);
+      const found = await loadWorkoutDraft(ownerId);
+      setDraftHandle(found.handle);
+      setRecoverable(found.draft);
+      setRecoveryError(found.error ?? '');
+    } catch (error) {
+      setRecoveryError(errMsg(error, 'Could not open local workout storage.'));
+    } finally { setStorageLoading(false); }
+  }, [ownerId, ownerToken]);
+  useEffect(() => { void loadRecovery(); }, [loadRecovery]);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['workout-logs'],
+    queryKey: ['workout-logs', ownerId],
     queryFn: async (): Promise<LogsResponse> => {
       const { data } = await api.get<LogsResponse>('/workouts/logs', { params: { page: 1, limit: 100 } });
       return data;
@@ -517,11 +669,18 @@ export default function WorkoutLogs() {
     [data],
   );
 
-  const openNew = (next?: { key: string; value: LogSeed } | null) => {
-    setEditing(null);
-    setSeed(next ?? null);
-    setModal(true);
+  const openEditor = (editing: WorkoutLog | null, seed: LogSeed | null) => {
+    if (!ownerId || !draftHandle || storageLoading || recoveryError) { toast.error('Open local workout storage before starting a session.'); return; }
+    if (recoverable) { toast.error('Resume or discard your local workout draft first.'); return; }
+    const draft: WorkoutDraft = {
+      version: 1, ownerId, draftId: crypto.randomUUID(), clientRequestId: crypto.randomUUID(),
+      updatedAt: Date.now(), form: formFrom(editing ?? seed), editing, seed,
+      timer: emptyRestTimer(), pending: null,
+    };
+    setInitiallyStored(false);
+    setActiveDraft(draft);
   };
+  const openNew = (next?: { key: string; value: LogSeed } | null) => openEditor(null, next?.value ?? null);
 
   // Deep links: ?log=1 opens the form; ?from=<workoutId> prefills it from a library workout.
   const wantsLog = params.get('log') === '1';
@@ -537,6 +696,7 @@ export default function WorkoutLogs() {
 
   useEffect(() => {
     if (!wantsLog) return;
+    if (storageLoading) return;
     if (fromId && fromWorkout.isPending) return; // wait for the prefill
     if (fromId && fromWorkout.isError) toast.error('Could not load that workout; starting an empty session.');
     openNew(fromId && fromWorkout.data ? { key: fromWorkout.data._id, value: seedFromWorkout(fromWorkout.data) } : null);
@@ -550,7 +710,7 @@ export default function WorkoutLogs() {
       { replace: true },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsLog, fromId, fromWorkout.isPending, fromWorkout.isError, fromWorkout.data]);
+  }, [wantsLog, fromId, fromWorkout.isPending, fromWorkout.isError, fromWorkout.data, storageLoading]);
 
   const remove = useMutation({
     mutationFn: async (log: WorkoutLog) => {
@@ -559,9 +719,9 @@ export default function WorkoutLogs() {
     },
     onMutate: async (log) => {
       await qc.cancelQueries({ queryKey: ['workout-logs'] });
-      const previous = qc.getQueryData<LogsResponse>(['workout-logs']);
+      const previous = qc.getQueryData<LogsResponse>(['workout-logs', ownerId]);
       if (previous) {
-        qc.setQueryData<LogsResponse>(['workout-logs'], {
+        qc.setQueryData<LogsResponse>(['workout-logs', ownerId], {
           ...previous,
           workouts: previous.workouts.filter((w) => w._id !== log._id),
           total: Math.max(0, previous.total - 1),
@@ -570,7 +730,7 @@ export default function WorkoutLogs() {
       return { previous };
     },
     onError: (e, _v, ctx) => {
-      if (ctx?.previous) qc.setQueryData(['workout-logs'], ctx.previous);
+      if (ctx?.previous) qc.setQueryData(['workout-logs', ownerId], ctx.previous);
       toast.error(errMsg(e, 'Could not delete session'));
     },
     onSuccess: () => toast.success('Session deleted'),
@@ -646,16 +806,32 @@ export default function WorkoutLogs() {
         title="Workout log"
         subtitle="Every session you have completed, with weekly volume."
         actions={
-          <Button variant="primary" icon={<Plus size={18} />} onClick={() => openNew()}>
+          <Button variant="primary" icon={<Plus size={18} />} onClick={() => openNew()} disabled={storageLoading}>
             Log session
           </Button>
         }
         mobileActions={
-          <IconButton label="Log session" onClick={() => openNew()}>
+          <IconButton label="Log session" onClick={() => openNew()} disabled={storageLoading}>
             <Plus size={24} />
           </IconButton>
         }
       />
+
+      {storageLoading ? <p role="status" className="text-sm text-text-2">Checking local workout drafts…</p> : null}
+      {recoveryError ? <Card className="space-y-3">
+        <p role="alert" className="text-sm text-danger">{recoveryError}</p>
+        <Button variant="secondary" onClick={() => { void loadRecovery(); }}>Retry draft storage</Button>
+        <Button variant="ghost" onClick={() => setConfirmDiscard(true)}>Discard local draft</Button>
+      </Card> : null}
+      {recoverable && recoverable.ownerId === ownerId && !activeDraft ? <Card className="space-y-3">
+        <h2 className="text-lg font-semibold text-text-1">Unsynced workout on this device</h2>
+        <p className="text-sm text-text-2">Local only. Saved {new Date(recoverable.updatedAt).toLocaleString()}. Nothing will be published automatically.</p>
+        {Date.now() - recoverable.updatedAt > 7 * 86400000 ? <p className="text-sm text-text-2">This draft is over 7 days old. Review its date, values and server history before saving.</p> : null}
+        <div className="flex flex-wrap gap-3">
+          <Button variant="primary" onClick={() => { setInitiallyStored(true); setActiveDraft(recoverable); setRecoverable(null); }}>Resume workout draft</Button>
+          <Button variant="ghost" onClick={() => setConfirmDiscard(true)}>Discard local draft</Button>
+        </div>
+      </Card> : null}
 
       {isLoading ? (
         <StatGrid columns={4}>
@@ -748,11 +924,7 @@ export default function WorkoutLogs() {
                   <SessionCard
                     key={log._id}
                     log={log}
-                    onEdit={(l) => {
-                      setSeed(null);
-                      setEditing(l);
-                      setModal(true);
-                    }}
+                    onEdit={(l) => openEditor(l, null)}
                     onRepeat={(l) => openNew({ key: `repeat:${l._id}:${Date.now()}`, value: seedFromLog(l) })}
                     onDelete={setPendingDelete}
                   />
@@ -766,17 +938,21 @@ export default function WorkoutLogs() {
         </div>
       )}
 
-      <LogModal
-        open={modal}
-        editing={editing}
-        seed={seed?.value}
-        seedKey={seed?.key}
-        onClose={() => {
-          setModal(false);
-          setEditing(null);
-          setSeed(null);
-        }}
-      />
+      {activeDraft && draftHandle && activeDraft.ownerId === ownerId ? <LogModal key={activeDraft.draftId} initialDraft={activeDraft}
+        handle={draftHandle} initiallyStored={initiallyStored} onReload={() => { void loadRecovery(); }}
+        onClose={draft => {
+          if (draft) { setActiveDraft(null); setRecoverable(draft); }
+          else void loadRecovery();
+        }} /> : null}
+      <ConfirmDialog open={confirmDiscard} title="Discard local workout draft?"
+        message="Only the local unsynced copy and timer will be removed. A workout already received by the server is not deleted."
+        confirmLabel="Discard draft" destructive onCancel={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          if (!draftHandle) return;
+          void removeWorkoutDraft(draftHandle).then(() => {
+            setConfirmDiscard(false); void loadRecovery();
+          }, error => { setRecoveryError(errMsg(error)); setConfirmDiscard(false); });
+        }} />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title="Delete session?"

@@ -153,7 +153,7 @@ test('a pushed notification is prepended once and the badge moves before the ser
 
 test('the shell subscribes to the socket for the whole session and reads the exact unread count', () => {
   const layout = read('src/components/Layout.tsx');
-  assert.match(layout, /useLiveNotifications\(!!user\)/, 'Layout must open the live subscription once the user is bootstrapped');
+  assert.match(layout, /useLiveNotifications\(!!user && !sessionStale\)/, 'Layout must open the live subscription only for a verified user, not an offline identity');
   assert.match(layout, /api\.get\('\/notifications\/unread-count'\)/);
   assert.doesNotMatch(layout, /API has no unread-count endpoint/);
   const live = read('src/lib/notificationsLive.ts');

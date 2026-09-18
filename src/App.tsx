@@ -4,11 +4,12 @@ import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
+import { Button, ErrorState, FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
+import { WorkoutDraftLifecycle } from './lib/WorkoutDraftLifecycle';
 import { useQueryClient } from '@tanstack/react-query';
 import { RouteErrorBoundary } from './components/ErrorBoundary';
-import { postLoginTarget } from './lib/authRedirect';
+import { postLoginTarget, sessionExpiredLoginUrl } from './lib/authRedirect';
 import WelcomeSheet from './pages/WelcomeSheet';
-import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth, useSessionRefresh } from './lib/auth';
 import { lazyPage } from './lib/navigation';
 
@@ -81,6 +82,23 @@ const AdminCatalog = lazy(() => import('./pages/admin/AdminCatalog'));
 const AdminCatalogWorkout = lazy(() => import('./pages/admin/AdminCatalogWorkout'));
 const AdminCatalogPlan = lazy(() => import('./pages/admin/AdminCatalogPlan'));
 
+function SessionUnavailable({ administrator = false }: { administrator?: boolean }) {
+  const { bootstrap, bootstrapAdmin, bootstrapError, adminBootstrapError, logout, adminLogout } = useAuth();
+  return (
+    <PublicShell title="Unable to verify your sign-in" subtitle="No need to enter your password again while Vybe reconnects.">
+      <ErrorState
+        title="Connection interrupted"
+        message={(administrator ? adminBootstrapError : bootstrapError) ?? undefined}
+        onRetry={administrator ? bootstrapAdmin : bootstrap}
+      />
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+        <Button variant="ghost" onClick={administrator ? adminLogout : logout}>Sign out instead</Button>
+        <a href="/support" className="text-sm text-brand-text hover:underline">Contact support</a>
+      </div>
+    </PublicShell>
+  );
+}
+
 /** Refresh the session user on foreground/interval; after a long absence, everything on screen refetches too. */
 function SessionRefresh() {
   const qc = useQueryClient();
@@ -90,18 +108,27 @@ function SessionRefresh() {
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, bootstrapError, sessionStale, sessionRejected, bootstrap } = useAuth();
   const location = useLocation();
   if (loading) return <FullPageSpinner />;
+  if (bootstrapError) return <SessionUnavailable />;
+  if (sessionStale && user) return (
+    <Layout>
+      <ErrorState title="Reconnect to verify your session"
+        message="Your saved identity is available, but private pages and workout recovery wait for verification."
+        onRetry={bootstrap} />
+    </Layout>
+  );
   // Preserve the attempted destination so login can bounce the user back.
-  if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
+  if (!user) return <Navigate to={sessionRejected ? sessionExpiredLoginUrl(location.pathname, location.search) : '/login'} replace state={{ from: location }} />;
   return <>{children}</>;
 }
 
 function RequireAdmin({ children }: { children: React.ReactNode }) {
-  const { admin, adminLoading, bootstrapAdmin } = useAuth();
+  const { admin, adminLoading, adminBootstrapError, bootstrapAdmin } = useAuth();
   useEffect(() => { void bootstrapAdmin(); }, [bootstrapAdmin]);
   if (adminLoading) return <FullPageSpinner />;
+  if (adminBootstrapError) return <SessionUnavailable administrator />;
   if (!admin) return <Navigate to="/admin/login" replace />;
   return <>{children}</>;
 }
@@ -113,10 +140,11 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
  * page -- as it did when it ignored `?next=` -- its redirect always won.
  */
 function GuestOnly({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, bootstrapError, sessionStale } = useAuth();
   const location = useLocation();
   const [params] = useSearchParams();
   if (loading) return <FullPageSpinner />;
+  if (bootstrapError || sessionStale) return <SessionUnavailable />;
   if (user) {
     const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
     return <Navigate to={postLoginTarget({ from, next: params.get('next') })} replace />;
@@ -130,9 +158,9 @@ function GuestOnly({ children }: { children: React.ReactNode }) {
  * Signed-in users get the same form inside the app shell.
  */
 function SupportGate() {
-  const { user, loading } = useAuth();
+  const { user, loading, verifiedToken } = useAuth();
   if (loading) return <FullPageSpinner />;
-  if (user) {
+  if (user && verifiedToken) {
     return (
       <Layout>
         <Support />
@@ -156,9 +184,9 @@ function SupportGate() {
  * and login still bounces back here because the CTA carries the location.
  */
 function PostGate() {
-  const { user, loading } = useAuth();
+  const { user, loading, verifiedToken } = useAuth();
   if (loading) return <FullPageSpinner />;
-  if (user) {
+  if (user && verifiedToken) {
     return (
       <Layout>
         <PostDetail />
@@ -231,6 +259,7 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <WorkoutDraftLifecycle />
       <ScrollToTop />
       <PwaUpdates />
       <SessionRefresh />

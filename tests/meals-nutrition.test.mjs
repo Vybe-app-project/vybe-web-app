@@ -169,7 +169,7 @@ test('community meals have a web home and the route noun redirects to it', () =>
 });
 
 test('4xx responses are not retried and the ring omits a percentage without a goal', () => {
-  assert.match(main, /if \(typeof s === 'number' && s < 500\) return false;/);
+  assert.match(read('src/lib/queryClient.ts'), /if \(typeof status === 'number' && status < 500\) return false;/);
   assert.match(ui, /aria-label=\{label \? \(max > 0 \? `\$\{label\}: \$\{Math\.round\(pct \* 100\)\}%` : label\) : undefined\}/);
   assert.match(detail, /status === 404 \|\| status === 400/);
 });

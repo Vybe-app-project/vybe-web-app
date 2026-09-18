@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import axios, { type AxiosError } from 'axios';
 import { useQuery } from '@tanstack/react-query';
-import { API_BASE, api, errMsg, tokenStore } from '../lib/api';
+import { API_BASE, api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { postLoginTarget, type FromLocation } from '../lib/authRedirect';
 import {
@@ -147,7 +147,7 @@ export default function Register() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
-  const setUser = useAuth((s) => s.setUser);
+  const acceptSession = useAuth((s) => s.acceptSession);
   const from = (location.state as FromState)?.from;
   const target = postLoginTarget({ from, next: new URLSearchParams(location.search).get('next') });
 
@@ -254,8 +254,7 @@ export default function Register() {
       // The address already has an account: the code signs it in (as on
       // mobile). Say so, rather than landing on Home under "Create your account".
       if (data?.token) {
-        tokenStore.set(data.token);
-        if (data.user) setUser(data.user);
+        await acceptSession(data.user, data.token);
         clearRegisterDraft(sessionStorage);
         const handle = data.user?.username ? `@${data.user.username}` : trimmedEmail;
         toast.info(`You already had an account, so we signed you in as ${handle}.`, { duration: 8000 });
@@ -325,8 +324,7 @@ export default function Register() {
       // Marked before the store update so GuestOnly's redirect cannot lose it.
       markWelcomePending(sessionStorage);
       clearRegisterDraft(sessionStorage);
-      tokenStore.set(data.token);
-      if (data.user) setUser(data.user);
+      await acceptSession(data.user, data.token);
       navigate(target, { replace: true });
     } catch (e2) {
       const response = (e2 as AxiosError<ConflictBody>)?.response;
