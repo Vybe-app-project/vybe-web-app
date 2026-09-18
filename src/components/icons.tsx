@@ -102,6 +102,12 @@ export const ArrowDown = make('ArrowDown', <><path d="M12 5v14"/><path d="m6 13 
 /* ------------------------------------------------------------------ media & objects */
 export const Image = make('Image', <><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 17 5-5 4 4 2.5-2.5L20 17"/></>);
 export const Video = make('Video', <><rect x="3" y="6" width="12" height="12" rx="2"/><path d="m15 10.5 6-3.5v10l-6-3.5z"/></>);
+export const VideoOff = make('VideoOff', <><path d="m3 3 18 18"/><path d="M15 12.5v1.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1"/><path d="M10 6h3a2 2 0 0 1 2 2v1.5l6-3.5v10l-2.5-1.5"/></>);
+export const Mic = make('Mic', <><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21M9 21h6"/></>);
+export const MicOff = make('MicOff', <><path d="m3 3 18 18"/><path d="M15 9.5V6a3 3 0 0 0-6 0v1"/><path d="M9 9.5V11a3 3 0 0 0 5.1 2.1"/><path d="M5.5 11a6.5 6.5 0 0 0 10.6 5M18.5 11a6.5 6.5 0 0 1-.6 2.7"/><path d="M12 17.5V21M9 21h6"/></>);
+export const Volume = make('Volume', <><path d="M4 9.5v5h3l4 3.5V6L7 9.5z"/><path d="M15 9.5a3.5 3.5 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></>);
+export const VolumeOff = make('VolumeOff', <><path d="M4 9.5v5h3l4 3.5V6L7 9.5z"/><path d="m16 10 4 4M20 10l-4 4"/></>);
+export const Maximize = make('Maximize', <><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></>);
 export const MapPin = make('MapPin', <><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></>);
 export const Calendar = make('Calendar', <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></>);
 export const Clock = make('Clock', <><circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/></>);

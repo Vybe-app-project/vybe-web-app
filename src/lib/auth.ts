@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, tokenStore, adminApi, revokeSession } from './api';
+import { disposeSocket } from './socket';
 
 /**
  * Field names follow the backend `User` model: the photo is `avatar`
@@ -103,6 +104,9 @@ export const useAuth = create<AuthState>((set) => ({
     // locally, which is the pre-existing behaviour. revokeSession() carries
     // the token explicitly and survives the navigation below; see api.ts.
     revokeSession('/auth/logout', tokenStore.get());
+    // The shared realtime socket authenticated with this token; drop it so it
+    // cannot keep a revoked session "online" or hold a live room open.
+    disposeSocket();
     tokenStore.clear();
     set({ user: null });
     location.href = '/login';

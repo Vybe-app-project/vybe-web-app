@@ -2,9 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { io, type Socket } from 'socket.io-client';
 import { differenceInCalendarDays, differenceInMinutes, format, isSameDay, isThisYear, isToday, isYesterday } from 'date-fns';
-import { api, errMsg, mediaUrl, ORIGIN_BASE, tokenStore } from '../lib/api';
+import { api, errMsg, mediaUrl } from '../lib/api';
+import { getSocket } from '../lib/socket';
 import { useAuth } from '../lib/auth';
 import { uploadImage, useDebounced, type UploadedMedia } from '../lib/hooks';
 import {
@@ -257,22 +257,15 @@ function useChatSocket(handlers: SocketHandlers) {
   ref.current = handlers;
 
   useEffect(() => {
-    const token = tokenStore.get();
-    if (!token) return;
-    let socket: Socket | null = null;
-    try {
-      socket = io(ORIGIN_BASE || '/', {
-        auth: { token },
-        transports: ['websocket', 'polling'],
-        reconnectionAttempts: 10,
-        reconnectionDelay: 2000,
-        timeout: 8000,
-      });
-    } catch {
-      // Realtime is an enhancement: the page stays fully usable over HTTP.
-      return;
-    }
-    let everConnected = false;
+    // The app-wide socket (lib/socket.ts) is shared with Live; this page only
+    // adds its own listeners and removes exactly those on unmount. Realtime is
+    // an enhancement: with no socket the page stays fully usable over HTTP.
+    const socket = getSocket();
+    if (!socket) return;
+    // If the socket is already up, the next 'connect' is a reconnect and the
+    // room list must be refreshed for anything missed while it was down.
+    let everConnected = socket.connected;
+    setConnected(socket.connected);
     const onConnect = () => {
       setConnected(true);
       if (everConnected) ref.current.onReconnect();
@@ -286,7 +279,6 @@ function useChatSocket(handlers: SocketHandlers) {
     socket.on('connect', onConnect);
     socket.on('disconnect', onDown);
     socket.on('connect_error', onDown);
-    socket.on('error', onDown);
     socket.on('message', onMessage);
     socket.on('newMessage', onMessage);
     socket.on('messageDeleted', onDeleted);
@@ -294,8 +286,14 @@ function useChatSocket(handlers: SocketHandlers) {
     socket.on('newGroupChat', onRooms);
 
     return () => {
-      socket?.removeAllListeners();
-      socket?.disconnect();
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDown);
+      socket.off('connect_error', onDown);
+      socket.off('message', onMessage);
+      socket.off('newMessage', onMessage);
+      socket.off('messageDeleted', onDeleted);
+      socket.off('chatRoomUpdate', onRooms);
+      socket.off('newGroupChat', onRooms);
     };
   }, []);
 
