@@ -29,7 +29,7 @@
 
 import { readFileSync, statSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, basename, extname, relative, resolve } from 'node:path';
+import { join, basename, extname, relative, resolve, sep } from 'node:path';
 
 const ROOT = process.cwd();
 
@@ -77,6 +77,33 @@ const BEHAVIOUR = [
   [/eth_getBlockByNumber|eth_getTransactionCount|eth_blockNumber/, 'Ethereum RPC call'],
   [/child_process/, 'child_process in a build config'],
 ];
+
+/* ------------------------------------------------------------------ *
+ * Editor / tooling auto-run
+ *
+ * A task that executes when a folder is merely OPENED is a supply-chain
+ * hazard: cloning a repository and looking at it is then enough to run code,
+ * with no build, install or test required.
+ *
+ * This is exactly how the 2026-09-17 payload was launched out of a PUBLIC
+ * repository. `.vscode/tasks.json` carried a task labelled "eslint-check"
+ * with `"runOn": "folderOpen"`, `"hide": true` and `"reveal": "never"`, whose
+ * command was `node ./public/fonts/fa-solid-500.woff2` — an interpreter
+ * pointed at a file that claimed to be a web font. Nothing appeared in the
+ * editor UI.
+ * ------------------------------------------------------------------ */
+const AUTORUN = [
+  [/"runOn"\s*:\s*"folderOpen"/, 'task runs automatically on folder open'],
+  [/"runOptions"[\s\S]{0,300}?folderOpen/, 'runOptions requests folderOpen'],
+];
+
+/**
+ * An interpreter invoked against a file whose extension claims to be a binary
+ * asset. Legitimate tooling never runs a font or an image, so this catches the
+ * smuggling trick generically, independent of any campaign indicator.
+ */
+const INTERPRETER_ON_ASSET =
+  /\b(?:node|nodejs|python3?|ruby|perl|sh|bash|zsh|deno|bun|osascript)\b[^"'\n;|&]{0,120}?\.(?:woff2?|ttf|otf|eot|png|jpe?g|gif|ico|svg|mp4|webp|bmp|tiff?)\b/i;
 
 const CONFIG_RE =
   /^(babel|metro|vite|tailwind|postcss|jest|next|rollup|webpack|svelte|nuxt|vue|astro|craco|karma|cypress|playwright)\.config\.(js|cjs|mjs|ts|mts|cts)$/;
@@ -205,6 +232,26 @@ function scanFile(abs) {
     for (const [re, label] of BEHAVIOUR) {
       if (re.test(text)) out.push(`build config contains ${label}`);
     }
+  }
+
+  // Auto-run lives in editor and CI configuration, so check it by location
+  // rather than by build-config name.
+  const norm = abs.split(sep).join('/');
+  const isEditorOrCiConfig =
+    /\/\.(vscode|idea|devcontainer|githooks)\//.test(norm)
+    || /\/\.github\/workflows\//.test(norm)
+    || /(^|\/)(tasks|settings|launch)\.json$/.test(norm);
+
+  if (isEditorOrCiConfig) {
+    for (const [re, label] of AUTORUN) {
+      if (re.test(text)) out.push(label);
+    }
+  }
+
+  // Generic in every file: nothing legitimate executes a font or an image.
+  const asset = text.match(INTERPRETER_ON_ASSET);
+  if (asset) {
+    out.push(`an interpreter is invoked on a binary asset: ${asset[0].trim().slice(0, 80)}`);
   }
 
   return out;
