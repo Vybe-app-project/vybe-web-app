@@ -690,6 +690,7 @@ export function ButtonLink({
   className,
   children,
   viewTransition = true,
+  state,
   ...rest
 }: {
   to: string;
@@ -701,9 +702,11 @@ export function ButtonLink({
   className?: string;
   children?: ReactNode;
   viewTransition?: boolean;
+  /** Router location state for the destination (e.g. where its back link should return to). */
+  state?: unknown;
 } & Omit<HTMLAttributes<HTMLAnchorElement>, 'className' | 'children'>) {
   return (
-    <Link to={to} viewTransition={viewTransition} className={buttonClass({ variant, size, block, className })} {...rest}>
+    <Link to={to} state={state} viewTransition={viewTransition} className={buttonClass({ variant, size, block, className })} {...rest}>
       {icon}
       {children}
       {iconRight}
@@ -2179,9 +2182,10 @@ export function useToast(): ToastApi {
 /* ================================================================== empty / error */
 
 export type EmptyStateVariant = 'first-run' | 'no-results' | 'offline' | 'error';
-export type EmptyStateAction = ReactNode | { label: string; onClick?: () => void; to?: string; icon?: ReactNode; variant?: ButtonVariant };
+type EmptyStateActionSpec = { label: string; onClick?: () => void; to?: string; state?: unknown; icon?: ReactNode; variant?: ButtonVariant };
+export type EmptyStateAction = ReactNode | EmptyStateActionSpec;
 
-function isActionSpec(a: EmptyStateAction): a is { label: string; onClick?: () => void; to?: string; icon?: ReactNode; variant?: ButtonVariant } {
+function isActionSpec(a: EmptyStateAction): a is EmptyStateActionSpec {
   return !!a && typeof a === 'object' && 'label' in (a as object) && typeof (a as { label?: unknown }).label === 'string';
 }
 
@@ -2190,7 +2194,7 @@ function renderAction(a: EmptyStateAction, fallbackVariant: ButtonVariant) {
   if (isActionSpec(a)) {
     if (a.to) {
       return (
-        <ButtonLink to={a.to} variant={a.variant ?? fallbackVariant} icon={a.icon}>
+        <ButtonLink to={a.to} state={a.state} variant={a.variant ?? fallbackVariant} icon={a.icon}>
           {a.label}
         </ButtonLink>
       );

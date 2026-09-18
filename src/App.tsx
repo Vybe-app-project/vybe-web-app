@@ -62,6 +62,9 @@ const AdminTrainers = lazy(() => import('./pages/admin/AdminTrainers'));
 const AdminAdmins = lazy(() => import('./pages/admin/AdminAdmins'));
 const AdminAudit = lazy(() => import('./pages/admin/AdminAudit'));
 const AdminSystem = lazy(() => import('./pages/admin/AdminSystem'));
+const AdminCatalog = lazy(() => import('./pages/admin/AdminCatalog'));
+const AdminCatalogWorkout = lazy(() => import('./pages/admin/AdminCatalogWorkout'));
+const AdminCatalogPlan = lazy(() => import('./pages/admin/AdminCatalogPlan'));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -195,6 +198,12 @@ export default function App() {
             <Route path="reports" element={<AdminReports />} />
             <Route path="support" element={<AdminSupport />} />
             <Route path="trainers" element={<AdminTrainers />} />
+            {/* Premade workout / plan catalog: list, then one editor route per kind ("new" or an id). */}
+            <Route path="catalog" element={<AdminCatalog />} />
+            <Route path="catalog/workouts/new" element={<AdminCatalogWorkout />} />
+            <Route path="catalog/workouts/:workoutId" element={<AdminCatalogWorkout />} />
+            <Route path="catalog/plans/new" element={<AdminCatalogPlan />} />
+            <Route path="catalog/plans/:planId" element={<AdminCatalogPlan />} />
             <Route path="admins" element={<AdminAdmins />} />
             <Route path="audit" element={<AdminAudit />} />
             <Route path="system" element={<AdminSystem />} />

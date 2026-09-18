@@ -134,6 +134,51 @@ test('admin sessions are tab-scoped and legacy paths still resolve', () => {
   }
 });
 
+test('the admin catalog manager is routed, in the console nav, and talks to the catalog API as staff', () => {
+  const app = read('src/App.tsx');
+  // The list plus one editor route per kind ("new" and an id), all under the RequireAdmin outlet.
+  for (const route of ['catalog', 'catalog/workouts/new', 'catalog/workouts/:workoutId', 'catalog/plans/new', 'catalog/plans/:planId']) {
+    assert.match(app, new RegExp(`path=["']${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`), `missing /admin/${route}`);
+  }
+  const layout = read('src/pages/admin/AdminLayout.tsx');
+  assert.match(layout, /\{ to: '\/admin\/catalog', label: 'Catalog', Icon: Dumbbell \}/);
+
+  // Every catalog call carries the staff token and every path is a literal
+  // the contract audit can pin; the cover upload uses the one presign purpose
+  // the catalog's media verifier accepts.
+  const api = read('src/pages/admin/catalogApi.ts');
+  assert.doesNotMatch(api, /\bapi\.(get|post|patch|put|delete)\(/, 'catalog calls must use adminApi, never the member client');
+  for (const route of ['/admin/catalog/workouts', '/admin/catalog/plans', '/upload/presign']) {
+    assert.ok(api.includes(`'${route}'`), `missing literal ${route}`);
+  }
+  assert.match(api, /purpose: 'media'/);
+
+  // The editors seed their form only from a fetch that settled during this
+  // mount (never the cached copy TanStack serves while it refetches) and diff
+  // against the record that seeded it; tests/admin-catalog-editor-seed.test.mjs
+  // shows why. Back/Cancel/save return to the list view the admin came from.
+  for (const [file, kind] of [['src/pages/admin/AdminCatalogWorkout.tsx', 'workout'], ['src/pages/admin/AdminCatalogPlan.tsx', 'plan']]) {
+    const editor = read(file);
+    assert.match(editor, /staleTime: 0/, `${file}: the detail query must refetch on every mount`);
+    assert.match(editor, /seedableRecord\(detail\)/, `${file}: the draft must wait for a settled fetch`);
+    assert.match(editor, new RegExp(`${kind}SessionBody\\(current\\)`), `${file}: the body must be diffed against the seeded baseline`);
+    assert.doesNotMatch(editor, /build(?:Workout|Plan)Body\(/, `${file}: never diff against the live query result`);
+    assert.match(editor, /catalogReturnPath\(location\.state/, `${file}: return to the list view the admin came from`);
+  }
+  assert.match(read('src/pages/admin/AdminCatalog.tsx'), /catalogReturnState\(location\)/);
+
+  const snapshot = JSON.parse(read('contracts/backend-routes.json'));
+  const pinned = new Set(snapshot.routes.map((route) => `${route.method} ${route.path}`));
+  for (const route of [
+    'GET /api/admin/catalog/workouts', 'POST /api/admin/catalog/workouts', 'GET /api/admin/catalog/workouts/:id',
+    'PATCH /api/admin/catalog/workouts/:id', 'DELETE /api/admin/catalog/workouts/:id',
+    'GET /api/admin/catalog/plans', 'POST /api/admin/catalog/plans', 'GET /api/admin/catalog/plans/:id',
+    'PATCH /api/admin/catalog/plans/:id', 'DELETE /api/admin/catalog/plans/:id',
+  ]) {
+    assert.ok(pinned.has(route), `contracts/backend-routes.json must pin ${route}`);
+  }
+});
+
 test('public legal and deletion pages ship without placeholder configuration', () => {
   const required = [
     'privacy-policy.html',
