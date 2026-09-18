@@ -29,12 +29,16 @@ for (const relative of [
   'fonts/LICENSE-Archivo.txt',
   'healthz.json',
   'robots.txt',
+  'sw-private-cache-cleanup.js',
 ]) {
   const target = path.join(dist, relative);
   assert.ok(fs.statSync(target).size > 0, `missing or empty build asset: ${relative}`);
 }
 
 const index = fs.readFileSync(path.join(dist, 'index.html'), 'utf8');
+const worker = fs.readFileSync(path.join(dist, 'sw.js'), 'utf8');
+assert.match(worker, /sw-private-cache-cleanup\.js/, 'worker must migrate legacy private caches');
+assert.doesNotMatch(worker, /cacheName:"vybe-(?:api|media)"/, 'worker must not persist API responses or private media');
 const assetRefs = [...index.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)]
   .map((match) => match[1]);
 assert.ok(assetRefs.some((asset) => asset.endsWith('.js')), 'index has no JavaScript bundle');
