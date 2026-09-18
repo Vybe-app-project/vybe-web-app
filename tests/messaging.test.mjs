@@ -218,6 +218,9 @@ test('the people typeahead is shared, debounced, limited, abortable and keyboard
   assert.match(src, /case 'ArrowDown':/);
   assert.match(src, /aria-label="Clear search"/);
   assert.match(src, /<button\s+type="button"\s+ref=\{buttonRef\}/, 'rows stay buttons so role queries keep working');
+  // A button may not contain a button: rows with their own actions render them beside the row button.
+  assert.match(src, /\{aside \? <div className="flex shrink-0 items-center gap-1\.5 pr-3">\{trailing\}<\/div> : null\}/);
+  assert.match(read('src/pages/Friends.tsx'), /trailingInteractive/, 'the Friends page passes buttons in the trailing slot');
   assert.match(src, /No one matches/);
   assert.match(src, /RECENT_KEY = 'vybe.recentPeople'/);
   for (const [file, needle] of [

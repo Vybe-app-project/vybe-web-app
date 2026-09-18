@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg } from '../lib/api';
@@ -114,6 +114,7 @@ function ListShell({
 export default function Friends() {
   const qc = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tabParam = params.get('tab');
   const tab: TabKey = isTab(tabParam) ? tabParam : 'friends';
@@ -290,13 +291,10 @@ export default function Friends() {
           hint={searching ? undefined : 'Search by name or username.'}
           placeholder="Search people"
           recent={false}
+          trailingInteractive
           emptyState={<span className="sr-only">Type to search people on Vybe.</span>}
           listClassName="min-h-0 max-h-[24rem]"
-          onPick={(u) => {
-            const rel = relationship.get(String(u._id));
-            if (rel?.status === 'incoming' && rel.requestId) acceptFriend.mutate(rel.requestId);
-            else if (!rel) sendRequest.mutate(u._id);
-          }}
+          onPick={(u) => navigate(`/u/${u._id}`, { viewTransition: true })}
           trailing={(u: Person) => {
             const rel = relationship.get(String(u._id));
             if (rel?.status === 'friends' || u.isFriend) {
@@ -313,10 +311,7 @@ export default function Friends() {
                   variant="primary"
                   icon={<Check size={16} />}
                   loading={acceptFriend.isPending && acceptFriend.variables === rel.requestId}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    acceptFriend.mutate(rel.requestId!);
-                  }}
+                  onClick={() => acceptFriend.mutate(rel.requestId!)}
                 >
                   Accept
                 </Button>
@@ -328,10 +323,7 @@ export default function Friends() {
                   variant="secondary"
                   title="Withdraw request"
                   loading={declineFriend.isPending && declineFriend.variables === rel?.requestId}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (rel?.requestId) declineFriend.mutate(rel.requestId);
-                  }}
+                  onClick={() => rel?.requestId && declineFriend.mutate(rel.requestId)}
                 >
                   Requested
                 </Button>
@@ -342,10 +334,7 @@ export default function Friends() {
                 variant="primary"
                 icon={<UserPlus size={16} />}
                 loading={sendRequest.isPending && sendRequest.variables === u._id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  sendRequest.mutate(u._id);
-                }}
+                onClick={() => sendRequest.mutate(u._id)}
               >
                 Add
               </Button>

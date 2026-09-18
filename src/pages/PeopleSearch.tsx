@@ -130,6 +130,7 @@ export function PersonRow({
   user,
   onClick,
   trailing,
+  trailingInteractive = false,
   selected,
   meta,
   disabled,
@@ -141,6 +142,12 @@ export function PersonRow({
   user: Person;
   onClick: () => void;
   trailing?: ReactNode;
+  /**
+   * The trailing slot holds its own buttons (Add / Accept …): it is rendered
+   * beside the row button rather than inside it, since a button may not
+   * contain another button.
+   */
+  trailingInteractive?: boolean;
   /** Multi-select: renders as a checkbox row. */
   selected?: boolean;
   meta?: ReactNode;
@@ -151,8 +158,9 @@ export function PersonRow({
   'data-index'?: number;
 }) {
   const name = personName(user);
+  const aside = trailingInteractive && !!trailing;
   return (
-    <li>
+    <li className={cx('flex items-center rounded-md transition-colors dur-1', aside && (selected ? 'bg-brand-soft' : 'hover:bg-surface-2'), aside && className)}>
       <button
         type="button"
         ref={buttonRef}
@@ -163,10 +171,10 @@ export function PersonRow({
         role={selected === undefined ? undefined : 'checkbox'}
         aria-checked={selected === undefined ? undefined : selected}
         className={cx(
-          'flex min-h-14 w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand',
-          selected ? 'bg-brand-soft' : 'hover:bg-surface-2 active:bg-surface-2 focus-visible:bg-surface-2',
+          'flex min-h-14 w-full min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand',
+          !aside && (selected ? 'bg-brand-soft' : 'hover:bg-surface-2 active:bg-surface-2 focus-visible:bg-surface-2'),
           disabled && 'opacity-60',
-          className,
+          !aside && className,
         )}
       >
         <span className="relative shrink-0">
@@ -188,8 +196,9 @@ export function PersonRow({
             {meta}
           </span>
         </span>
-        {trailing}
+        {!aside ? trailing : null}
       </button>
+      {aside ? <div className="flex shrink-0 items-center gap-1.5 pr-3">{trailing}</div> : null}
     </li>
   );
 }
@@ -231,6 +240,8 @@ export type PeopleSearchProps = {
   recent?: boolean;
   /** Per-row action on the right. Defaults to "Message" / a checkbox. */
   trailing?: (user: Person) => ReactNode;
+  /** Set when `trailing` renders buttons of its own (see PersonRow). */
+  trailingInteractive?: boolean;
   meta?: (user: Person) => ReactNode;
   label?: string;
   hideLabel?: boolean;
@@ -258,6 +269,7 @@ export default function PeopleSearch({
   emptyState,
   recent = true,
   trailing,
+  trailingInteractive = false,
   meta,
   label = 'Search people',
   hideLabel = true,
@@ -449,6 +461,7 @@ export default function PeopleSearch({
                     }}
                     onKeyDown={onRowKeyDown(i)}
                     onClick={() => pick(u)}
+                    trailingInteractive={trailingInteractive && !!trailing}
                     selected={mode === 'multi' ? on : undefined}
                     meta={meta ? meta(u) : !searching && !emptyList ? <Clock size={12} className="shrink-0 text-text-3" aria-label="Recent" /> : undefined}
                     trailing={
