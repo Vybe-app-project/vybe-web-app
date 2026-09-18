@@ -224,7 +224,7 @@ export default function Water() {
     queryKey,
     queryFn: async (): Promise<TodayWater> => {
       const { data } = await api.get<TodayWater>('/water/today', {
-        params: { timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1 },
+        params: { timezoneOffsetMinutes: new Date().getTimezoneOffset() },
       });
       return data;
     },

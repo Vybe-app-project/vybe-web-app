@@ -42,7 +42,7 @@ import { Award, Calendar, Camera, ChevronRight, Edit, MapPin, Settings as Settin
 import { UserBadges } from './UserRow';
 import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
 
-const tzOffset = () => new Date().getTimezoneOffset() * -1;
+const tzOffset = () => new Date().getTimezoneOffset();
 
 /** Profile pages read best at post width; the shell owns the gutter. */
 export const PAGE = 'mx-auto w-full max-w-[52rem] space-y-6';

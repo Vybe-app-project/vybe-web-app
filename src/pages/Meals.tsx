@@ -773,7 +773,7 @@ export default function Meals() {
     queryFn: async (): Promise<DailySummaryResponse['data'] | null> => {
       try {
         const { data } = await api.get<DailySummaryResponse>('/health-goals/daily-summary', {
-          params: { timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1 },
+          params: { timezoneOffsetMinutes: new Date().getTimezoneOffset() },
         });
         return data.data;
       } catch (e: unknown) {

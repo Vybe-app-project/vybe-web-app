@@ -214,7 +214,7 @@ const fmtDate = (iso?: string | null) => {
   return isValid(d) ? format(d, 'MMM d, yyyy') : '';
 };
 
-const tzOffset = () => new Date().getTimezoneOffset() * -1;
+const tzOffset = () => new Date().getTimezoneOffset();
 
 /** "12 / 20 workouts" — the criteria key is an enum, so humanise it. */
 const criteriaLabel = (a: Achievement) => humanize(a.criteria?.type).toLowerCase();

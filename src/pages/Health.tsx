@@ -131,8 +131,11 @@ const WINDOWS: { key: TimeWindow; label: string }[] = [
 
 const WINDOW_NOUN: Record<TimeWindow, string> = { week: 'this week', month: 'this month', year: 'this year' };
 
-/** The API expects a signed offset where positive means east of UTC. */
-export const timezoneOffsetMinutes = () => new Date().getTimezoneOffset() * -1;
+// Re-exported so existing imports keep working. The previous definition here
+// negated the offset under a comment that mis-stated the server's convention;
+// see src/lib/timezone.ts for the correct one and why.
+import { timezoneOffsetMinutes } from '../lib/timezone';
+export { timezoneOffsetMinutes };
 
 const shortDate = (value: string) => {
   const d = parseISO(value);
