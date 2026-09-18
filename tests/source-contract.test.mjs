@@ -65,6 +65,20 @@ test('account deletion remains a deliberate authenticated operation', () => {
   assert.match(settings, /Permanently delete my account/);
 });
 
+test('admin sessions are tab-scoped and legacy paths still resolve', () => {
+  const api = read('src/lib/api.ts');
+  // The admin console shares the consumer origin; its token must not persist
+  // past the tab (item 14 of the post-rebuild audit).
+  assert.match(api, /getAdmin: \(\) => sessionStorage\.getItem\(ADMIN_TOKEN_KEY\)/);
+  assert.match(api, /setAdmin: \(t: string\) => sessionStorage\.setItem\(ADMIN_TOKEN_KEY, t\)/);
+  assert.doesNotMatch(api, /localStorage\.setItem\(ADMIN_TOKEN_KEY/);
+
+  const app = read('src/App.tsx');
+  for (const legacy of ['workout-logs', 'livestreams', 'meal-templates', 'health-goals', 'water', 'explore', 'inbox']) {
+    assert.match(app, new RegExp(`path=["']${legacy}["']`), `legacy path /${legacy} must redirect`);
+  }
+});
+
 test('public legal and deletion pages ship without placeholder configuration', () => {
   const required = [
     'privacy-policy.html',

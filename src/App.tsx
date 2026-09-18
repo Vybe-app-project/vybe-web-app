@@ -127,6 +127,11 @@ function RedirectPost() {
   return <Navigate to={postId ? `/p/${postId}` : '/'} replace />;
 }
 
+function RedirectLive() {
+  const { streamId } = useParams();
+  return <Navigate to={streamId ? `/live/${streamId}` : '/live'} replace />;
+}
+
 /** Service-worker lifecycle: prompt to reload when a new build is waiting. */
 function PwaUpdates() {
   const toast = useToast();
@@ -225,6 +230,9 @@ export default function App() {
             <Route path="meal-templates" element={<Navigate to="/meals/templates" replace />} />
             <Route path="health-goals" element={<Navigate to="/health/goals" replace />} />
             <Route path="water" element={<Navigate to="/health/water" replace />} />
+            <Route path="workout-logs" element={<Navigate to="/workouts/logs" replace />} />
+            <Route path="livestreams" element={<Navigate to="/live" replace />} />
+            <Route path="livestreams/:streamId" element={<RedirectLive />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

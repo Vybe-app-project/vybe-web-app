@@ -8,13 +8,25 @@ export const ORIGIN_BASE = API_BASE.replace(/\/api\/?$/, '');
 const TOKEN_KEY = 'vybe.token';
 const ADMIN_TOKEN_KEY = 'vybe.adminToken';
 
+// Consumer sessions live in localStorage so the installed PWA survives a
+// relaunch. Admin sessions live in sessionStorage: they end with the tab,
+// which is the right lifetime for a moderation console that shares its origin
+// with the consumer app and is used from shared machines. The previous
+// console kept the admin token in localStorage; any such token is dropped
+// rather than migrated so it cannot outlive this change.
+try {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
+} catch {
+  // Storage can be unavailable (privacy mode); nothing to clean up then.
+}
+
 export const tokenStore = {
   get: () => localStorage.getItem(TOKEN_KEY),
   set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
   clear: () => localStorage.removeItem(TOKEN_KEY),
-  getAdmin: () => localStorage.getItem(ADMIN_TOKEN_KEY),
-  setAdmin: (t: string) => localStorage.setItem(ADMIN_TOKEN_KEY, t),
-  clearAdmin: () => localStorage.removeItem(ADMIN_TOKEN_KEY),
+  getAdmin: () => sessionStorage.getItem(ADMIN_TOKEN_KEY),
+  setAdmin: (t: string) => sessionStorage.setItem(ADMIN_TOKEN_KEY, t),
+  clearAdmin: () => sessionStorage.removeItem(ADMIN_TOKEN_KEY),
 };
 
 export const api = axios.create({ baseURL: API_BASE, timeout: 30000 });
