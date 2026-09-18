@@ -5,7 +5,7 @@
  * target to its canonical route here. Keep the type list and the id rule in
  * step with the mobile module.
  */
-export const SHARE_TYPES = ['post', 'profile', 'meal', 'meal-template', 'meal-plan', 'workout', 'gym'] as const;
+export const SHARE_TYPES = ['post', 'profile', 'meal', 'meal-template', 'meal-plan', 'workout', 'gym', 'community'] as const;
 export type ShareType = (typeof SHARE_TYPES)[number];
 
 const SHARE_ENTITY_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -18,6 +18,7 @@ export const SHARE_LABEL: Record<ShareType, string> = {
   'meal-plan': 'weekly meal plan',
   workout: 'workout',
   gym: 'gym',
+  community: 'community',
 };
 
 export function isShareType(value: unknown): value is ShareType {
@@ -31,10 +32,12 @@ const MEAL_SHARE_TOKEN = /^[a-f0-9]{64}$/i;
  * Canonical in-app destination for a share target, or null when the link is
  * malformed. Templates and weekly plans travel as share tokens (or a public
  * plan id), which their pages read from `?shared=`; gyms open their detail
- * modal from `?gym=`. A meal travels as its share token when the sender
- * shared it from the app (the recipient may not be allowed to see the meal by
- * id), so a token lands on the shared-meal page and only a plain id on the
- * meal itself.
+ * modal from `?gym=` and communities theirs from `?community=`. (Older app
+ * builds shared communities as type `gym`; the Gyms page falls back to the
+ * community route when such an id is not a directory gym.) A meal travels as
+ * its share token when the sender shared it from the app (the recipient may
+ * not be allowed to see the meal by id), so a token lands on the shared-meal
+ * page and only a plain id on the meal itself.
  */
 export function shareDestination(type: string | null, id: string | null): string | null {
   if (!isShareType(type) || typeof id !== 'string' || !SHARE_ENTITY_ID.test(id)) return null;
@@ -54,6 +57,8 @@ export function shareDestination(type: string | null, id: string | null): string
       return `/workouts/${q}`;
     case 'gym':
       return `/gyms?gym=${q}`;
+    case 'community':
+      return `/communities?community=${q}`;
   }
 }
 

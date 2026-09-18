@@ -1490,14 +1490,25 @@ export function CardHeader({
 }
 
 /** Media slot inside a card: 14 px radius (card 20 → media 14 → chip 6). */
-export function CardMedia({ className, children, ratio }: { className?: string; children: ReactNode; ratio?: '1/1' | '4/5' | '16/9' | '3/2' }) {
+export function CardMedia({
+  className,
+  children,
+  ratio,
+  as: Tag = 'div',
+}: {
+  className?: string;
+  children: ReactNode;
+  ratio?: '1/1' | '4/5' | '16/9' | '3/2';
+  /** `span` when the media sits inside a `<button>` (block content is invalid there). */
+  as?: 'div' | 'span';
+}) {
   return (
-    <div
-      className={cx('overflow-hidden rounded-md bg-surface-2', className)}
+    <Tag
+      className={cx('block overflow-hidden rounded-md bg-surface-2', className)}
       style={ratio ? { aspectRatio: ratio.replace('/', ' / ') } : undefined}
     >
       {children}
-    </div>
+    </Tag>
   );
 }
 
@@ -1659,6 +1670,12 @@ export function useFocusTrap(active: boolean, ref: RefObject<HTMLElement | null>
   }, [active, ref, initialFocus]);
 }
 
+/** Open modals, bottom to top; see the Escape handling in Modal. */
+const modalStack: symbol[] = [];
+export const isTopmostModal = (token: symbol | null) => (
+  modalStack.length > 0 && modalStack[modalStack.length - 1] === token
+);
+
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 const MODAL_WIDTH: Record<ModalSize, string> = {
   sm: 'md:max-w-[30rem]',
@@ -1711,24 +1728,47 @@ export function Modal({
   const titleId = useId();
   const descId = useId();
   useLockBody(mounted);
-  useFocusTrap(open, panelRef, initialFocusRef);
+  // The panel mounts one render after `open` flips (usePresence), so the trap
+  // has to wait for it: armed on `open` alone it read a null panel ref, never
+  // re-ran, and Tab walked the page behind the sheet.
+  useFocusTrap(open && mounted, panelRef, initialFocusRef);
 
+  // Only the topmost open modal answers Escape. Every Modal listens on
+  // window, and stopPropagation inside one listener does not silence its
+  // siblings, so a ConfirmDialog over a sheet used to take both down.
+  const stackToken = useRef<symbol | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const mine = Symbol('modal');
+    stackToken.current = mine;
+    modalStack.push(mine);
+    return () => {
+      const at = modalStack.indexOf(mine);
+      if (at >= 0) modalStack.splice(at, 1);
+      if (stackToken.current === mine) stackToken.current = null;
+    };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== 'Escape') return;
+      if (!isTopmostModal(stackToken.current)) return;
+      e.stopPropagation();
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Swipe-to-dismiss on the sheet handle / header.
+  // Swipe-to-dismiss on the sheet handle / header. Only a finger starts a
+  // drag: capturing a mouse/pen pointer here stole the click from the Close
+  // button (the X did nothing on a narrow desktop window or an iPad with a
+  // trackpad), and a press that begins on a control is that control's.
   const drag = useRef<{ startY: number; startT: number; dy: number } | null>(null);
   const onDragStart = (e: ReactPointerEvent) => {
     if (!asSheet) return;
+    if (e.pointerType !== 'touch') return;
+    if ((e.target as HTMLElement | null)?.closest?.('button, a, input, textarea, select, [role="button"]')) return;
     drag.current = { startY: e.clientY, startT: performance.now(), dy: 0 };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     if (panelRef.current) panelRef.current.style.transition = 'none';
@@ -1984,6 +2024,10 @@ export function Menu({
       case 'Escape':
       case 'Tab':
         e.preventDefault();
+        // Escape belongs to the menu while it is open: the Modal listens for
+        // it on window, and without this a member menu inside a community
+        // sheet took the whole sheet down with it.
+        e.stopPropagation();
         setOpen(false);
         wrapRef.current?.querySelector<HTMLElement>('button')?.focus();
         break;

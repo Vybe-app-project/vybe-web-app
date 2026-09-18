@@ -74,7 +74,8 @@ export type Post = {
   createdAt: string;
   views?: number;
   category?: string;
-  community?: { _id: string; name?: string } | null;
+  /** Populated by the API for community posts (name, vicinity). */
+  community?: { _id: string; name?: string; vicinity?: string } | null;
 };
 
 export type PagedPosts = {
@@ -231,6 +232,37 @@ export async function uploadImage(
     type: String(data.type || file.type).startsWith('video') ? 'video' : 'image',
     size: data.size,
   };
+}
+
+/**
+ * Presigned upload for records whose media verifier demands a completed,
+ * owner-scoped key under purpose `media` (community covers, gym photos):
+ * POST /upload/presign, transfer the bytes, hand back the storage key.
+ * Mirrors the admin catalog's cover flow on the member client.
+ */
+export async function uploadOwnedMedia(file: File): Promise<{ key: string; url: string }> {
+  const contentType = file.type || 'image/jpeg';
+  const { data } = await api.post('/upload/presign', { contentType, purpose: 'media', sizeBytes: file.size });
+  const p = data as {
+    uploadUrl: string;
+    uploadMethod: 'PUT' | 'POST';
+    uploadFields?: Record<string, string>;
+    publicUrl?: string;
+    storageReference?: string;
+    key: string;
+  };
+  let res: Response;
+  if (p.uploadMethod === 'POST') {
+    const form = new FormData();
+    Object.entries(p.uploadFields || {}).forEach(([k, v]) => form.append(k, v));
+    form.append('file', file);
+    res = await fetch(p.uploadUrl, { method: 'POST', body: form });
+  } else {
+    res = await fetch(p.uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: file });
+  }
+  if (!res.ok) throw new Error(`Upload failed (${res.status}). Try a smaller photo or check your connection.`);
+  const key = p.storageReference || p.key;
+  return { key, url: p.publicUrl || key };
 }
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;

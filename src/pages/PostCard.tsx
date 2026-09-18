@@ -45,6 +45,7 @@ import {
   ShareUp,
   Shield,
   Trash,
+  Users,
   X,
 } from './icons';
 import { useReportModal } from './Report';
@@ -897,6 +898,18 @@ export default function PostCard({
           </div>
         </div>
       </div>
+
+      {post.community?._id ? (
+        <Link
+          to={`/communities?community=${encodeURIComponent(post.community._id)}`}
+          viewTransition
+          className="relative z-[2] mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-xs text-xs font-semibold text-brand-text underline-offset-2 hover:underline"
+          aria-label={`Posted in ${post.community.name || 'a community'} — open community`}
+        >
+          <Users size={14} className="shrink-0" />
+          <span className="truncate">in {post.community.name || 'a community'}</span>
+        </Link>
+      ) : null}
 
       {/* media first, then text */}
       <PostMediaGrid post={post} className="mt-3" expanded={expandMedia} onOpen={setLightbox} />
