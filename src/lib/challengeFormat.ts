@@ -110,3 +110,21 @@ export function unitLabel(goalUnit?: string | null, goalUnitLabel?: string | nul
 export function withUnit(text: string, unit: string): string {
   return unit ? `${text} ${unit}` : text;
 }
+
+const SINGULAR_UNITS: Record<string, string> = {
+  workouts: 'workout',
+  calories: 'calorie',
+  steps: 'step',
+  pounds: 'pound',
+  miles: 'mile',
+  minutes: 'minute',
+};
+
+/**
+ * "1 workout", "2 workouts": built-in units singularise for exactly one. A
+ * creator's custom label is printed as written, whatever the count.
+ */
+export function pluralUnit(unit: string, count: number): string {
+  if (count === 1 && SINGULAR_UNITS[unit]) return SINGULAR_UNITS[unit];
+  return unit;
+}

@@ -39,6 +39,7 @@ import {
 } from './ui';
 import {
   Activity,
+  ArrowRight,
   Clock,
   Copy,
   Dumbbell,
@@ -1478,7 +1479,12 @@ export function PlanCard({
     <Card to={href} linkLabel={`Open ${plan.title}`} className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-md font-semibold text-text-1">{plan.title}</h3>
+          <h3 className="truncate text-md font-semibold text-text-1">
+            {/* Explicit link: the session list below sits above the card overlay and would otherwise swallow most taps. */}
+            <Link to={href} viewTransition className="relative z-[2] rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+              {plan.title}
+            </Link>
+          </h3>
           {plan.goal ? <p className="mt-0.5 text-sm text-text-2">{plan.goal}</p> : null}
           {plan.createdBy ? (
             <Link
@@ -1509,6 +1515,7 @@ export function PlanCard({
         ]}
       />
       {included.length > 0 ? (
+        <>
         <ol className="relative z-[2] divide-y divide-line rounded-md border border-line bg-surface-2/40">
           {included.slice(0, 5).map((entry, i) => (
             <li key={`${entry.week}-${entry.day}-${entry.workout?._id ?? i}`}>
@@ -1528,6 +1535,15 @@ export function PlanCard({
             <li className="px-3 py-2 text-xs text-text-3">and {included.length - 5} more</li>
           ) : null}
         </ol>
+        <Link
+          to={href}
+          viewTransition
+          aria-label={`View schedule for ${plan.title}`}
+          className="relative z-[2] inline-flex min-h-9 items-center gap-1 self-start text-sm font-medium text-brand-text hover:underline"
+        >
+          View schedule <ArrowRight size={14} aria-hidden="true" />
+        </Link>
+        </>
       ) : isOwn && onAddWorkout ? (
         <div className="relative z-[2] flex flex-col items-center gap-2 rounded-md border border-dashed border-line-strong px-3 py-4 text-center">
           <p className="text-xs text-text-3">No workouts scheduled yet</p>

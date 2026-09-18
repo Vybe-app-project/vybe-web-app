@@ -5,6 +5,7 @@ import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   formatChallengeWindow,
+  pluralUnit,
   remainingLabel,
   timeBadgeFor,
   unitLabel,
@@ -55,6 +56,7 @@ import {
   ChevronRight,
   Clock,
   Edit,
+  Lock,
   Flame,
   Medal,
   Plus,
@@ -816,6 +818,10 @@ function ChallengeDetailModal({
   const isOwner =
     !!challenge && challenge.ownership === 'user' && idOf(challenge.createdBy) === myId;
   const closed = !!challenge && ['closed', 'ended'].includes(timeBadge(challenge).state);
+  // isActive false means the owner already closed it: the history is kept and
+  // there is nothing left for the owner to edit or remove.
+  const archived = challenge?.isActive === false;
+  const hasParticipants = (challenge?.participants?.length ?? 0) > 0;
   const unit = challenge ? unitOf(challenge) : '';
   const participantCount =
     stats.data?.totalParticipants ??
@@ -889,7 +895,7 @@ function ChallengeDetailModal({
       return data.progress;
     },
     onSuccess: (progress) => {
-      toast.success(`Synced: ${withUnit(formatStat(progress), unit || 'logged')}${unit ? ' logged' : ''}`);
+      toast.success(`Synced: ${withUnit(formatStat(progress), unit ? pluralUnit(unit, progress) : 'logged')}${unit ? ' logged' : ''}`);
       pulse();
       invalidate();
     },
@@ -898,6 +904,7 @@ function ChallengeDetailModal({
 
   const time = challenge ? timeBadge(challenge) : null;
   const myPct = challenge ? pctOf(myParticipation?.progress ?? 0, challenge.goal) : 0;
+  const left = Math.max(0, (challenge?.goal ?? 0) - (myParticipation?.progress ?? 0));
   const myDone = !!myParticipation?.completed || myPct >= 100;
 
   return (
@@ -911,15 +918,22 @@ function ChallengeDetailModal({
         challenge && !detail.isLoading ? (
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap gap-2">
-              {isOwner ? (
+              {isOwner && !archived ? (
                 <>
                   <Button variant="secondary" onClick={() => onEdit(challenge)} icon={<Edit size={16} />}>
                     Edit
                   </Button>
-                  <Button variant="danger" onClick={() => onDelete(challenge)} icon={<Trash size={16} />}>
-                    Delete
+                  {/* A joined challenge is closed, never deleted; the button says which. */}
+                  <Button
+                    variant="danger"
+                    onClick={() => onDelete(challenge)}
+                    icon={hasParticipants ? <Lock size={16} /> : <Trash size={16} />}
+                  >
+                    {hasParticipants ? 'Close challenge' : 'Delete'}
                   </Button>
                 </>
+              ) : isOwner ? (
+                <p className="text-sm text-text-3">Closed. Participants keep their history.</p>
               ) : null}
             </div>
             {joined ? (
@@ -1088,7 +1102,7 @@ function ChallengeDetailModal({
                       <p className="mt-1 text-xs text-text-2">
                         {myDone
                           ? 'Goal reached. Keep logging to climb the board.'
-                          : `${withUnit(formatStat(Math.max(0, challenge.goal - (myParticipation?.progress ?? 0))), unit)} to go.`}
+                          : `${withUnit(formatStat(left), pluralUnit(unit, left))} to go.`}
                       </p>
                     </div>
                   </div>
@@ -1276,6 +1290,7 @@ export default function Challenges() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Challenge | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Challenge | null>(null);
+  const pendingHasParticipants = (pendingDelete?.participants?.length ?? 0) > 0;
 
   const debouncedTerm = useDebounced(term, 400);
   const searching = debouncedTerm.trim().length > 0;
@@ -1675,13 +1690,15 @@ export default function Challenges() {
       <ConfirmDialog
         open={!!pendingDelete}
         destructive
-        title="Delete this challenge?"
+        title={pendingHasParticipants ? 'Close this challenge?' : 'Delete this challenge?'}
         message={
           pendingDelete
-            ? `“${pendingDelete.title}” will be deleted. If it already has participants it is closed out instead, so their history is kept.`
+            ? pendingHasParticipants
+              ? `“${pendingDelete.title}” closes for everyone. Participants keep their progress and it stays under Created by me with a Closed badge.`
+              : `“${pendingDelete.title}” will be deleted. Nobody has joined, so nothing else is lost.`
             : undefined
         }
-        confirmLabel="Delete challenge"
+        confirmLabel={pendingHasParticipants ? 'Close challenge' : 'Delete challenge'}
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => {

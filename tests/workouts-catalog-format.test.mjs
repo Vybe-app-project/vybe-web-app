@@ -52,6 +52,22 @@ test('a custom goal unit uses its label or disappears', () => {
   assert.equal(challenge.withUnit('40 / 100', challenge.unitLabel('custom', 'pull-ups')), '40 / 100 pull-ups');
 });
 
+test('goal units singularise for exactly one; custom labels print as written', () => {
+  assert.equal(challenge.pluralUnit('workouts', 1), 'workout');
+  assert.equal(challenge.pluralUnit('workouts', 2), 'workouts');
+  assert.equal(challenge.pluralUnit('workouts', 0), 'workouts');
+  assert.equal(challenge.pluralUnit('minutes', 1), 'minute');
+  assert.equal(challenge.pluralUnit('calories', 1), 'calorie');
+  assert.equal(challenge.pluralUnit('pull-ups', 1), 'pull-ups');
+  assert.equal(challenge.pluralUnit('', 1), '');
+});
+
+test('the server\'s nameless-sender fallback never reads "you follow liked your workout"', () => {
+  const fallback = { type: 'workout_like', sender: { _id: 'u1' }, message: 'Someone you follow liked your workout.', data: { workoutId: 'w1' } };
+  assert.equal(routes.notificationSentence(fallback), 'liked your workout.');
+  assert.equal(routes.notificationSentence({ ...fallback, sender: null }), 'liked your workout.');
+});
+
 test('workout notifications open the workout and never read "Alex Someone liked"', () => {
   const sender = { _id: 'u1', fullName: 'Vybe Test User' };
   const like = { type: 'workout_like', sender, message: 'Vybe Test User liked your workout.', data: { workoutId: 'w1', senderId: 'u1' } };

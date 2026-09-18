@@ -57,6 +57,9 @@ test('plans have an editor: schedule, remove, edit, delete, and a canonical rout
   // Legacy /workouts/<planId> links land on the canonical plan page.
   assert.match(detail, /<Navigate to=\{`\/workouts\/plans\/\$\{plan\.data\._id\}`\} replace \/>/);
   assert.match(planDetail, /humanize\(plan\.level\)/);
+  // A program card with sessions stays openable: the title links, and so does "View schedule".
+  assert.match(workouts, /aria-label=\{`View schedule for \$\{plan\.title\}`\}/);
+  assert.match(workouts, /<Link to=\{href\} viewTransition className="relative z-\[2\][^"]*">\s*\{plan\.title\}/);
 });
 
 test('premade and community programs are browsable and lists page', () => {
@@ -95,6 +98,13 @@ test('challenge copy: readable time, named custom units, honest delete, closed i
   assert.match(challenges, /key: 'challenge-validation'/);
   assert.match(challenges, /api\.get<ChallengeListResponse>\('\/challenges\/created'\)/);
   assert.match(challenges, /closed \? 'Challenge closed/);
+  // A joined challenge can only be closed (the API keeps it), and a closed one has no owner actions left.
+  assert.match(challenges, /isOwner && !archived \? \(/);
+  assert.match(challenges, /hasParticipants \? 'Close challenge' : 'Delete'/);
+  assert.match(challenges, /pendingHasParticipants \? 'Close challenge' : 'Delete challenge'/);
+  // "Synced: 1 workout logged", "1 workout to go" — never "1 workouts".
+  assert.match(challenges, /pluralUnit\(unit, progress\)/);
+  assert.match(challenges, /pluralUnit\(unit, left\)/);
 });
 
 test('achievement tiles read from the always-loaded personal set, and progress never exceeds the target', () => {

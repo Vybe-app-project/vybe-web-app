@@ -60,7 +60,7 @@ export function notificationSentence(n: NotificationLike): string {
   if (name && raw.toLowerCase().startsWith(name.toLowerCase())) {
     return raw.slice(name.length).replace(/^[\s,:]+/, '');
   }
-  const someone = raw.match(/^(Someone|A creator you follow)\s+(.*)$/i);
+  const someone = raw.match(/^(Someone you follow|Someone|A creator you follow)\s+(.*)$/i);
   if (someone) return someone[2];
   return raw;
 }
