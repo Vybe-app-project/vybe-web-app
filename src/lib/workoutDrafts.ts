@@ -40,7 +40,7 @@ const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
 };
 const generation = () => localStorage.getItem(GENERATION) ?? 'initial';
 const assertScope = (scope: Scope) => {
-  if (active !== scope || generation() !== scope.generation || localStorage.getItem('vybe.token') !== scope.token) {
+  if (active !== scope || generation() !== scope.generation || readConsumerToken() !== scope.token) {
     error('Your account changed. Reload before using a workout draft.');
   }
 };
@@ -84,9 +84,21 @@ async function transaction<T>(run: (drafts: IDBObjectStore, meta: IDBObjectStore
 }
 function revokeLocally() {
   active = null;
+  void purgeRevokedWorkoutDrafts();
+}
+/** Complete an interrupted logout purge without deleting a live tab-only session. */
+export async function purgeRevokedWorkoutDrafts(): Promise<void> {
   if (typeof indexedDB !== 'undefined') {
-    void enqueue(() => transaction<void>((drafts, meta, done) => {
-      drafts.clear(); meta.clear(); done(undefined);
+    await enqueue(() => transaction<void>((drafts, meta, done, fail) => {
+      const request = meta.get('scope');
+      request.onsuccess = () => {
+        try {
+          if (!request.result || request.result.generation !== generation()) {
+            drafts.clear(); meta.clear();
+          }
+          done(undefined);
+        } catch { fail('Local workout draft cleanup is unavailable.'); }
+      };
     })).catch(() => { issue = 'Local workout drafts could not be purged. They remain inaccessible; retry storage cleanup.'; });
   }
 }
@@ -103,18 +115,18 @@ if (typeof window !== 'undefined') {
 }
 
 export async function bindWorkoutDraftAccount(ownerId: string, token: string) {
-  if (!ownerId || !token || localStorage.getItem('vybe.token') !== token) return error('A verified account is required for workout recovery.');
+  if (!ownerId || !token || readConsumerToken() !== token) return error('A verified account is required for workout recovery.');
   const currentGeneration = generation();
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   const sessionHash = [...new Uint8Array(bytes)].map(value => value.toString(16).padStart(2, '0')).join('');
   return enqueue(async () => {
-    if (generation() !== currentGeneration || localStorage.getItem('vybe.token') !== token) return error('Your account changed. Reload before using a workout draft.');
+    if (generation() !== currentGeneration || readConsumerToken() !== token) return error('Your account changed. Reload before using a workout draft.');
     const scope = active?.ownerId === ownerId && active.token === token && active.generation === currentGeneration
       ? active : { ownerId, token, generation: currentGeneration, sessionHash };
     await transaction<void>((drafts, meta, done, fail) => {
       const request = meta.get('scope');
       request.onsuccess = () => {
-        if (generation() !== currentGeneration || localStorage.getItem('vybe.token') !== token) { fail('Your account changed.'); return; }
+        if (generation() !== currentGeneration || readConsumerToken() !== token) { fail('Your account changed.'); return; }
         const old = request.result;
         if (old?.ownerId !== ownerId || old?.sessionHash !== sessionHash || old?.generation !== currentGeneration) drafts.clear();
         meta.put({ ownerId, sessionHash, generation: currentGeneration }, 'scope');
@@ -130,6 +142,7 @@ export function reportWorkoutDraftStorageIssue(message: string) { issue = messag
 export function workoutDraftSessionToken(ownerId: string) {
   if (!active || active.ownerId !== ownerId) return error('Your workout draft no longer belongs to the active session.');
   assertScope(active);
+  if (readVerifiedConsumerToken() !== active.token) return error('Verify your sign-in before sending a workout draft.');
   return active.token;
 }
 export function validWorkoutDraft(value: unknown, ownerId: string): value is WorkoutDraft {
@@ -254,3 +267,4 @@ export const emptyRestTimer = (): RestTimer => ({ durationSeconds: 60, deadline:
 export function restRemaining(timer: RestTimer, now = Date.now()) {
   return timer.deadline !== null ? Math.max(0, Math.ceil((timer.deadline - now) / 1000)) : timer.pausedSeconds ?? timer.durationSeconds;
 }
+import { readConsumerToken, readVerifiedConsumerToken } from './consumerSession';

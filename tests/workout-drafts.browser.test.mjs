@@ -60,6 +60,13 @@ if (!playwright) {
           res.end(storageModule);
           return;
         }
+        if (req.url === '/consumerSession') {
+          res.writeHead(200, { 'Content-Type': 'text/javascript' });
+          res.end(ts.transpileModule(fs.readFileSync(path.join(root, 'src/lib/consumerSession.ts'), 'utf8'), {
+            compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+          }).outputText);
+          return;
+        }
         const target = path.resolve(dist, `.${decodeURIComponent(new URL(req.url, 'http://localhost').pathname)}`);
         if (!target.startsWith(`${dist}${path.sep}`)) { res.writeHead(400); res.end(); return; }
         const file = fs.existsSync(target) && fs.statSync(target).isFile() ? target : path.join(dist, 'index.html');
@@ -86,6 +93,7 @@ if (!playwright) {
         let status = 200;
         let body = { data: [], posts: [], notifications: [], rooms: [] };
         if (url.pathname === '/api/users/me') body = { user: state.user };
+        if (url.pathname === '/api/auth/trainer-application') body = { application: { status: 'none' } };
         if (url.pathname === '/api/workouts/logs' && method === 'GET') body = { workouts: state.logs, total: state.logs.length, page: 1, hasNextPage: false };
         if (url.pathname === '/api/workouts/logs' && method === 'POST') {
           const payload = route.request().postDataJSON();
@@ -421,12 +429,11 @@ if (!playwright) {
         await page.goto(`${base}/settings`);
         await page.getByRole('button', { name: 'Sign out', exact: true }).click();
         await page.waitForURL('**/login');
-        await second.getByLabel('Session name', { exact: true }).fill('Revoked tab input');
-        await second.getByRole('button', { name: 'Log session', exact: true }).click();
-        await second.getByText(/no longer belongs|account changed|current verified account/).first().waitFor();
+        await other.waitForURL(url => url.pathname === '/login');
+        await second.waitFor({ state: 'hidden' });
         assert.deepEqual(await stored(other), []);
         assert.equal(state.saves.length, 0);
-        assert.equal(await second.getByLabel('Session name', { exact: true }).inputValue(), 'Revoked tab input');
+        assert.equal(await other.getByLabel('Session name', { exact: true }).count(), 0);
       } finally { await context.close(); }
     });
     test('authoring and stable request ID survive navigation and page/process replacement without publishing', async () => {
@@ -548,8 +555,8 @@ if (!playwright) {
         await otherTab.goto(`${base}/settings`);
         state.user = userB;
         await otherTab.evaluate(() => localStorage.setItem('vybe.token', 'session-b'));
-        await dialog.getByRole('button', { name: 'Log session', exact: true }).click();
-        await dialog.getByText(/no longer belongs|account changed/).first().waitFor();
+        await dialog.waitFor({ state: 'hidden' });
+        await page.getByRole('heading', { name: 'Workout log', exact: true }).waitFor();
         assert.equal(state.saves.length, 0);
         await page.reload();
         await page.getByRole('heading', { name: 'Workout log', exact: true }).waitFor();

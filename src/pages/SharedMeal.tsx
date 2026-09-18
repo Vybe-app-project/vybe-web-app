@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api, mediaUrl } from '../lib/api';
+import { dayAndTime } from '../lib/timezone';
 import { useAuth } from '../lib/auth';
 import { Avatar, ButtonLink, Card, ErrorState, PageHeader, Skeleton } from './ui';
 import { MacroLine, mealTypeLabel, type Meal } from './Meals';
@@ -66,7 +67,8 @@ export default function SharedMeal() {
   const owner = typeof meal.user === 'object' && meal.user ? meal.user : undefined;
   const ownerName = owner?.fullName || owner?.username;
   const isOwner = Boolean(user && owner && owner._id === user._id);
-  const when = meal.timestamp ? format(new Date(meal.timestamp), 'EEE d MMM, HH:mm') : '';
+  // Same locale time-of-day format as the meal cards ("12:16 PM").
+  const when = dayAndTime(meal.timestamp);
 
   return (
     <>

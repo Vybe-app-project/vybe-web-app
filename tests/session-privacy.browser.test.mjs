@@ -132,12 +132,133 @@ if (!playwrightPath) {
           status: 401, contentType: 'application/json', body: '{}',
         }));
         await page.goto(`${base}/settings`);
-        await page.waitForURL('**/login');
+        await page.waitForURL(url => url.pathname === '/login');
+        assert.equal(new URL(page.url()).searchParams.get('next'), '/settings');
+        assert.equal(new URL(page.url()).searchParams.get('expired'), '1');
         await page.getByRole('heading', { name: 'Welcome back', exact: true }).waitFor();
         assert.equal(await page.evaluate(() => localStorage.getItem('vybe.token')), null);
       } finally {
         await context.close();
       }
+    });
+
+    for (const remember of [true, false]) {
+      test(`remember=${remember}: login, draft binding, tab reload, offline identity and logout retain the correct lifetime`, async () => {
+        const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 390, height: 844 } });
+        try {
+          const page = await context.newPage();
+          page.setDefaultTimeout(12_000);
+          let available = true;
+          const writes = [];
+          await context.route('**/api/**', async route => {
+            const url = new URL(route.request().url());
+            const method = route.request().method();
+            let status = 200;
+            let body = { data: [], posts: [], notifications: [], rooms: [] };
+            if (url.pathname === '/api/auth/login') {
+              assert.equal(route.request().postDataJSON().remember, remember);
+              body = { token: 'fixture-mode-session', user };
+            } else if (url.pathname === '/api/users/me') {
+              status = available ? 200 : 503;
+              body = available ? { user } : { message: 'Fixture unavailable' };
+            } else if (url.pathname === '/api/workouts/logs') {
+              if (method === 'POST') {
+                const payload = route.request().postDataJSON();
+                writes.push(payload);
+                body = { workout: { ...payload, _id: 'saved-fixture', user: user._id } };
+              } else body = { workouts: [], total: 0, page: 1, hasNextPage: false };
+            } else if (url.pathname === '/api/auth/trainer-application') {
+              body = { application: { status: 'none' } };
+            }
+            await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+          });
+          await page.goto(`${base}/login?next=${encodeURIComponent('/workouts/logs?log=1')}`);
+          await page.getByLabel('Email', { exact: true }).fill('fixture@example.invalid');
+          await page.getByLabel('Password', { exact: true }).fill('fixture-only');
+          await page.getByRole('checkbox', { name: 'Keep me signed in' }).setChecked(remember);
+          await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+          let dialog = page.getByRole('dialog', { name: 'Log a session', exact: true });
+          await dialog.waitFor();
+          await dialog.getByLabel('Session name', { exact: true }).fill('Mode scoped private draft');
+          await dialog.getByLabel('Exercise 1 name', { exact: true }).fill('Squat');
+          await dialog.getByText('Local only · unsynced · saved on this device', { exact: true }).waitFor();
+          const storage = await page.evaluate(() => ({
+            localToken: !!localStorage.getItem('vybe.token'), tabToken: !!sessionStorage.getItem('vybe.token'),
+            localUser: !!localStorage.getItem('vybe.user'), tabUser: !!sessionStorage.getItem('vybe.user'),
+          }));
+          assert.deepEqual(storage, { localToken: remember, tabToken: !remember, localUser: remember, tabUser: !remember });
+          await page.reload();
+          await page.getByRole('button', { name: 'Resume workout draft', exact: true }).click();
+          dialog = page.getByRole('dialog', { name: 'Log a session', exact: true });
+          assert.equal(await dialog.getByLabel('Session name', { exact: true }).inputValue(), 'Mode scoped private draft');
+          available = false;
+          await page.reload();
+          await page.getByText('Reconnect to verify your session', { exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: 'Resume workout draft', exact: true }).count(), 0);
+          assert.equal(await page.getByRole('dialog', { name: 'Log a session', exact: true }).count(), 0);
+          assert.equal(writes.length, 0);
+          available = true;
+          await page.getByRole('button', { name: 'Try again', exact: true }).click();
+          await page.getByRole('button', { name: 'Resume workout draft', exact: true }).waitFor();
+          if (!remember) {
+            const fresh = await context.newPage();
+            await fresh.goto(`${base}/workouts/logs`);
+            await fresh.getByRole('heading', { name: 'Welcome back', exact: true }).waitFor();
+            assert.equal(await fresh.evaluate(() => sessionStorage.getItem('vybe.user')), null);
+            await fresh.close();
+            await page.reload();
+            await page.getByRole('button', { name: 'Resume workout draft', exact: true }).waitFor();
+          }
+          await page.getByRole('button', { name: 'Resume workout draft', exact: true }).click();
+          await dialog.getByRole('button', { name: 'Log session', exact: true }).click();
+          await dialog.waitFor({ state: 'hidden' });
+          assert.equal(writes.length, 1);
+          await page.goto(`${base}/settings`);
+          await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+          await page.waitForURL(url => url.pathname === '/login');
+          assert.deepEqual(await page.evaluate(() => [
+            localStorage.getItem('vybe.token'), sessionStorage.getItem('vybe.token'),
+            localStorage.getItem('vybe.user'), sessionStorage.getItem('vybe.user'),
+          ]), [null, null, null, null]);
+        } finally { await context.close(); }
+      });
+    }
+
+    test('a replacement account cannot paint the previous private query while verification is pending', async () => {
+      const context = await browser.newContext({ serviceWorkers: 'block' });
+      let release;
+      try {
+        const page = await context.newPage();
+        await page.addInitScript(() => {
+          if (!localStorage.getItem('vybe.token')) localStorage.setItem('vybe.token', 'fixture-a');
+        });
+        let seenReplacement;
+        const observed = new Promise(resolve => { seenReplacement = resolve; });
+        const held = new Promise(resolve => { release = resolve; });
+        await context.route('**/api/**', async route => {
+          const url = new URL(route.request().url());
+          const isB = route.request().headers().authorization === 'Bearer fixture-b';
+          const owner = isB ? { _id: 'owner-b', username: 'runner-b' } : user;
+          let body = { data: [], posts: [], notifications: [], rooms: [] };
+          if (url.pathname === '/api/users/me') {
+            if (isB) { seenReplacement(); await held; }
+            body = { user: owner };
+          } else if (url.pathname === '/api/workouts/workout/info/single-workout/private-template') {
+            body = { data: { _id: 'private-template', title: isB ? 'Owner B private plan' : 'Owner A private plan', category: 'strength', createdBy: owner, exercises: [] } };
+          }
+          await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+        });
+        await page.goto(`${base}/workouts/private-template`);
+        await page.getByRole('heading', { name: 'Owner A private plan', exact: true }).first().waitFor();
+        const other = await context.newPage();
+        await other.goto(`${base}/cache-fixture`);
+        await other.evaluate(() => localStorage.setItem('vybe.token', 'fixture-b'));
+        await observed;
+        await page.getByRole('heading', { name: 'Owner A private plan', exact: true }).first().waitFor({ state: 'hidden' });
+        release();
+        await page.getByRole('heading', { name: 'Owner B private plan', exact: true }).first().waitFor();
+        assert.equal(await page.getByText('Owner A private plan', { exact: true }).count(), 0);
+      } finally { release?.(); await context.close(); }
     });
 
     test('the built worker removes legacy caches and never serves private data offline', async () => {

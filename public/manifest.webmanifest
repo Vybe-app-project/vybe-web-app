@@ -17,6 +17,29 @@
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
+  "screenshots": [
+    {
+      "src": "/screenshots/phone-health.png",
+      "sizes": "780x1688",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Health overview: fitness score, workouts, calories, steps and streaks for the week"
+    },
+    {
+      "src": "/screenshots/phone-meals.png",
+      "sizes": "780x1688",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Meals: today's calories and macros with daily targets and a food log"
+    },
+    {
+      "src": "/screenshots/desktop-health.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Vybe on a laptop: health overview with weight and calorie trends"
+    }
+  ],
   "shortcuts": [
     {
       "name": "Log workout",

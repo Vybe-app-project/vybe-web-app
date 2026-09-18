@@ -3,12 +3,19 @@ import { useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { FEED_PAGE_SIZE, dedupeById, feedPageParams, nextFeedPageParam, type FeedPageParam } from '../lib/feedLogic';
 import {
   ACCEPTED_IMAGE_TYPES,
+  ACCEPTED_VIDEO_TYPES,
+  MAX_POST_MEDIA,
   MAX_UPLOAD_BYTES,
+  MAX_VIDEO_UPLOAD_BYTES,
+  captureVideoPoster,
   displayName,
   extractHashtags,
+  uploadContentType,
   uploadImage,
+  uploadPresigned,
   useInfiniteScroll,
   type PagedPosts,
   type Post,
@@ -36,12 +43,13 @@ import {
   useOnline,
   useToast,
 } from './ui';
-import { ArrowUp, Image as ImageIcon, Refresh, UserPlus, X } from './icons';
+import { ArrowUp, Image as ImageIcon, Refresh, UserPlus, Video as VideoIcon, X } from './icons';
 import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors } from './PostCard';
+import { StoryTray } from './StoryTray';
 
-const PAGE_SIZE = 10;
-const MAX_IMAGES = 4;
 const MAX_CHARS = 2000;
+
+type Attachment = UploadedMedia & { preview: string; thumbnail?: string };
 
 /* ------------------------------------------------------------------ */
 /* Composer                                                            */
@@ -59,11 +67,11 @@ function Composer({
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const toast = useToast();
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const photoRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLInputElement | null>(null);
 
   const [content, setContent] = useState('');
-  const [medias, setMedias] = useState<UploadedMedia[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
+  const [medias, setMedias] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
@@ -71,9 +79,8 @@ function Composer({
 
   const reset = useCallback(() => {
     setContent('');
-    setMedias([]);
-    setPreviews((prev) => {
-      prev.forEach((url) => URL.revokeObjectURL(url));
+    setMedias((prev) => {
+      prev.forEach((m) => URL.revokeObjectURL(m.preview));
       return [];
     });
   }, []);
@@ -83,7 +90,7 @@ function Composer({
       const text = content.trim();
       const { data } = await api.post('/posts/create', {
         content: text,
-        medias: medias.map((m) => ({ type: m.type, key: m.key, url: m.url })),
+        medias: medias.map((m) => ({ type: m.type, key: m.key, url: m.url, ...(m.thumbnail ? { thumbnail: m.thumbnail } : {}) })),
         hashtags: extractHashtags(text),
         isPublic: true,
       });
@@ -99,52 +106,71 @@ function Composer({
     onError: (e) => toast.error(e, 'Could not share your post.'),
   });
 
+  /**
+   * Photos go through the multipart /upload/image route; video uses the
+   * presigned flow (like stories) and gets a first-frame poster captured in
+   * the browser so the card shows a picture before play.
+   */
   async function addFiles(files: FileList | File[] | null) {
     if (!files || !files.length) return;
     const list = Array.from(files);
-    const room = MAX_IMAGES - medias.length;
+    const room = MAX_POST_MEDIA - medias.length;
     if (room <= 0) {
-      toast.error(`You can attach up to ${MAX_IMAGES} photos per post.`);
+      toast.error(`You can attach up to ${MAX_POST_MEDIA} photos or videos per post.`);
       return;
     }
     const selected = list.slice(0, room);
-    if (list.length > room) toast.info(`Only the first ${room} photo${room === 1 ? '' : 's'} were added — ${MAX_IMAGES} per post.`);
+    if (list.length > room) toast.info(`Only the first ${room} ${room === 1 ? 'file was' : 'files were'} added — ${MAX_POST_MEDIA} per post.`);
 
     onOpen();
     setUploading(true);
     try {
       for (const file of selected) {
-        if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-          toast.error(`${file.name}: use a JPEG, PNG, WebP or HEIC photo.`);
+        const contentType = uploadContentType(file);
+        if (!contentType) {
+          toast.error(`${file.name}: use a JPEG, PNG, WebP or HEIC photo, or an MP4 or MOV video.`);
           continue;
         }
-        if (file.size > MAX_UPLOAD_BYTES) {
-          toast.error(`${file.name} is over 10 MB.`);
+        const isVideo = ACCEPTED_VIDEO_TYPES.includes(contentType);
+        if (file.size > (isVideo ? MAX_VIDEO_UPLOAD_BYTES : MAX_UPLOAD_BYTES)) {
+          toast.error(`${file.name} is over ${isVideo ? '50' : '10'} MB.`);
           continue;
         }
-        const uploaded = await uploadImage(file, 'posts');
-        setMedias((prev) => [...prev, uploaded]);
-        setPreviews((prev) => [...prev, URL.createObjectURL(file)]);
+        if (isVideo) {
+          const [uploaded, poster] = await Promise.all([uploadPresigned(file, contentType, 'media'), captureVideoPoster(file)]);
+          let thumbnail: string | undefined;
+          if (poster) {
+            try {
+              thumbnail = (await uploadPresigned(poster, 'image/jpeg', 'media')).key;
+            } catch {
+              // No poster is fine; the card falls back to the browser's first frame.
+            }
+          }
+          setMedias((prev) => [...prev, { type: 'video', key: uploaded.key, url: uploaded.key, size: file.size, thumbnail, preview: URL.createObjectURL(file) }]);
+        } else {
+          const uploaded = await uploadImage(file, 'posts');
+          setMedias((prev) => [...prev, { ...uploaded, preview: URL.createObjectURL(file) }]);
+        }
       }
     } catch (e) {
-      toast.error(e, 'Photo upload failed.');
+      toast.error(e, 'Upload failed.');
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
+      if (photoRef.current) photoRef.current.value = '';
+      if (videoRef.current) videoRef.current.value = '';
     }
   }
 
   function removeMedia(index: number) {
-    setMedias((prev) => prev.filter((_, i) => i !== index));
-    setPreviews((prev) => {
-      const url = prev[index];
-      if (url) URL.revokeObjectURL(url);
+    setMedias((prev) => {
+      const target = prev[index];
+      if (target) URL.revokeObjectURL(target.preview);
       return prev.filter((_, i) => i !== index);
     });
   }
 
   function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
+    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'));
     if (files.length) {
       e.preventDefault();
       void addFiles(files);
@@ -161,22 +187,19 @@ function Composer({
 
   const canPost = dirty && !create.isPending && !uploading;
   const remaining = MAX_CHARS - content.length;
+  const full = medias.length >= MAX_POST_MEDIA;
 
-  const fileInput = (
-    <input
-      ref={fileRef}
-      type="file"
-      accept={ACCEPTED_IMAGE_TYPES.join(',')}
-      multiple
-      hidden
-      onChange={(e) => void addFiles(e.target.files)}
-    />
+  const fileInputs = (
+    <>
+      <input ref={photoRef} type="file" accept={ACCEPTED_IMAGE_TYPES.join(',')} multiple hidden onChange={(e) => void addFiles(e.target.files)} />
+      <input ref={videoRef} type="file" accept={ACCEPTED_VIDEO_TYPES.join(',')} hidden onChange={(e) => void addFiles(e.target.files)} />
+    </>
   );
 
   if (!open) {
     return (
       <Card className="flex items-center gap-3">
-        {fileInput}
+        {fileInputs}
         <Avatar src={me?.avatar} name={displayName(me)} size="md" />
         <button
           type="button"
@@ -185,8 +208,11 @@ function Composer({
         >
           <span className="truncate">Share a session, a win or a meal…</span>
         </button>
-        <IconButton label="Add a photo" variant="secondary" onClick={() => fileRef.current?.click()}>
+        <IconButton label="Add a photo" variant="secondary" onClick={() => photoRef.current?.click()}>
           <ImageIcon size={22} />
+        </IconButton>
+        <IconButton label="Add a video" variant="secondary" onClick={() => videoRef.current?.click()} className="hidden sm:inline-flex">
+          <VideoIcon size={22} />
         </IconButton>
       </Card>
     );
@@ -194,7 +220,7 @@ function Composer({
 
   return (
     <Card aria-label="New post" role="form">
-      {fileInput}
+      {fileInputs}
       <div className="flex gap-3">
         <Avatar src={me?.avatar} name={displayName(me)} size="md" className="mt-0.5 hidden sm:inline-flex" />
         <div className="min-w-0 flex-1">
@@ -213,14 +239,23 @@ function Composer({
             disabled={create.isPending}
           />
 
-          {previews.length > 0 || uploading ? (
-            <ul className="mt-3 flex flex-wrap gap-2" aria-label="Attached photos">
-              {previews.map((src, i) => (
-                <li key={src} className="relative h-22 w-22 overflow-hidden rounded-md bg-surface-2">
-                  <img src={src} alt={`Attachment ${i + 1}`} className="h-full w-full object-cover" />
+          {medias.length > 0 || uploading ? (
+            <ul className="mt-3 flex flex-wrap gap-2" aria-label="Attachments">
+              {medias.map((m, i) => (
+                <li key={m.preview} className="relative h-22 w-22 overflow-hidden rounded-md bg-surface-2">
+                  {m.type === 'video' ? (
+                    <video src={m.preview} muted playsInline preload="metadata" className="h-full w-full object-cover" aria-label={`Video ${i + 1}`} />
+                  ) : (
+                    <img src={m.preview} alt={`Attachment ${i + 1}`} className="h-full w-full object-cover" />
+                  )}
+                  {m.type === 'video' ? (
+                    <span className="absolute bottom-1 left-1 grid h-6 w-6 place-items-center rounded-full bg-scrim text-[var(--navy-50)]" aria-hidden="true">
+                      <VideoIcon size={14} />
+                    </span>
+                  ) : null}
                   <button
                     type="button"
-                    aria-label={`Remove photo ${i + 1}`}
+                    aria-label={`Remove ${m.type === 'video' ? 'video' : 'photo'} ${i + 1}`}
                     onClick={() => removeMedia(i)}
                     className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-scrim text-[var(--navy-50)] before:absolute before:-inset-2 before:content-[''] hover:bg-danger"
                   >
@@ -240,12 +275,24 @@ function Composer({
             <Button
               variant="ghost"
               icon={<ImageIcon size={20} />}
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading || medias.length >= MAX_IMAGES || create.isPending}
+              onClick={() => photoRef.current?.click()}
+              disabled={uploading || full || create.isPending}
             >
               Photo
-              {medias.length ? <span className="tabular text-text-3">{medias.length}/{MAX_IMAGES}</span> : null}
             </Button>
+            <Button
+              variant="ghost"
+              icon={<VideoIcon size={20} />}
+              onClick={() => videoRef.current?.click()}
+              disabled={uploading || full || create.isPending}
+            >
+              Video
+            </Button>
+            {medias.length ? (
+              <span className="tabular text-xs text-text-3" aria-live="polite">
+                {medias.length}/{MAX_POST_MEDIA}
+              </span>
+            ) : null}
             {content.length > 0 ? (
               <span
                 className={cx('tabular text-xs', remaining < 100 ? 'text-warning-text' : 'text-text-3')}
@@ -269,7 +316,7 @@ function Composer({
       <ConfirmDialog
         open={confirmDiscard}
         title="Discard this post?"
-        message="Your text and photos will be removed."
+        message="Your text and attachments will be removed."
         confirmLabel="Discard"
         destructive
         onConfirm={() => {
@@ -493,19 +540,21 @@ export default function Feed() {
     setSearchParams(next, { replace: true });
   }, [compose, searchParams, setSearchParams]);
 
-  const feed = useInfiniteQuery({
+  // Page 1 by number, later pages by the API's keyset cursor so a post
+  // published mid-scroll never shifts the window and repeats a card.
+  const feed = useInfiniteQuery<PagedPosts, Error, { pages: PagedPosts[]; pageParams: FeedPageParam[] }, string[], FeedPageParam>({
     queryKey: ['feed'],
     initialPageParam: 1,
     queryFn: async ({ pageParam }) => {
-      const { data } = await api.get('/posts/feed', { params: { page: pageParam, limit: PAGE_SIZE } });
+      const { data } = await api.get('/posts/feed', { params: feedPageParams(pageParam, FEED_PAGE_SIZE) });
       return data as PagedPosts;
     },
-    getNextPageParam: (last, all) => (last.hasNextPage ? all.length + 1 : undefined),
+    getNextPageParam: (last, all) => nextFeedPageParam(last, all.length),
   });
 
   const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = feed;
 
-  const allPosts = useMemo(() => data?.pages.flatMap((p) => p.posts || []) ?? [], [data]);
+  const allPosts = useMemo(() => dedupeById(data?.pages.flatMap((p) => p.posts || []) ?? []), [data]);
   const posts = useMemo(() => allPosts.filter((p) => !isAuthorHidden(hidden, p)), [allPosts, hidden]);
   const hiddenCount = allPosts.length - posts.length;
 
@@ -517,7 +566,7 @@ export default function Feed() {
     refetchIntervalInBackground: false,
     staleTime: 30_000,
     queryFn: async () => {
-      const { data } = await api.get('/posts/feed', { params: { page: 1, limit: PAGE_SIZE } });
+      const { data } = await api.get('/posts/feed', { params: { page: 1, limit: FEED_PAGE_SIZE } });
       return data as PagedPosts;
     },
   });
@@ -562,6 +611,7 @@ export default function Feed() {
 
       <div className="space-y-4">
         <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
+        <StoryTray variant="home" />
         <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
         <TrendingHashtags />
 

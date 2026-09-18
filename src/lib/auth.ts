@@ -1,12 +1,10 @@
-import axios from 'axios';
+import { useEffect } from 'react';
 import { create } from 'zustand';
-import { api, tokenStore, adminApi, revokeSession } from './api';
+import { api, tokenStore, adminApi, revokeSession, signOutReason, isSessionRejected } from './api';
+import { onSessionChange, sessionEpoch, verifyConsumerToken } from './consumerSession';
 import { disposeSocket } from './socket';
+import { purgeRevokedWorkoutDrafts } from './workoutDrafts';
 
-/**
- * Field names follow the backend `User` model: the photo is `avatar`
- * (there is no `profilePicture` virtual), the cover is `coverPicture`.
- */
 export type User = {
   _id: string;
   username: string;
@@ -15,7 +13,9 @@ export type User = {
   avatar?: string;
   coverPicture?: string;
   bio?: string;
+  /** Auth policy only; the staff-granted public badge is isIdentityVerified. */
   isVerified?: boolean;
+  isIdentityVerified?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
   isPremium?: boolean;
@@ -23,179 +23,238 @@ export type User = {
   followingCount?: number;
   [k: string]: any;
 };
-
+export type LoginOptions = { remember?: boolean };
 type AuthState = {
   user: User | null;
-  /** In-memory credential that actually verified `user`; never persisted in drafts. */
   verifiedToken: string | null;
   loading: boolean;
   bootstrapError: string | null;
+  sessionStale: boolean;
+  sessionRejected: boolean;
   admin: any | null;
   adminLoading: boolean;
   adminBootstrapError: string | null;
-  bootstrap: () => Promise<void>;
+  bootstrap: (options?: { preserveVerified?: boolean }) => Promise<void>;
   bootstrapAdmin: () => Promise<void>;
+  refreshUser: (options?: { force?: boolean }) => Promise<void>;
   setUser: (u: User | null) => void;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, options?: LoginOptions) => Promise<void>;
+  acceptSession: (user: User, token: string, options?: LoginOptions) => Promise<void>;
   adminLogin: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  logoutEverywhere: () => void;
   adminLogout: () => void;
-  /** Drop the local admin session only; used when the API has already revoked it. */
   forgetAdminSession: () => void;
 };
-
-let userBootstrap: Promise<void> | null = null;
-let adminBootstrap: Promise<void> | null = null;
-
 const hasIdentity = (value: unknown): value is { _id: string } =>
-  typeof value === 'object' && value !== null && '_id' in value
-  && typeof value._id === 'string' && value._id.length > 0;
-
+  typeof value === 'object' && value !== null && '_id' in value && typeof value._id === 'string' && !!value._id;
 const isUser = (value: unknown): value is User =>
   hasIdentity(value) && 'username' in value && typeof value.username === 'string';
+type Check = { token: string; epoch: number; promise: Promise<void> };
+let userCheck: Check | null = null;
+let adminCheck: Check | null = null;
+let loginAttempt = 0;
+let adminLoginAttempt = 0;
+let refreshed: { token: string; epoch: number; at: number } | null = null;
+const USER_REFRESH_THROTTLE_MS = 30_000;
+const recoveryMessage = 'Your saved sign-in is still on this device. Check your connection and try again.';
 
-export const useAuth = create<AuthState>((set) => ({
-  user: null,
-  verifiedToken: null,
-  loading: true,
-  bootstrapError: null,
-  admin: null,
-  adminLoading: true,
-  adminBootstrapError: null,
+export const useAuth = create<AuthState>((set, get) => ({
+  user: null, verifiedToken: null, loading: true, bootstrapError: null,
+  sessionStale: false, sessionRejected: false,
+  admin: null, adminLoading: true, adminBootstrapError: null,
 
-  bootstrap: () => {
-    if (userBootstrap) return userBootstrap;
+  bootstrap: ({ preserveVerified = false } = {}) => {
     const token = tokenStore.get();
+    const epoch = sessionEpoch();
     if (!token) {
-      set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
-      return Promise.resolve();
+      verifyConsumerToken(null);
+      set({ user: null, verifiedToken: null, loading: true, bootstrapError: null, sessionStale: false });
+      return purgeRevokedWorkoutDrafts().then(() => {
+        if (sessionEpoch() === epoch && !tokenStore.get()) set({ loading: false });
+      });
     }
-    set({ loading: true, bootstrapError: null });
-    userBootstrap = (async () => {
+    if (userCheck?.token === token && userCheck.epoch === epoch) return userCheck.promise;
+    const ownsCheck = () => tokenStore.get() === token && sessionEpoch() === epoch;
+    if (get().verifiedToken !== token) set({ user: null, verifiedToken: null, loading: true, bootstrapError: null });
+    const promise = (async () => {
       try {
         const { data } = await api.get('/users/me', { sessionVerification: true });
-        if (tokenStore.get() !== token) {
-          if (!tokenStore.get()) set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
-          return;
-        }
+        if (!ownsCheck()) return;
         const user: unknown = data?.user ?? data;
         if (!isUser(user)) throw new Error('Session response has no user identity.');
-        set({ user, verifiedToken: token, loading: false, bootstrapError: null });
-      } catch (error) {
-        const current = tokenStore.get();
-        if (current && current !== token) return;
-        const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-        if (status === 401) {
-          tokenStore.clear();
-          set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
-        } else if (!current) {
-          set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
-        } else if (current === token) {
-          console.warn('User session verification is unavailable.', { status });
-          set({ loading: false, bootstrapError: 'Your saved sign-in is still on this device. Check your connection and try again.' });
+        // The same credential returning a different principal must not reuse private queries.
+        if (get().user && get().user!._id !== user._id) {
+          tokenStore.clear(true);
+          return;
         }
+        verifyConsumerToken(token);
+        await tokenStore.setUser(user, token);
+        if (!ownsCheck()) return;
+        refreshed = { token, epoch, at: Date.now() };
+        set({ user, verifiedToken: token, loading: false, bootstrapError: null, sessionStale: false, sessionRejected: false });
+      } catch (error) {
+        if (!ownsCheck()) return;
+        if (isSessionRejected(error)) {
+          tokenStore.clear(true);
+          return;
+        }
+        // A refresh outage must not tear down an already-verified editor and
+        // lose input that a storage failure has left only in memory.
+        if (preserveVerified && get().verifiedToken === token) return;
+        verifyConsumerToken(null);
+        const snapshot = await tokenStore.getUser();
+        if (!ownsCheck()) return;
+        set({
+          user: snapshot, verifiedToken: null, loading: false, sessionStale: true,
+          bootstrapError: snapshot ? null : recoveryMessage,
+        });
       }
-    })().finally(() => { userBootstrap = null; });
-    return userBootstrap;
+    })().finally(() => {
+      if (userCheck?.promise === promise) userCheck = null;
+    });
+    userCheck = { token, epoch, promise };
+    return promise;
+  },
+
+  refreshUser: async ({ force = false } = {}) => {
+    const token = tokenStore.get();
+    if (!token || !get().user) return;
+    if (!force && refreshed?.token === token && refreshed.epoch === sessionEpoch()
+        && Date.now() - refreshed.at < USER_REFRESH_THROTTLE_MS) return;
+    await get().bootstrap({ preserveVerified: true });
   },
 
   bootstrapAdmin: () => {
-    if (adminBootstrap) return adminBootstrap;
     const token = tokenStore.getAdmin();
+    const epoch = sessionEpoch('admin');
     if (!token) {
       set({ admin: null, adminLoading: false, adminBootstrapError: null });
       return Promise.resolve();
     }
+    if (adminCheck?.token === token && adminCheck.epoch === epoch) return adminCheck.promise;
+    const ownsCheck = () => tokenStore.getAdmin() === token && sessionEpoch('admin') === epoch;
     set({ adminLoading: true, adminBootstrapError: null });
-    adminBootstrap = (async () => {
+    const promise = (async () => {
       try {
         const { data } = await adminApi.get('/admins/me', { sessionVerification: true });
-        if (tokenStore.getAdmin() !== token) {
-          if (!tokenStore.getAdmin()) set({ admin: null, adminLoading: false, adminBootstrapError: null });
-          return;
-        }
+        if (!ownsCheck()) return;
         const admin: unknown = data?.data?.admin ?? data?.admin ?? data;
         if (!hasIdentity(admin)) throw new Error('Session response has no administrator identity.');
         set({ admin, adminLoading: false, adminBootstrapError: null });
-      } catch (error) {
-        const current = tokenStore.getAdmin();
-        if (current && current !== token) return;
-        const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-        if (status === 401) {
-          tokenStore.clearAdmin();
-          set({ admin: null, adminLoading: false, adminBootstrapError: null });
-        } else if (!current) {
-          set({ admin: null, adminLoading: false, adminBootstrapError: null });
-        } else if (current === token) {
-          console.warn('Administrator session verification is unavailable.', { status });
-          set({ adminLoading: false, adminBootstrapError: 'Your administrator sign-in is still in this tab. Check your connection and try again.' });
-        }
+      } catch {
+        if (!ownsCheck()) return;
+        set({ adminLoading: false, adminBootstrapError: 'Your administrator sign-in is still in this tab. Check your connection and try again.' });
       }
-    })().finally(() => { adminBootstrap = null; });
-    return adminBootstrap;
+    })().finally(() => {
+      if (adminCheck?.promise === promise) adminCheck = null;
+    });
+    adminCheck = { token, epoch, promise };
+    return promise;
   },
 
-  setUser: (u) => set({ user: u, ...(!u ? { verifiedToken: null } : {}), loading: false, bootstrapError: null }),
+  setUser: (user) => {
+    if (!user) {
+      if (tokenStore.get()) return;
+      verifyConsumerToken(null);
+      set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
+      return;
+    }
+    if (get().verifiedToken !== tokenStore.get() || !get().verifiedToken || get().user?._id !== user._id) return;
+    void tokenStore.setUser(user, get().verifiedToken);
+    set({ user });
+  },
 
-  login: async (email, password) => {
-    const { data } = await api.post('/auth/login', { email, password });
-    tokenStore.set(data.token);
-    set({ user: data.user, verifiedToken: data.token, loading: false, bootstrapError: null });
+  login: async (email, password, { remember = true }: LoginOptions = {}) => {
+    const attempt = ++loginAttempt;
+    const epoch = sessionEpoch();
+    const { data } = await api.post('/auth/login', { email, password, remember });
+    if (attempt !== loginAttempt || epoch !== sessionEpoch()) throw new Error('Your account changed. Sign in again to continue.');
+    await get().acceptSession(data.user, data.token, { remember });
+  },
+  acceptSession: async (user, token, { remember = true }: LoginOptions = {}) => {
+    if (typeof token !== 'string' || !token || !isUser(user)) throw new Error('Sign-in did not return a valid session.');
+    tokenStore.set(token, remember ? 'local' : 'session');
+    const newEpoch = sessionEpoch();
+    verifyConsumerToken(token);
+    await tokenStore.setUser(user, token);
+    if (newEpoch !== sessionEpoch() || tokenStore.get() !== token) return;
+    set({ user, verifiedToken: token, loading: false, bootstrapError: null, sessionStale: false, sessionRejected: false });
   },
 
   adminLogin: async (email, password) => {
+    const attempt = ++adminLoginAttempt;
+    const epoch = sessionEpoch('admin');
     const { data: body } = await adminApi.post('/admins/login', { email, password });
-    // POST /admins/login answers with an envelope -- { success, message,
-    // data: { admin, token } } -- unlike the consumer login, which returns
-    // { token, user } at the top level. This read `body.token`, which was
-    // always undefined, so it stored an undefined token and no administrator
-    // could ever sign in to the console. Accept both shapes and fail loudly
-    // rather than "succeeding" with no session.
+    if (attempt !== adminLoginAttempt || epoch !== sessionEpoch('admin')) throw new Error('Your administrator account changed.');
     const payload = body?.data && typeof body.data === 'object' ? body.data : body;
     const token: unknown = payload?.token;
     const admin = payload?.admin ?? payload?.user;
-    if (typeof token !== 'string' || !token || !admin) {
-      throw new Error(body?.message || 'Sign-in did not return an admin session.');
-    }
+    if (typeof token !== 'string' || !token || !hasIdentity(admin)) throw new Error(body?.message || 'Sign-in did not return an admin session.');
     tokenStore.setAdmin(token);
     set({ admin, adminLoading: false, adminBootstrapError: null });
   },
 
   logout: () => {
-    // Revoke on the server before forgetting the token locally. Sessions are
-    // long-lived bearer tokens; clearing localStorage alone left a valid
-    // 30-day token alive in whatever browser issued it. POST /auth/logout
-    // bumps the account's tokenVersion, which the API checks on every
-    // request, so every outstanding token dies -- not only this tab's.
-    // Best-effort and fire-and-forget: signing out must never be blocked by
-    // the network, and a failed revocation still leaves the user signed out
-    // locally, which is the pre-existing behaviour. revokeSession() carries
-    // the token explicitly and survives the navigation below; see api.ts.
     revokeSession('/auth/logout', tokenStore.get());
-    // The shared realtime socket authenticated with this token; drop it so it
-    // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
     tokenStore.clear();
-    set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
     location.href = '/login';
   },
-
+  logoutEverywhere: () => {
+    revokeSession('/auth/logout-all', tokenStore.get());
+    disposeSocket();
+    tokenStore.clear();
+    signOutReason.set('signed-out-all');
+    location.href = '/login';
+  },
   adminLogout: () => {
-    // Same reasoning, via the admin-side route. This matters more for the
-    // console, which shares the consumer origin: one leaked admin token is the
-    // whole moderation surface.
     revokeSession('/admins/logout', tokenStore.getAdmin());
     tokenStore.clearAdmin();
-    set({ admin: null, adminLoading: false, adminBootstrapError: null });
     location.href = '/admin/login';
   },
-
-  forgetAdminSession: () => {
-    // After a password reset the API has bumped tokenVersion, so any admin
-    // token this tab still holds is already dead. Forgetting it here means the
-    // next visit to /admin/login shows the form straight away instead of first
-    // failing a /admins/me call with the stale bearer.
-    tokenStore.clearAdmin();
-    set({ admin: null, adminLoading: false, adminBootstrapError: null });
-  },
+  forgetAdminSession: () => { tokenStore.clearAdmin(); },
 }));
+
+onSessionChange((kind, rejected, external) => {
+  if (kind === 'admin') {
+    useAuth.setState({ admin: null, adminLoading: false, adminBootstrapError: null });
+    return;
+  }
+  disposeSocket();
+  useAuth.setState({
+    user: null, verifiedToken: null, loading: external && !!tokenStore.get(),
+    bootstrapError: null, sessionStale: false, sessionRejected: rejected,
+  });
+  if (external) queueMicrotask(() => { void useAuth.getState().bootstrap(); });
+});
+
+export const SESSION_STALE_AFTER_MS = 10 * 60 * 1000;
+export function useSessionRefresh(onStale?: () => void) {
+  const refreshUser = useAuth((s) => s.refreshUser);
+  const signedIn = useAuth((s) => !!s.user);
+  useEffect(() => {
+    if (!signedIn) return;
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = null;
+      if (away >= SESSION_STALE_AFTER_MS) {
+        void refreshUser({ force: true });
+        onStale?.();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshUser({ force: true });
+    }, SESSION_STALE_AFTER_MS);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearInterval(interval);
+    };
+  }, [signedIn, refreshUser, onStale]);
+}

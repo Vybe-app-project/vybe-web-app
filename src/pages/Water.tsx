@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, isValid, parseISO } from 'date-fns';
+import { isValid, parseISO } from 'date-fns';
 import { api, errMsg } from '../lib/api';
+import { localDayParams, timeOfDay } from '../lib/timezone';
+import { displayVolume, mlToOz, useUnits, volumeUnit, type UnitSystem } from '../lib/units';
 import {
   Badge,
   Button,
@@ -36,18 +38,32 @@ type WaterLog = {
   timestamp: string;
 };
 
+type WaterGoal = { oz: number; source: 'custom' | 'weight' | 'default' };
+
 type TodayWater = {
   logs: WaterLog[];
   total: number;
   unit: 'oz';
   count: number;
+  /** Older servers do not send one; 64 oz is the classic fallback. */
+  goal?: WaterGoal;
 };
 
 /** Server-side conversion constants, mirrored so the UI can preview totals. */
 const OUNCES_PER_CUP = 8;
 const ML_PER_OUNCE = 29.5735;
 const MAX_OUNCES_PER_LOG = 128;
-const DAILY_GOAL_OZ = 64;
+const FALLBACK_GOAL: WaterGoal = { oz: 64, source: 'default' };
+const GOAL_RANGE_OZ = { min: 8, max: 400 };
+
+const GOAL_SOURCE_COPY: Record<WaterGoal['source'], string> = {
+  custom: 'Your own target',
+  weight: 'Based on your body weight (about 35 ml per kg)',
+  default: 'The classic 8 glasses. Set your weight on Goals for a personal target.',
+};
+
+/** Whole number for display in the chosen unit, e.g. 64 oz -> "1,893 ml". */
+const vol = (oz: number, system: UnitSystem) => formatStat(Math.round(displayVolume(oz, system)));
 
 const toOunces = (amount: number, unit: WaterUnit) => {
   if (unit === 'ml') return amount / ML_PER_OUNCE;
@@ -91,22 +107,25 @@ function LogWaterModal({
   onClose,
   onSubmit,
   pending,
+  defaultUnit = 'oz',
 }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (payload: { amount: number; unit: WaterUnit }) => Promise<unknown>;
   pending: boolean;
+  /** Follows the units preference: oz for imperial, ml for metric. */
+  defaultUnit?: WaterUnit;
 }) {
-  const [unit, setUnit] = useState<WaterUnit>('oz');
-  const [amount, setAmount] = useState(UNIT_DEFAULTS.oz.value);
+  const [unit, setUnit] = useState<WaterUnit>(defaultUnit);
+  const [amount, setAmount] = useState(UNIT_DEFAULTS[defaultUnit].value);
   const [error, setError] = useState<string | null>(null);
   const [wasOpen, setWasOpen] = useState(false);
 
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
-      setUnit('oz');
-      setAmount(UNIT_DEFAULTS.oz.value);
+      setUnit(defaultUnit);
+      setAmount(UNIT_DEFAULTS[defaultUnit].value);
       setError(null);
     }
   }
@@ -201,6 +220,115 @@ function LogWaterModal({
   );
 }
 
+/* -------------------------------------------------------------- goal modal */
+
+function GoalModal({
+  open,
+  goal,
+  system,
+  onClose,
+}: {
+  open: boolean;
+  goal: WaterGoal;
+  system: UnitSystem;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const unit = volumeUnit(system);
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setValue(String(Math.round(displayVolume(goal.oz, system))));
+      setError(null);
+    }
+  }
+
+  const save = useMutation({
+    mutationFn: async (oz: number | null) => {
+      const { data } = await api.put<{ goal: WaterGoal }>('/water/goal', { oz });
+      return data.goal;
+    },
+    onSuccess: (next, oz) => {
+      toast.success(oz === null ? 'Goal reset to the weight-based default' : `Daily goal set to ${vol(next.oz, system)} ${unit}`);
+      qc.setQueryData<TodayWater>(queryKey, (old) => (old ? { ...old, goal: next } : old));
+      qc.invalidateQueries({ queryKey });
+      onClose();
+    },
+    onError: (e) => setError(errMsg(e, 'Could not save the goal')),
+  });
+
+  const submit = () => {
+    const shown = Number(value);
+    const oz = system === 'imperial' ? shown : mlToOz(shown);
+    if (!Number.isFinite(shown) || shown <= 0) {
+      setError('Enter an amount greater than zero.');
+      return;
+    }
+    if (oz < GOAL_RANGE_OZ.min || oz > GOAL_RANGE_OZ.max) {
+      setError(`Choose between ${vol(GOAL_RANGE_OZ.min, system)} and ${vol(GOAL_RANGE_OZ.max, system)} ${unit} a day.`);
+      return;
+    }
+    setError(null);
+    save.mutate(Math.round(oz * 10) / 10);
+  };
+  const formId = 'water-goal-form';
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Daily water goal"
+      description="How much you aim to drink each day. The rings and the remaining amount follow it."
+      size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={save.isPending}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" loading={save.isPending}>
+            Save goal
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={formId}
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <Input
+          label="Daily goal"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          step={system === 'imperial' ? 4 : 100}
+          value={value}
+          autoFocus
+          error={error ?? undefined}
+          hint={error ? undefined : GOAL_SOURCE_COPY[goal.source]}
+          trailing={<span className="text-xs font-semibold">{unit}</span>}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+        />
+        {goal.source === 'custom' ? (
+          <Button type="button" variant="secondary" size="sm" loading={save.isPending} onClick={() => save.mutate(null)}>
+            Use the weight-based default instead
+          </Button>
+        ) : null}
+      </form>
+    </Modal>
+  );
+}
+
 /* ------------------------------------------------------------------- page */
 
 export default function Water() {
@@ -208,6 +336,9 @@ export default function Water() {
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [logOpen, setLogOpen] = useState(false);
+  const [goalOpen, setGoalOpen] = useState(false);
+  const system = useUnits((st) => st.system);
+  const unit = volumeUnit(system);
 
   // Deep link from the Log sheet and the PWA shortcut: /health/water?log=1
   const wantsLog = searchParams.get('log') === '1';
@@ -223,11 +354,35 @@ export default function Water() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: async (): Promise<TodayWater> => {
-      const { data } = await api.get<TodayWater>('/water/today', {
-        params: { timezoneOffsetMinutes: new Date().getTimezoneOffset() },
-      });
+      const { data } = await api.get<TodayWater>('/water/today', { params: localDayParams() });
       return data;
     },
+  });
+
+  const removeLog = useMutation({
+    mutationFn: async (log: WaterLog) => {
+      await api.delete(`/water/${log._id}`);
+      return log._id;
+    },
+    onMutate: async (log) => {
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<TodayWater>(queryKey);
+      if (previous) {
+        qc.setQueryData<TodayWater>(queryKey, {
+          ...previous,
+          logs: previous.logs.filter((l) => l._id !== log._id),
+          count: Math.max(0, previous.count - 1),
+          total: roundOz(Math.max(0, previous.total - toOunces(log.amount, log.unit))),
+        });
+      }
+      return { previous };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+      toast.error(errMsg(e, 'Could not remove that log'));
+    },
+    onSuccess: () => toast.success('Log removed'),
+    onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 
   const logWater = useMutation({
@@ -260,43 +415,23 @@ export default function Water() {
       if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
       toast.error(errMsg(e, 'Could not log water'));
     },
-    onSuccess: (_d, payload) => toast.success(`${formatStat(payload.amount)} ${payload.unit} logged`),
-    onSettled: () => qc.invalidateQueries({ queryKey }),
-  });
-
-  const removeLog = useMutation({
-    mutationFn: async (log: WaterLog) => {
-      await api.delete(`/water/${log._id}`);
-      return log._id;
-    },
-    onMutate: async (log) => {
-      await qc.cancelQueries({ queryKey });
-      const previous = qc.getQueryData<TodayWater>(queryKey);
-      if (previous) {
-        qc.setQueryData<TodayWater>(queryKey, {
-          ...previous,
-          logs: previous.logs.filter((l) => l._id !== log._id),
-          count: Math.max(0, previous.count - 1),
-          total: roundOz(Math.max(0, previous.total - toOunces(log.amount, log.unit))),
-        });
-      }
-      return { previous };
-    },
-    onError: (e, _v, ctx) => {
-      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
-      toast.error(errMsg(e, 'Could not remove that log'));
-    },
-    onSuccess: () => toast.success('Log removed'),
+    onSuccess: (created, payload) =>
+      toast.success(`${formatStat(payload.amount)} ${payload.unit} logged`, {
+        // A stray quick-add is one tap to take back, like the mobile tracker's "Undo latest".
+        action: { label: 'Undo', onClick: () => removeLog.mutate(created) },
+        duration: 6000,
+      }),
     onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 
   const logs = useMemo(() => data?.logs ?? [], [data]);
   const total = data?.total ?? 0;
-  const remaining = Math.max(0, DAILY_GOAL_OZ - total);
-  const reached = total >= DAILY_GOAL_OZ && !isLoading;
-  const pct = Math.round(Math.min(1, total / DAILY_GOAL_OZ) * 100);
+  const goal = data?.goal ?? FALLBACK_GOAL;
+  const goalOz = goal.oz;
+  const remaining = Math.max(0, goalOz - total);
+  const reached = total >= goalOz && !isLoading;
+  const pct = Math.round(Math.min(1, total / goalOz) * 100);
   const lastLog = logs.find((l) => !l._id.startsWith('optimistic-')) ?? logs[0];
-  const lastLogTime = lastLog ? parseISO(lastLog.timestamp) : null;
 
   const logButton = (
     <Button variant="primary" icon={<Plus size={18} />} onClick={() => setLogOpen(true)}>
@@ -308,10 +443,17 @@ export default function Water() {
     <div className="space-y-6">
       <PageHeader
         title="Hydration"
-        subtitle={`Every glass counts toward a ${DAILY_GOAL_OZ} oz daily goal.`}
-        actions={logButton}
+        subtitle={isLoading ? 'Every glass counts toward your daily goal.' : `Every glass counts toward a ${vol(goalOz, system)} ${unit} daily goal.`}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setGoalOpen(true)} disabled={isLoading || isError}>
+              Edit goal
+            </Button>
+            {logButton}
+          </>
+        }
         mobileActions={
-          <IconButton label="Log water" variant="primary" onClick={() => setLogOpen(true)}>
+          <IconButton label="Log water" onClick={() => setLogOpen(true)}>
             <Plus size={22} />
           </IconButton>
         }
@@ -325,10 +467,10 @@ export default function Water() {
             <ErrorState error={error} title="Could not load today’s hydration" retry={() => refetch()} />
           ) : (
             <>
-              <Ring value={total} max={DAILY_GOAL_OZ} size={200} stroke={14} color={reached ? 'brand' : 'protein'} label="Hydration">
+              <Ring value={total} max={goalOz} size={200} stroke={14} color={reached ? 'brand' : 'protein'} label={`Hydration ${vol(total, system)} of ${vol(goalOz, system)} ${unit}`}>
                 <Droplet size={22} className={cx(reached ? 'text-brand' : 'text-info')} />
-                <span className="mt-1 text-3xl">{formatStat(Math.round(total))}</span>
-                <span className="text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">of {DAILY_GOAL_OZ} oz</span>
+                <span className="mt-1 text-3xl">{vol(total, system)}</span>
+                <span className="text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">of {vol(goalOz, system)} {unit}</span>
               </Ring>
               {reached ? (
                 <Badge tone="success" size="md">
@@ -336,9 +478,12 @@ export default function Water() {
                 </Badge>
               ) : (
                 <p className="text-sm text-text-2">
-                  <span className="tabular font-semibold text-text-1">{formatStat(Math.round(remaining))} oz</span> to go
+                  <span className="tabular font-semibold text-text-1">{vol(remaining, system)} {unit}</span> to go
                 </p>
               )}
+              <button type="button" className="text-xs text-text-3 underline-offset-2 hover:underline" onClick={() => setGoalOpen(true)}>
+                {GOAL_SOURCE_COPY[goal.source]}
+              </button>
             </>
           )}
         </Card>
@@ -350,7 +495,7 @@ export default function Water() {
             <StatTile
               loading={isLoading}
               label="Last drink"
-              value={lastLogTime && isValid(lastLogTime) ? format(lastLogTime, 'HH:mm') : '—'}
+              value={timeOfDay(lastLog?.timestamp) || '—'}
               hint={lastLog ? `${formatStat(lastLog.amount)} ${lastLog.unit}` : 'Nothing logged yet'}
             />
           </div>
@@ -379,7 +524,7 @@ export default function Water() {
         </div>
       </div>
 
-      <Section title="Today’s logs" description="Newest first. Totals are shown in ounces.">
+      <Section title="Today’s logs" description={`Newest first. Totals are shown in ${system === 'imperial' ? 'ounces' : 'millilitres'}; change units in Settings.`}>
         {isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -410,9 +555,9 @@ export default function Water() {
                     </p>
                     <p className="text-xs text-text-2">
                       <time dateTime={isValid(ts) ? ts.toISOString() : undefined} className="tabular">
-                        {isValid(ts) ? format(ts, 'HH:mm') : 'Just now'}
+                        {timeOfDay(ts) || 'Just now'}
                       </time>
-                      {log.unit !== 'oz' ? <span className="ml-2 tabular text-text-3">{formatStat(oz)} oz</span> : null}
+                      {log.unit !== unit ? <span className="ml-2 tabular text-text-3">{vol(oz, system)} {unit}</span> : null}
                     </p>
                   </div>
                   <IconButton label={`Remove ${formatStat(log.amount)} ${log.unit} log`} variant="danger" disabled={pending || removeLog.isPending} onClick={() => removeLog.mutate(log)}>
@@ -426,10 +571,11 @@ export default function Water() {
       </Section>
 
       <Callout tone="info">
-        Hydration is tracked from what you log here. The {DAILY_GOAL_OZ} oz goal is a general guideline, not personal medical advice.
+        Hydration is tracked from what you log here. The {vol(goalOz, system)} {unit} goal is a general guideline, not personal medical advice.
       </Callout>
 
-      <LogWaterModal open={logOpen} onClose={() => setLogOpen(false)} onSubmit={(payload) => logWater.mutateAsync(payload)} pending={logWater.isPending} />
+      <LogWaterModal open={logOpen} onClose={() => setLogOpen(false)} onSubmit={(payload) => logWater.mutateAsync(payload)} pending={logWater.isPending} defaultUnit={system === 'imperial' ? 'oz' : 'ml'} />
+      <GoalModal open={goalOpen} goal={goal} system={system} onClose={() => setGoalOpen(false)} />
     </div>
   );
 }

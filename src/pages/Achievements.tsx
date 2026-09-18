@@ -296,6 +296,8 @@ function AchievementCard({
   const percent =
     achievement.progressPercentage ??
     (required > 0 ? Math.min((current / required) * 100, 100) : 0);
+  // "9 / 1 posts" reads as a bug; once the target is met the count caps there.
+  const shown = Math.min(current, required);
   const claimable = Boolean(achievement.canClaim) && !earned;
   const { className: pulseClass, pulse } = usePulse();
 
@@ -369,10 +371,10 @@ function AchievementCard({
           />
           <p className="flex items-baseline justify-between text-xs text-text-2">
             <span className="tabular">
-              {formatStat(current)} / {formatStat(required)} {criteriaLabel(achievement)}
+              {formatStat(shown)} / {formatStat(required)} {criteriaLabel(achievement)}
             </span>
             <span className={cx('tabular font-semibold', claimable ? 'text-accent-text' : 'text-text-1')}>
-              {Math.round(percent)}%
+              {current >= required ? 'Criteria met' : `${Math.round(percent)}%`}
             </span>
           </p>
         </div>
@@ -498,7 +500,7 @@ function DetailModal({
                 ) : data ? (
                   <>
                     <p className="type-stat text-xl text-text-1">
-                      {formatStat(data.current)}
+                      {formatStat(Math.min(data.current, data.required))}
                       <span className="text-text-3"> / {formatStat(data.required)}</span>
                       <span className="ml-1.5 align-baseline text-xs font-semibold tracking-normal text-text-2 [font-variation-settings:'wdth'_100]">
                         {criteriaLabel(achievement)}
@@ -586,6 +588,22 @@ export default function Achievements() {
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [celebrateId, setCelebrateId] = useState<string | null>(null);
   const [claimingAll, setClaimingAll] = useState(false);
+
+  /*
+   * The member's whole set, unfiltered and always loaded: the summary tiles
+   * read from it on every tab, and the catalogue tab merges its earned and
+   * claimable flags in. Deriving the tiles from the visible list made "All
+   * badges" show Earned 0 and Points banked 0 the moment you switched tabs.
+   */
+  const summaryQuery = useQuery({
+    queryKey: ['achievements', 'user', 'summary'],
+    queryFn: async (): Promise<Achievement[]> => {
+      const { data } = await api.get<AchievementListResponse>('/achievements/user', {
+        params: { timezoneOffsetMinutes: tzOffset() },
+      });
+      return data.achievements ?? [];
+    },
+  });
 
   /* Personalised list: earned flags, progress and claimability. */
   const userAchievements = useQuery({
@@ -686,8 +704,18 @@ export default function Achievements() {
       if (category) list = list.filter((a) => a.category === category);
       if (rarity) list = list.filter((a) => a.rarity === rarity);
     }
+    if (tab !== 'mine' && summaryQuery.data) {
+      // The catalogue endpoints carry no per-member flags; borrow them.
+      const mine = new Map(summaryQuery.data.map((a) => [a._id, a]));
+      list = list.map((a) => {
+        const own = mine.get(a._id);
+        return own
+          ? { ...a, isEarned: own.isEarned, earnedAt: own.earnedAt, progress: own.progress, required: own.required, progressPercentage: own.progressPercentage, canClaim: own.canClaim }
+          : a;
+      });
+    }
     return list;
-  }, [active.data, tab, category, rarity]);
+  }, [active.data, tab, category, rarity, summaryQuery.data]);
 
   const grouped = useMemo(() => {
     const buckets = new Map<Category, Achievement[]>();
@@ -710,16 +738,19 @@ export default function Achievements() {
     );
   }, [items]);
 
-  const earnedCount = items.filter((a) => a.isEarned).length;
-  const claimableItems = items.filter((a) => a.canClaim && !a.isEarned);
+  /* Summary tiles: the member's real totals, whatever tab or filter is showing. */
+  const summary = summaryQuery.data ?? [];
+  const summaryLoading = summaryQuery.isLoading;
+  const earnedCount = summary.filter((a) => a.isEarned).length;
+  const claimableItems = summary.filter((a) => a.canClaim && !a.isEarned);
   const claimableCount = claimableItems.length;
-  const totalPoints = items.reduce(
+  const totalPoints = summary.reduce(
     (sum, a) => (a.isEarned ? sum + (a.rewards?.points ?? 0) : sum),
     0,
   );
   const pendingPoints = claimableItems.reduce((sum, a) => sum + (a.rewards?.points ?? 0), 0);
-  const streakEarned = items.filter((a) => a.isEarned && categoryOf(a) === 'streak').length;
-  const streakTotal = items.filter((a) => categoryOf(a) === 'streak').length;
+  const streakEarned = summary.filter((a) => a.isEarned && categoryOf(a) === 'streak').length;
+  const streakTotal = summary.filter((a) => categoryOf(a) === 'streak').length;
 
   const claimAll = async () => {
     if (!claimableItems.length || claimingAll) return;
@@ -762,18 +793,18 @@ export default function Achievements() {
         <StatTile
           label="Earned"
           value={earnedCount}
-          unit={`of ${items.length}`}
+          unit={`of ${summary.length}`}
           icon={<Trophy size={20} />}
           tone="brand"
-          loading={active.isLoading}
-          hint={items.length ? `${Math.round((earnedCount / items.length) * 100)}% of this set` : undefined}
+          loading={summaryLoading}
+          hint={summary.length ? `${Math.round((earnedCount / summary.length) * 100)}% of all badges` : undefined}
         />
         <StatTile
           label="Ready to claim"
           value={claimableCount}
           icon={<Sparkles size={20} />}
           tone={claimableCount > 0 ? 'accent' : 'neutral'}
-          loading={active.isLoading}
+          loading={summaryLoading}
           hint={claimableCount > 0 ? `${formatStat(pendingPoints)} pts waiting` : 'Nothing pending'}
         />
         <StatTile
@@ -781,7 +812,7 @@ export default function Achievements() {
           value={formatStat(totalPoints)}
           unit="pts"
           icon={<Medal size={20} />}
-          loading={active.isLoading}
+          loading={summaryLoading}
         />
         <StatTile
           label="Streak badges"
@@ -789,8 +820,8 @@ export default function Achievements() {
           unit={streakTotal ? `of ${streakTotal}` : undefined}
           icon={<Flame size={20} />}
           tone={streakEarned > 0 ? 'accent' : 'neutral'}
-          loading={active.isLoading}
-          hint={streakTotal ? 'Consistency pays' : 'None in this set'}
+          loading={summaryLoading}
+          hint={streakTotal ? 'Consistency pays' : 'None yet'}
         />
       </StatGrid>
 

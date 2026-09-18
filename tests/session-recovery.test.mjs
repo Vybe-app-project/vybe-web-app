@@ -21,6 +21,8 @@ globalThis.location = { pathname: '/', href: '/' };
 
 const { api, adminApi, tokenStore } = await import('../src/lib/api.ts');
 const { useAuth } = await import('../src/lib/auth.ts');
+const { currentQueryClient } = await import('../src/lib/queryClient.ts');
+const { readConsumerToken, readVerifiedConsumerToken } = await import('../src/lib/consumerSession.ts');
 const user = { _id: 'user-a', username: 'athlete' };
 const admin = { _id: 'admin-a', username: 'moderator' };
 const result = (data, config) => ({ data, status: 200, statusText: 'OK', headers: {}, config });
@@ -35,7 +37,7 @@ beforeEach(() => {
   location.pathname = '/';
   location.href = '/';
   useAuth.setState({
-    user: null, verifiedToken: null, loading: true, bootstrapError: null,
+    user: null, verifiedToken: null, loading: true, bootstrapError: null, sessionStale: false, sessionRejected: false,
     admin: null, adminLoading: true, adminBootstrapError: null,
   });
 
@@ -114,7 +116,8 @@ test('an old response cannot overwrite a newly signed-in user', async () => {
   await new Promise((resolve) => setImmediate(resolve));
   tokenStore.set('new-session');
   const nextUser = { _id: 'user-b', username: 'runner' };
-  useAuth.getState().setUser(nextUser);
+  api.defaults.adapter = async config => result({ user: nextUser }, config);
+  await useAuth.getState().bootstrap();
   finish();
   await pending;
   assert.deepEqual(useAuth.getState().user, nextUser);
@@ -129,7 +132,8 @@ test('an old 401 cannot revoke a newer sign-in', async () => {
   await new Promise((resolve) => setImmediate(resolve));
   tokenStore.set('new-session');
   const nextUser = { _id: 'user-b', username: 'runner' };
-  useAuth.getState().setUser(nextUser);
+  api.defaults.adapter = async config => result({ user: nextUser }, config);
+  await useAuth.getState().bootstrap();
   finish();
   await pending;
   assert.equal(tokenStore.get(), 'new-session');
@@ -184,7 +188,7 @@ test('an ordinary protected request still redirects when its current credential 
   api.defaults.adapter = async (config) => { throw failure(config, 401); };
   await assert.rejects(api.get('/posts/feed'));
   assert.equal(tokenStore.get(), null);
-  assert.equal(location.href, '/login');
+  assert.equal(location.href, '/login?expired=1');
 });
 
 test('an expired consumer credential does not interrupt a valid administrator bootstrap', async () => {
@@ -196,4 +200,179 @@ test('an expired consumer credential does not interrupt a valid administrator bo
   assert.equal(tokenStore.getAdmin(), 'valid-admin-session');
   assert.deepEqual(useAuth.getState().admin, admin);
   assert.equal(location.href, '/');
+});
+
+for (const remember of [true, false]) {
+  test(`remember=${remember} keeps a token-bound minimal snapshot in the same lifetime, not draft authority`, async () => {
+    let loginBody;
+    api.defaults.adapter = async config => {
+      loginBody = JSON.parse(config.data);
+      return result({ token: 'mode-session', user: { ...user, email: 'private@example.invalid', avatar: '/api/media/content/avatar-a' } }, config);
+    };
+    await useAuth.getState().login('fixture@example.invalid', 'fixture-only', { remember });
+    assert.equal(loginBody.remember, remember);
+    const own = remember ? localStorage : sessionStorage;
+    const other = remember ? sessionStorage : localStorage;
+    assert.equal(readConsumerToken(), 'mode-session');
+    assert.equal(own.getItem('vybe.token'), 'mode-session');
+    assert.equal(other.getItem('vybe.token'), null);
+    assert.equal(other.getItem('vybe.user'), null);
+    assert.equal(JSON.parse(own.getItem('vybe.user')).user.email, undefined);
+    assert.doesNotMatch(own.getItem('vybe.user'), /mode-session/);
+    api.defaults.adapter = async config => { throw failure(config, 503); };
+    await useAuth.getState().bootstrap();
+    assert.equal(useAuth.getState().user._id, user._id);
+    assert.equal(useAuth.getState().sessionStale, true);
+    assert.equal(useAuth.getState().verifiedToken, null);
+    assert.equal(readVerifiedConsumerToken(), null);
+    await assert.rejects(api.post('/workouts/logs', {}, { workoutSessionToken: 'mode-session' }), /account changed/);
+    assert.equal(tokenStore.get(), 'mode-session');
+    own.setItem('vybe.token', 'different-token');
+    await useAuth.getState().bootstrap();
+    assert.equal(useAuth.getState().user, null);
+    assert.match(useAuth.getState().bootstrapError, /try again/);
+  });
+}
+
+for (const message of ['This account is currently unavailable', 'Email verification is required', 'Permission denied', 'Gateway forbidden']) {
+  test(`403 policy classification: ${message}`, async () => {
+    tokenStore.set('consumer-session');
+    api.defaults.adapter = async config => {
+      const error = failure(config, 403);
+      error.response.data = { message };
+      throw error;
+    };
+    await useAuth.getState().bootstrap();
+    const rejected = ['This account is currently unavailable', 'Email verification is required'].includes(message);
+    assert.equal(tokenStore.get(), rejected ? null : 'consumer-session');
+    assert.equal(useAuth.getState().sessionRejected, rejected);
+    assert.equal(Boolean(useAuth.getState().bootstrapError), !rejected);
+    assert.equal(location.href, '/', 'public pages must not be redirected by bootstrap');
+  });
+}
+
+test('refresh updates signed-avatar snapshots but a late refresh cannot overwrite a replacement login', async () => {
+  tokenStore.set('first-session');
+  await useAuth.getState().bootstrap();
+  const renewed = { ...user, avatar: '/api/media/content/avatar-renewed' };
+  api.defaults.adapter = async config => result({ user: renewed }, config);
+  await useAuth.getState().refreshUser({ force: true });
+  assert.equal(useAuth.getState().user.avatar, renewed.avatar);
+  assert.equal((await tokenStore.getUser()).avatar, renewed.avatar);
+  let finish;
+  api.defaults.adapter = config => new Promise(resolve => { finish = () => resolve(result({ user }, config)); });
+  const pending = useAuth.getState().refreshUser({ force: true });
+  await new Promise(resolve => setImmediate(resolve));
+  const replacement = { _id: 'user-b', username: 'second' };
+  await useAuth.getState().acceptSession(replacement, 'replacement-session', { remember: false });
+  finish();
+  await pending;
+  assert.deepEqual(useAuth.getState().user, replacement);
+  assert.equal((await tokenStore.getUser())._id, replacement._id);
+  useAuth.getState().setUser(user);
+  assert.deepEqual(useAuth.getState().user, replacement, 'old profile callbacks cannot replace the new owner');
+  useAuth.getState().setUser(null);
+  assert.deepEqual(useAuth.getState().user, replacement, 'an old callback cannot clear a newer signed-in owner');
+});
+
+test('a real credential change isolates query clients and late private responses/rollbacks', async () => {
+  tokenStore.set('first-session');
+  await useAuth.getState().bootstrap();
+  const old = currentQueryClient();
+  old.setQueryData(['messages'], { private: 'owner-a' });
+  let finish;
+  api.defaults.adapter = config => new Promise(resolve => { finish = () => resolve(result({ private: 'late-owner-a' }, config)); });
+  const pending = api.get('/messages/me/all/recent/rooms');
+  await new Promise(resolve => setImmediate(resolve));
+  tokenStore.set('second-session', 'session');
+  const next = currentQueryClient();
+  assert.notEqual(next, old);
+  assert.equal(useAuth.getState().user, null);
+  assert.equal(next.getQueryData(['messages']), undefined);
+  finish();
+  await assert.rejects(pending, /account changed/);
+  old.setQueryData(['messages'], { private: 'old mutation rollback' });
+  assert.equal(next.getQueryData(['messages']), undefined);
+});
+
+test('older login responses cannot replace the latest attempt, including a reused token epoch', async () => {
+  let first;
+  api.defaults.adapter = config => new Promise(resolve => { first = () => resolve(result({ token: 'old-login', user }, config)); });
+  const pending = useAuth.getState().login('a@example.invalid', 'fixture-only');
+  await new Promise(resolve => setImmediate(resolve));
+  const next = { _id: 'user-b', username: 'second' };
+  api.defaults.adapter = async config => result({ token: 'latest-login', user: next }, config);
+  await useAuth.getState().login('b@example.invalid', 'fixture-only', { remember: false });
+  first();
+  await assert.rejects(pending, /account changed/);
+  assert.deepEqual(useAuth.getState().user, next);
+  assert.equal(tokenStore.get(), 'latest-login');
+});
+
+test('device/all-device logout keep their explicit endpoints and remove both snapshot stores', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => { calls.push({ url, options }); return {}; };
+  try {
+    for (const everywhere of [false, true]) {
+      await useAuth.getState().acceptSession(user, 'fixture-session', { remember: !everywhere });
+      if (everywhere) useAuth.getState().logoutEverywhere();
+      else useAuth.getState().logout();
+      assert.equal(tokenStore.get(), null);
+      assert.equal(await tokenStore.getUser(), null);
+      assert.equal(localStorage.getItem('vybe.user'), null);
+      assert.equal(sessionStorage.getItem('vybe.user'), null);
+    }
+    assert.deepEqual(calls.map(call => call.url), ['/api/auth/logout', '/api/auth/logout-all']);
+    assert.ok(calls.every(call => call.options.keepalive));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('invalid public login/reset proofs do not revoke an unrelated saved session', async () => {
+  tokenStore.set('consumer-session');
+  await useAuth.getState().bootstrap();
+  api.defaults.adapter = async config => { throw failure(config, 401); };
+  for (const endpoint of ['/auth/login', '/auth/reset-password', '/auth/verifyEmailOtp']) {
+    await assert.rejects(api.post(endpoint, {}));
+    assert.equal(tokenStore.get(), 'consumer-session');
+    assert.equal(useAuth.getState().verifiedToken, 'consumer-session');
+    assert.equal(location.href, '/');
+  }
+});
+
+test('a refresh outage preserves an already-verified editor, never promoting a cold snapshot', async () => {
+  tokenStore.set('consumer-session');
+  await useAuth.getState().bootstrap();
+  api.defaults.adapter = async config => { throw failure(config, 503); };
+  await useAuth.getState().refreshUser({ force: true });
+  assert.equal(useAuth.getState().verifiedToken, 'consumer-session');
+  assert.deepEqual(useAuth.getState().user, user);
+  useAuth.setState({ user: null, verifiedToken: null });
+  await useAuth.getState().bootstrap();
+  assert.equal(useAuth.getState().verifiedToken, null);
+  assert.equal(useAuth.getState().sessionStale, true);
+});
+
+test('finishing an old bootstrap does not release the newer token’s in-flight dedup slot', async () => {
+  const finishes = [];
+  api.defaults.adapter = config => new Promise(resolve => {
+    finishes.push(nextUser => resolve(result({ user: nextUser }, config)));
+  });
+  tokenStore.set('first-check');
+  const first = useAuth.getState().bootstrap();
+  await new Promise(resolve => setImmediate(resolve));
+  tokenStore.set('second-check', 'session');
+  const second = useAuth.getState().bootstrap();
+  await new Promise(resolve => setImmediate(resolve));
+  finishes[0](user);
+  await first;
+  const duplicate = useAuth.getState().bootstrap();
+  assert.equal(finishes.length, 2);
+  assert.equal(useAuth.getState().loading, true);
+  const replacement = { _id: 'user-b', username: 'second' };
+  finishes[1](replacement);
+  await Promise.all([second, duplicate]);
+  assert.deepEqual(useAuth.getState().user, replacement);
+  assert.equal(useAuth.getState().verifiedToken, 'second-check');
+  assert.equal(useAuth.getState().loading, false);
 });

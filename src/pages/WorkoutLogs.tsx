@@ -20,6 +20,7 @@ import {
   workoutDraftSessionToken, emptyRestTimer, WorkoutDraftConflict, type WorkoutDraft, type WorkoutDraftHandle,
 } from '../lib/workoutDrafts';
 import { WorkoutRestTimer } from './WorkoutRestTimer';
+import { formatSeconds } from '../lib/duration';
 import {
   Badge,
   Button,
@@ -135,7 +136,10 @@ const formFrom = (log?: LogSeed | null): FormState => {
   };
 };
 
-/** Seed a fresh session from a library workout ("Log this workout"). */
+/**
+ * Seed a fresh session from a library workout ("Log this workout"). Exercise
+ * prescriptions are seconds; private exercise and session durations are minutes.
+ */
 const seedFromWorkout = (w: SocialWorkout): LogSeed => ({
   name: w.title,
   type: w.category,
@@ -146,7 +150,7 @@ const seedFromWorkout = (w: SocialWorkout): LogSeed => ({
     sets: e.sets,
     reps: e.reps,
     weight: e.weight,
-    duration: e.duration,
+    duration: e.duration == null ? undefined : e.duration / 60,
     notes: e.notes,
   })),
 });
@@ -513,7 +517,7 @@ function SessionCard({
             const facts = [
               ex.sets ? `${formatStat(ex.sets)} × ${formatStat(ex.reps ?? 0)}` : ex.reps ? `${formatStat(ex.reps)} reps` : null,
               ex.weight ? `${formatStat(ex.weight)} ${ex.weightUnit ?? 'kg'}` : null,
-              ex.duration ? `${formatStat(ex.duration)} min` : null,
+              ex.duration ? formatSeconds(ex.duration * 60) : null,
               ex.distance ? `${formatStat(ex.distance)} km` : null,
             ].filter(Boolean) as string[];
             return (

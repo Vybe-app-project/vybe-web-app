@@ -1,20 +1,41 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg, tokenStore } from '../lib/api';
+import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
+import { UnitsControl } from '../components/UnitsControl';
+import {
+  MAX_CREDENTIAL_URLS,
+  MAX_TRAINER_FIELDS,
+  SUMMARY_MAX,
+  SUMMARY_MIN,
+  TRAINER_FIELDS,
+  parseCredentialUrls,
+  statusCopy,
+  validateTrainerApplication,
+  type TrainerApplicationErrors,
+  type TrainerApplicationStatus,
+} from '../lib/trainerApplication';
 import { useAuth } from '../lib/auth';
 import {
+  DEFAULT_EMAIL_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
+  EMAIL_SETTING_KEYS,
   NOTIFICATION_SETTING_KEYS,
+  displayName,
   isPasswordValid,
   passwordRules,
+  pickEmailSettings,
   pickNotificationSettings,
   usernameError,
+  type EmailSettingKey,
+  type EmailSettings,
   type NotificationSettingKey,
   type NotificationSettings,
   type PublicUser,
 } from '../lib/hooks';
 import {
+  Avatar,
+  Badge,
   Button,
   Callout,
   Card,
@@ -30,7 +51,7 @@ import {
   cx,
   useToast,
 } from './ui';
-import { ChevronRight, ExternalLink, FileText, LifeBuoy, LogOut, Shield } from './icons';
+import { Award, ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Monitor, Shield } from './icons';
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
 
@@ -76,7 +97,7 @@ function SettingsCard({
   padded?: boolean;
 }) {
   return (
-    <Card role="region" aria-labelledby={`${id}-title`} className={className} padded={padded}>
+    <Card id={id} role="region" aria-labelledby={`${id}-title`} className={cx('scroll-mt-20', className)} padded={padded}>
       <div className={cx(!padded && 'px-4 pt-4 sm:px-5 sm:pt-5')}>
         <h2 id={`${id}-title`} className={cx('type-heading text-lg text-text-1', titleClassName)}>
           {title}
@@ -175,7 +196,23 @@ function AccountSection() {
       setForm({ fullName: user.fullName || '', username: user.username || '', bio: user.bio || '' });
       toast.success('Account details saved');
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save your account details.')),
+    onError: (e) => {
+      const message = errMsg(e, 'Could not save your account details.');
+      const field = fieldErrorsOf(e);
+      // "Username is already taken" belongs under the field, with focus
+      // there; a toast alone left the input looking valid.
+      if (field.username || /username/i.test(message)) {
+        setErrors((x) => ({ ...x, username: field.username || message }));
+        document.getElementById('set-username')?.focus();
+        return;
+      }
+      if (field.fullName) {
+        setErrors((x) => ({ ...x, fullName: field.fullName }));
+        document.getElementById('set-name')?.focus();
+        return;
+      }
+      toast.error(message);
+    },
   });
 
   function submit(e: FormEvent) {
@@ -263,6 +300,251 @@ function AccountSection() {
   );
 }
 
+/* ------------------------------------------------------------------ coaching */
+
+type TrainerApplicationResponse = {
+  application: {
+    status: TrainerApplicationStatus;
+    fields: string[];
+    experienceSummary: string;
+    credentialUrls: string[];
+    submittedAt?: string | null;
+    reviewedAt?: string | null;
+    decisionNote?: string;
+  };
+  isTrainer: boolean;
+};
+
+const STATUS_TONE: Record<TrainerApplicationStatus, 'neutral' | 'warning' | 'success' | 'danger'> = {
+  none: 'neutral',
+  pending: 'warning',
+  approved: 'success',
+  rejected: 'danger',
+};
+
+/**
+ * The same two-step coach application the phone has: specialties, an
+ * experience summary and optional credential links, plus the review status.
+ * Web-only members had no way into the coach directory before this.
+ */
+function CoachingSection() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const setUser = useAuth((s) => s.setUser);
+  const [fields, setFields] = useState<string[]>([]);
+  const [summary, setSummary] = useState('');
+  const [links, setLinks] = useState('');
+  const [errors, setErrors] = useState<TrainerApplicationErrors>({});
+  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  const application = useQuery({
+    queryKey: ['trainer-application'],
+    queryFn: async () => {
+      const { data } = await api.get<TrainerApplicationResponse>('/auth/trainer-application');
+      return data;
+    },
+  });
+
+  const status: TrainerApplicationStatus = application.data?.application.status ?? 'none';
+  const seedKey = application.data ? `${status}:${application.data.application.submittedAt ?? ''}` : null;
+  useEffect(() => {
+    if (!application.data || hydratedFor === seedKey) return;
+    setFields(application.data.application.fields ?? []);
+    setSummary(application.data.application.experienceSummary ?? '');
+    setLinks((application.data.application.credentialUrls ?? []).join('\n'));
+    setHydratedFor(seedKey);
+  }, [application.data, hydratedFor, seedKey]);
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      const credentialUrls = parseCredentialUrls(links);
+      const next = validateTrainerApplication({ fields, experienceSummary: summary, credentialUrls });
+      setErrors(next);
+      if (Object.keys(next).length) throw Object.assign(new Error('Check the highlighted fields.'), { silent: true });
+      const { data } = await api.post<{ application: TrainerApplicationResponse['application']; user?: PublicUser }>('/auth/becomeTrainer', {
+        fields,
+        experienceSummary: summary.trim(),
+        credentialUrls,
+      });
+      return data;
+    },
+    onSuccess: (data) => {
+      toast.success('Application sent. We will review it and let you know.');
+      setEditing(false);
+      qc.setQueryData<TrainerApplicationResponse>(['trainer-application'], (old) => ({
+        application: data.application,
+        isTrainer: old?.isTrainer ?? false,
+      }));
+      qc.invalidateQueries({ queryKey: ['trainer-application'] });
+      if (data.user) setUser(data.user as any);
+    },
+    onError: (e) => {
+      if ((e as { silent?: boolean })?.silent) {
+        toast.error('Check the highlighted fields.', undefined, { key: 'coaching-validation' });
+        return;
+      }
+      toast.error(errMsg(e, 'Could not send your application.'));
+    },
+  });
+
+  const toggleField = (value: string) => {
+    setFields((current) => {
+      if (current.includes(value)) return current.filter((f) => f !== value);
+      if (current.length >= MAX_TRAINER_FIELDS) {
+        toast.info(`Up to ${MAX_TRAINER_FIELDS} specialties.`, { key: 'coaching-fields' });
+        return current;
+      }
+      return [...current, value];
+    });
+    if (errors.fields) setErrors((x) => ({ ...x, fields: undefined }));
+  };
+
+  if (application.isLoading) {
+    return (
+      <SettingsCard id="coaching" title="Coaching">
+        <RowsSkeleton rows={3} />
+      </SettingsCard>
+    );
+  }
+  if (application.isError) {
+    return (
+      <SettingsCard id="coaching" title="Coaching">
+        <ErrorState title="Could not load your coach application" error={application.error} retry={() => void application.refetch()} />
+      </SettingsCard>
+    );
+  }
+
+  const copy = statusCopy(status);
+  const showForm = status === 'none' || status === 'rejected' || editing;
+  const summaryLength = summary.trim().length;
+  const decisionNote = application.data?.application.decisionNote;
+
+  return (
+    <SettingsCard id="coaching" title="Coaching" description="Coach on Vybe: a badge on your profile and a place in the coach directory.">
+      <div className="space-y-4">
+        <Callout
+          tone={status === 'approved' ? 'success' : status === 'rejected' ? 'danger' : status === 'pending' ? 'warning' : 'brand'}
+          icon={<Award size={20} className={status === 'approved' ? 'text-success' : 'text-brand'} />}
+          title={
+            <span className="inline-flex flex-wrap items-center gap-2">
+              {copy.title}
+              {status !== 'none' ? <Badge tone={STATUS_TONE[status]}>{status === 'pending' ? 'Pending' : status === 'approved' ? 'Approved' : 'Not approved'}</Badge> : null}
+            </span>
+          }
+          action={
+            status === 'pending' && !editing ? (
+              <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+                Update
+              </Button>
+            ) : undefined
+          }
+        >
+          {copy.body}
+          {status === 'rejected' && decisionNote ? <span className="mt-1 block font-medium text-text-1">Reviewer note: {decisionNote}</span> : null}
+        </Callout>
+
+        {status === 'approved' && application.data?.application.fields.length ? (
+          <div>
+            <p className="type-label mb-1.5 text-text-2">Your specialties</p>
+            <ul className="flex flex-wrap gap-1.5" aria-label="Coaching specialties">
+              {application.data.application.fields.map((f) => (
+                <li key={f}>
+                  <Badge tone="info">{TRAINER_FIELDS.find((t) => t.value === f)?.label ?? f}</Badge>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {showForm ? (
+          <form
+            className="space-y-4"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit.mutate();
+            }}
+          >
+            <fieldset>
+              <legend className="type-label mb-1.5 text-text-2">Specialties</legend>
+              <p id="coaching-fields-hint" className="mb-2 text-xs text-text-3">
+                Pick up to {MAX_TRAINER_FIELDS}. {fields.length ? `${fields.length} selected.` : ''}
+              </p>
+              <ul className="flex flex-wrap gap-1.5" aria-describedby="coaching-fields-hint">
+                {TRAINER_FIELDS.map((f) => {
+                  const selected = fields.includes(f.value);
+                  return (
+                    <li key={f.value}>
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selected}
+                        onClick={() => toggleField(f.value)}
+                        className={cx(
+                          'relative inline-flex h-9 items-center gap-1.5 rounded-xs px-3 text-xs font-semibold transition-colors dur-1',
+                          'before:absolute before:-inset-1 before:content-[""]',
+                          selected ? 'bg-brand-soft text-brand-text' : 'border border-line bg-surface-2 text-text-2 hover:text-text-1',
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {errors.fields ? (
+                <p role="alert" className="mt-1.5 text-xs text-danger">
+                  {errors.fields}
+                </p>
+              ) : null}
+            </fieldset>
+            <Textarea
+              id="coaching-summary"
+              label="Experience summary"
+              rows={4}
+              autoGrow
+              maxLength={SUMMARY_MAX}
+              placeholder="Certifications, years coaching, who you work with and how."
+              hint={`${summaryLength}/${SUMMARY_MAX} characters${summaryLength < SUMMARY_MIN ? ` · at least ${SUMMARY_MIN}` : ''}`}
+              error={errors.experienceSummary}
+              value={summary}
+              onChange={(e) => {
+                setSummary(e.target.value);
+                if (errors.experienceSummary) setErrors((x) => ({ ...x, experienceSummary: undefined }));
+              }}
+            />
+            <Textarea
+              id="coaching-links"
+              label="Credential links"
+              rows={2}
+              autoGrow
+              placeholder={'https://…\nOne per line, up to ' + MAX_CREDENTIAL_URLS}
+              hint={`Optional. Up to ${MAX_CREDENTIAL_URLS} https:// links to certificates or a coaching page.`}
+              error={errors.credentialUrls}
+              value={links}
+              onChange={(e) => {
+                setLinks(e.target.value);
+                if (errors.credentialUrls) setErrors((x) => ({ ...x, credentialUrls: undefined }));
+              }}
+            />
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {editing ? (
+                <Button type="button" variant="ghost" onClick={() => setEditing(false)} disabled={submit.isPending}>
+                  Cancel
+                </Button>
+              ) : null}
+              <Button type="submit" variant="primary" loading={submit.isPending} icon={<Award size={18} />}>
+                {status === 'none' ? 'Apply to coach' : 'Resubmit application'}
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </div>
+    </SettingsCard>
+  );
+}
+
 /* ------------------------------------------------------------------ appearance */
 
 function AppearanceSection() {
@@ -273,6 +555,20 @@ function AppearanceSection() {
       description="Choose how Vybe looks. System follows your device setting and switches automatically."
     >
       <ThemeControl />
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ units */
+
+function UnitsSection() {
+  return (
+    <SettingsCard
+      id="units"
+      title="Units"
+      description="Weight, height and hydration are shown in these units everywhere on the web. Your saved goals are not changed."
+    >
+      <UnitsControl />
     </SettingsCard>
   );
 }
@@ -374,9 +670,11 @@ function PasswordSection() {
 
 /* ------------------------------------------------------------------ notifications */
 
+const NOTIFICATION_SETTINGS_KEY = ['notification-settings'] as const;
+
 function useNotificationSettings() {
   return useQuery({
-    queryKey: ['notification-settings'],
+    queryKey: NOTIFICATION_SETTINGS_KEY,
     queryFn: async () => {
       const { data } = await api.get('/notifications/settings');
       return pickNotificationSettings(data.settings || data);
@@ -384,33 +682,30 @@ function useNotificationSettings() {
   });
 }
 
+/**
+ * Push preferences. Every switch reads from and writes to the shared query:
+ * there is no per-card draft, and a save sends only the key that changed, so
+ * nothing here can replay a stale value over another card's work.
+ */
 function NotificationsSection() {
   const toast = useToast();
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<NotificationSettings | null>(null);
   const settingsQuery = useNotificationSettings();
 
-  useEffect(() => {
-    if (settingsQuery.data && !draft) setDraft(settingsQuery.data);
-  }, [settingsQuery.data, draft]);
-
   const save = useMutation({
-    mutationFn: async (next: NotificationSettings) => {
-      const payload = pickNotificationSettings(next);
-      const { data } = await api.put('/notifications/settings', payload);
-      return pickNotificationSettings(data.settings || payload);
+    mutationFn: async (patch: Partial<NotificationSettings>) => {
+      const { data } = await api.put('/notifications/settings', patch);
+      return pickNotificationSettings(data.settings || { ...settingsQuery.data, ...patch });
     },
-    onMutate: (next) => {
-      const prev = draft;
-      setDraft(next);
-      return prev;
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: NOTIFICATION_SETTINGS_KEY });
+      const previous = qc.getQueryData<NotificationSettings>(NOTIFICATION_SETTINGS_KEY);
+      qc.setQueryData<NotificationSettings>(NOTIFICATION_SETTINGS_KEY, (old) => ({ ...(old ?? DEFAULT_NOTIFICATION_SETTINGS), ...patch }));
+      return { previous };
     },
-    onSuccess: (settings) => {
-      setDraft(settings);
-      qc.setQueryData(['notification-settings'], settings);
-    },
-    onError: (e, _v, ctx) => {
-      if (ctx) setDraft(ctx as NotificationSettings);
+    onSuccess: (settings) => qc.setQueryData(NOTIFICATION_SETTINGS_KEY, settings),
+    onError: (e, _patch, ctx) => {
+      if (ctx?.previous) qc.setQueryData(NOTIFICATION_SETTINGS_KEY, ctx.previous);
       toast.error(errMsg(e, 'Could not save your notification preferences.'));
     },
   });
@@ -431,7 +726,7 @@ function NotificationsSection() {
     );
   }
 
-  const value = draft || settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
+  const value = settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
   const paused = value.pauseAll === true;
   const rest = NOTIFICATION_SETTING_KEYS.filter((k) => k !== 'pauseAll');
 
@@ -442,7 +737,7 @@ function NotificationsSection() {
         hint={NOTIFICATION_LABELS.pauseAll.hint}
         checked={paused}
         disabled={save.isPending}
-        onChange={(checked) => save.mutate({ ...value, pauseAll: checked })}
+        onChange={(checked) => save.mutate({ pauseAll: checked })}
       />
       {paused ? (
         <Callout tone="warning" className="my-2">
@@ -457,7 +752,7 @@ function NotificationsSection() {
             hint={NOTIFICATION_LABELS[key].hint}
             checked={value[key]}
             disabled={save.isPending || paused}
-            onChange={(checked) => save.mutate({ ...value, [key]: checked })}
+            onChange={(checked) => save.mutate({ [key]: checked } as Partial<NotificationSettings>)}
           />
         ))}
       </div>
@@ -467,32 +762,49 @@ function NotificationsSection() {
 
 /* ------------------------------------------------------------------ email */
 
-const EMAIL_KEYS: NotificationSettingKey[] = ['newFollowers', 'likes', 'comments', 'friendRequests', 'workoutPosts'];
+const EMAIL_SETTINGS_KEY = ['email-preferences'] as const;
 
+/**
+ * Email is its own store on the API (settings.emailNotifications). Until it
+ * was, this card wrote the push object with every key from a draft taken at
+ * page load, so "Save email preferences" silently flipped push switches back.
+ * The draft here holds only the keys the user touched.
+ */
 function EmailPreferencesSection() {
   const toast = useToast();
-  const [draft, setDraft] = useState<NotificationSettings | null>(null);
-  const settingsQuery = useNotificationSettings();
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState<Partial<EmailSettings>>({});
 
-  useEffect(() => {
-    if (settingsQuery.data && !draft) setDraft(settingsQuery.data);
-  }, [settingsQuery.data, draft]);
+  const settingsQuery = useQuery({
+    queryKey: EMAIL_SETTINGS_KEY,
+    queryFn: async () => {
+      const { data } = await api.get('/users/email-preferences');
+      return pickEmailSettings(data.settings || data);
+    },
+  });
+
+  const base = settingsQuery.data || DEFAULT_EMAIL_SETTINGS;
+  const value: EmailSettings = { ...base, ...draft };
+  const changed = Object.fromEntries(
+    EMAIL_SETTING_KEYS.filter((k) => value[k] !== base[k]).map((k) => [k, value[k]]),
+  ) as Partial<EmailSettings>;
+  const dirty = Object.keys(changed).length > 0;
 
   const save = useMutation({
-    mutationFn: async (next: NotificationSettings) => {
-      await api.put('/users/email-preferences', { notifications: pickNotificationSettings(next) });
-      return next;
+    mutationFn: async (patch: Partial<EmailSettings>) => {
+      const { data } = await api.put('/users/email-preferences', { notifications: patch });
+      return pickEmailSettings(data.settings || { ...base, ...patch });
     },
-    onSuccess: () => toast.success('Email preferences saved'),
+    onSuccess: (settings) => {
+      qc.setQueryData(EMAIL_SETTINGS_KEY, settings);
+      setDraft({});
+      toast.success('Email preferences saved');
+    },
     onError: (e) => toast.error(errMsg(e, 'Could not save your email preferences.')),
   });
 
-  const value = draft || settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
-  const base = settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
-  const dirty = EMAIL_KEYS.some((k) => value[k] !== base[k]);
-
   return (
-    <SettingsCard id="email" title="Email preferences" description="Which of these updates you also receive by email.">
+    <SettingsCard id="email" title="Email preferences" description="Which of these updates you also receive by email. Separate from push notifications.">
       {settingsQuery.isLoading ? (
         <RowsSkeleton rows={4} height="h-12" />
       ) : settingsQuery.isError ? (
@@ -500,25 +812,179 @@ function EmailPreferencesSection() {
       ) : (
         <>
           <div className="divide-y divide-line">
-            {EMAIL_KEYS.map((key) => (
+            {EMAIL_SETTING_KEYS.map((key: EmailSettingKey) => (
               <ToggleRow
                 key={key}
                 title={NOTIFICATION_LABELS[key].title}
                 hint={NOTIFICATION_LABELS[key].hint}
                 checked={value[key]}
                 disabled={save.isPending}
-                onChange={(checked) => setDraft({ ...value, [key]: checked })}
+                onChange={(checked) => setDraft((d) => ({ ...d, [key]: checked }))}
               />
             ))}
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-xs text-text-3">{dirty ? 'You have unsaved changes.' : 'Up to date.'}</p>
-            <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate(value)}>
+            <p className="text-xs text-text-3" aria-live="polite">
+              {dirty ? 'You have unsaved changes.' : 'Up to date.'}
+            </p>
+            <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate(changed)}>
               Save email preferences
             </Button>
           </div>
         </>
       )}
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ privacy */
+
+type BlockedUser = Pick<PublicUser, '_id' | 'username' | 'fullName' | 'avatar'>;
+
+/**
+ * Account privacy, which the page subtitle promised and the mobile app has had
+ * all along. The switch mirrors mobile's Account privacy screen and writes
+ * PUT /users/settings { privacy }; the list underneath is GET /users/blocked.
+ */
+function PrivacySection() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const authUser = useAuth((s) => s.user);
+  const setUser = useAuth((s) => s.setUser);
+
+  const meQuery = useQuery({
+    queryKey: ['me'],
+    queryFn: async () => {
+      const { data } = await api.get('/users/me');
+      return (data.user || data) as PublicUser;
+    },
+    initialData: (authUser as PublicUser) ?? undefined,
+  });
+  const isPrivate = meQuery.data?.settings?.privacy === 'private';
+
+  const savePrivacy = useMutation({
+    mutationFn: async (privacy: 'public' | 'private') => {
+      const { data } = await api.put('/users/settings', { privacy });
+      return (data.user || data) as PublicUser;
+    },
+    onMutate: async (privacy) => {
+      await qc.cancelQueries({ queryKey: ['me'] });
+      const previous = qc.getQueryData<PublicUser>(['me']);
+      qc.setQueryData<PublicUser>(['me'], (old) => (old ? { ...old, settings: { ...(old.settings ?? {}), privacy } } : old));
+      return { previous };
+    },
+    onSuccess: (user) => {
+      qc.setQueryData(['me'], user);
+      setUser(user as any);
+      toast.success(user.settings?.privacy === 'private' ? 'Your account is now private' : 'Your account is now public');
+    },
+    onError: (e, _privacy, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['me'], ctx.previous);
+      toast.error(errMsg(e, 'Could not update your privacy setting.'));
+    },
+  });
+
+  const blockedQuery = useQuery({
+    queryKey: ['blocked-users'],
+    queryFn: async () => {
+      const { data } = await api.get('/users/blocked');
+      return (data.users || []) as BlockedUser[];
+    },
+  });
+
+  const unblock = useMutation({
+    mutationFn: async (userId: string) => {
+      await api.post('/users/unblock', { userId });
+    },
+    onMutate: async (userId) => {
+      await qc.cancelQueries({ queryKey: ['blocked-users'] });
+      const previous = qc.getQueryData<BlockedUser[]>(['blocked-users']);
+      qc.setQueryData<BlockedUser[]>(['blocked-users'], (old) => (old ?? []).filter((u) => u._id !== userId));
+      return { previous };
+    },
+    onSuccess: () => toast.success('Unblocked'),
+    onError: (e, _id, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['blocked-users'], ctx.previous);
+      toast.error(errMsg(e, 'Could not unblock this account.'));
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['blocked-users'] }),
+  });
+
+  return (
+    <SettingsCard id="privacy" title="Privacy" description="Who can see what you share and who cannot reach you at all.">
+      <ToggleRow
+        title="Private account"
+        hint={isPrivate ? 'Only followers you approve can see your posts, workouts and meals.' : 'Anyone on Vybe can see your posts, workouts and meals.'}
+        checked={isPrivate}
+        disabled={savePrivacy.isPending || !meQuery.data}
+        onChange={(checked) => savePrivacy.mutate(checked ? 'private' : 'public')}
+      />
+      <div className="mt-2 border-t border-line pt-4">
+        <h3 className="text-sm font-semibold text-text-1">Blocked accounts</h3>
+        <p className="text-xs text-text-2">Blocked accounts cannot follow, message or find you. You can unblock them here.</p>
+        <div className="mt-3">
+          {blockedQuery.isLoading ? (
+            <RowsSkeleton rows={2} />
+          ) : blockedQuery.isError ? (
+            <ErrorState title="Could not load blocked accounts" error={blockedQuery.error} retry={() => void blockedQuery.refetch()} />
+          ) : blockedQuery.data && blockedQuery.data.length > 0 ? (
+            <ul className="divide-y divide-line" aria-label="Blocked accounts">
+              {blockedQuery.data.map((u) => (
+                <li key={u._id} className="flex min-h-14 items-center gap-3 py-2">
+                  <Avatar src={u.avatar} name={displayName(u as PublicUser)} size="md" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-text-1">{displayName(u as PublicUser)}</span>
+                    <span className="block truncate text-xs text-text-2">@{u.username}</span>
+                  </span>
+                  <Button variant="secondary" size="sm" disabled={unblock.isPending} onClick={() => unblock.mutate(u._id)} aria-label={`Unblock ${displayName(u as PublicUser)}`}>
+                    Unblock
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-sm bg-surface-2 px-3 py-3 text-sm text-text-2">You haven’t blocked anyone. Block someone from the menu on their profile.</p>
+          )}
+        </div>
+      </div>
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ sessions */
+
+/**
+ * "Sign out" at the top of the page ends this device only (POST /auth/logout
+ * revokes the presenting session). Ending every session is a different,
+ * deliberate action, so it lives here behind a confirmation.
+ */
+function SessionsSection() {
+  const logoutEverywhere = useAuth((s) => s.logoutEverywhere);
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <SettingsCard id="sessions" title="Devices" description="Signing out from the top of this page only signs out this device.">
+      <div className="flex min-h-11 flex-wrap items-center gap-4 py-2">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2">
+          <Monitor size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-text-1">Sign out of all devices</p>
+          <p className="text-xs text-text-2">Ends every session on every phone, tablet and computer, including this one. Use it if you left yourself signed in somewhere.</p>
+        </div>
+        <Button variant="secondary" icon={<Lock size={18} />} onClick={() => setConfirming(true)}>
+          Sign out everywhere
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirming}
+        title="Sign out of all devices?"
+        message="Every device signed in to your account will be signed out, including this one. You can sign back in straight away."
+        confirmLabel="Sign out everywhere"
+        cancelLabel="Keep me signed in"
+        destructive
+        onConfirm={() => logoutEverywhere()}
+        onCancel={() => setConfirming(false)}
+      />
     </SettingsCard>
   );
 }
@@ -637,12 +1103,28 @@ function DangerZone() {
 
 export default function Settings() {
   const logout = useAuth((s) => s.logout);
+  const { hash } = useLocation();
+
+  // Deep links such as /settings#privacy (from the Friends page) scroll the
+  // card into view and move focus to it once the sections have rendered.
+  useEffect(() => {
+    const id = hash.replace(/^#/, '');
+    if (!id) return;
+    const t = window.setTimeout(() => {
+      const card = document.getElementById(`${id}-title`)?.closest('[role="region"]') as HTMLElement | null;
+      if (!card) return;
+      card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      card.setAttribute('tabindex', '-1');
+      card.focus({ preventScroll: true });
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [hash]);
 
   return (
     <>
       <PageHeader
         title="Settings"
-        subtitle="Account, appearance, notifications and privacy."
+        subtitle="Account, appearance, units, notifications and privacy."
         actions={
           <Button variant="ghost" icon={<LogOut size={18} />} onClick={() => logout()}>
             Sign out
@@ -657,7 +1139,11 @@ export default function Settings() {
       <div className="w-full max-w-form space-y-4">
         <AccountSection />
         <AppearanceSection />
+        <UnitsSection />
+        <PrivacySection />
+        <CoachingSection />
         <PasswordSection />
+        <SessionsSection />
         <NotificationsSection />
         <EmailPreferencesSection />
         <AboutSection />

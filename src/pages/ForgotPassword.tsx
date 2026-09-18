@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { api, errMsg } from '../lib/api';
 import { isEmail, useCountdown } from '../lib/hooks';
 import { Button, Callout, Input } from './ui';
 import { ArrowLeft, Mail } from './icons';
-import { AuthShell } from './Login';
+import { AuthShell, focusField } from './Login';
 
 export default function ForgotPassword() {
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  // Sign-in hands the typed email over so the person does not retype it.
+  const handed = (location.state as { email?: string } | null)?.email;
+  const [email, setEmail] = useState(typeof handed === 'string' ? handed : '');
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +24,11 @@ export default function ForgotPassword() {
     setError(null);
     setFieldError(undefined);
 
-    if (!isEmail(trimmed)) return setFieldError('Enter a valid email address.');
+    if (!isEmail(trimmed)) {
+      setFieldError('Enter a valid email address.');
+      focusField('fp-email');
+      return;
+    }
 
     setBusy(true);
     try {

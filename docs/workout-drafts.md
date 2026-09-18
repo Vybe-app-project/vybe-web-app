@@ -1,6 +1,10 @@
 # Durable workout draft and rest timer (bounded W3/W5)
 
-Current branch `aaa-a656-fleet-workout-recovery-web` combines reconciled web
+The current integration is `aaa-a656-fleet-recovery-e2e`, merging main
+`77c14ec22626834c3f159ff40cee8712d2cba313` into parent harness tip
+`6c4b04b6fc0d848ec73b4baa51a812dc0c2d91b3` (including `d4ff555` and guarded
+draft release `da7b4d6`). The preceding `aaa-a656-fleet-workout-recovery-web`
+package combined reconciled web
 `7e5b308b755d4d794f1069b8b0003875a95ec972` with the preserved draft/timer
 `b8b5e3af0b9bf2bb84ac87a9e1928bc07aa2e96f`. Main's place pictures, meal-token
 handoff and full-template updates, plus the earlier reliability/per-set fixes,
@@ -18,7 +22,8 @@ frontend package does not change the REST contract or qualify server storage.
   their version-1 format.
 - Save form strings, stable exercise/set IDs, original edit/seed context,
   request ID, rest timer and any pending immutable request. No raw credential
-  is stored in IndexedDB. The existing authentication token store is unchanged.
+  is stored in IndexedDB. Both actual consumer token persistence modes are
+  read through the shared noncyclic session reader.
 - “Local only · unsynced” distinguishes local commits from server saves.
   “Saved on this device” appears only after the IndexedDB transaction completes.
   Input entered while a storage operation is pending is not yet durable.
@@ -66,6 +71,15 @@ a local revocation generation. Logout/credential replacement synchronously
 revokes the generation before asynchronous IndexedDB purge, so navigation
 interrupting that purge cannot make the old draft eligible again.
 
+Remembered and tab-only credentials both support same-tab reload recovery
+after real verification. A tab-only credential/snapshot stays in sessionStorage;
+browser/tab restart authentication is not promised. Offline identity snapshots
+never supply `verifiedToken`, bind an editor, or authorize a workout POST/PATCH.
+Without verification, the draft remains on disk and the shell offers reconnect,
+not fabricated login or silent publication. Real account changes synchronously
+remove the old identity and its query client; stale editors cannot paint as the
+new owner. A fresh signed-out tab alone is not an account-change/purge operation.
+
 The small `api.ts`/`auth.ts`/`App.tsx` hooks are necessary for lifecycle safety,
 including outside the logger:
 
@@ -81,6 +95,19 @@ including outside the logger:
 - IDs, content and request metadata stay local/private. No secrets appear in
   status messages. Browser storage is not application-level encrypted; device/
   browser profile access remains a privacy consideration.
+
+## Duration compatibility
+
+Private log exercise duration remains **minutes**, exactly as the existing
+logger entered it and as backend `docs/workout-set-records.md` specifies
+(0–1,440 minutes, pinned source `f9d0c53888ef625f2894d64777ef1e78b5152e1b`).
+The social/catalog exercise prescription uses **seconds**, as current main's
+editor and catalog contract specify. Seeding a new private log converts only
+that prescription (`180 seconds → 3 minutes`). Existing logs/drafts are never
+rescaled. History uses `formatSeconds(minutes * 60)` while preserving kg/lb.
+The session-level duration remains minutes; the optional rest timer remains
+seconds/deadlines. Browser regressions cover both the boundary conversion and
+an unchanged historical 180-minute/lb entry. No backend wire change is made.
 
 ## Concurrent tabs and stale editors
 
@@ -210,7 +237,29 @@ skip; those skips are not proof. The live smoke script is **not run** here.
 Native/device, actual production, notifications and full W3/W5 completion
 remain parent-owned/out of scope.
 
-## Current concurrency-package verification — 2026-09-18
+## Current-main compatibility verification — 2026-09-18
+
+The current merge passes all 34 pure/mock-browser files: **361 tests, zero
+failures/skips/cancellations**, including six Chromium suites. `npm run verify`
+also passes with 361 tests and exactly one explicitly gated real-backend E2E;
+scan, zero-finding dependency audit, contracts, typecheck/build/artifact and
+diff checks pass. Static routes were additionally checked against an exact
+read-only export of pinned backend `f9d0c53888ef625f2894d64777ef1e78b5152e1b`.
+
+Real Chromium covers remembered/tab-only login, draft binding, same-tab reload,
+offline snapshot gating, successful recovery/save, and logout cleanup. A fresh
+unsigned tab does not erase the original tab-only draft. Account changes
+immediately hide old editor/cache state (rather than leaving the prior account's
+input visible); same-account stale-tab conflicts still retain unsaved input.
+Store tests cover late 401/success/refresh/login callbacks and scoped bootstrap
+dedup. Existing CAS/ABA/immutable-retry/timer tests remain passing.
+
+The parent-provided real-backend harness is unchanged and was **not executed**
+for this merge. Its earlier five passes preceded current main; a new parent
+run is required. Matching dependency links/caches remain for that run. See
+`logs/fleet-web-current-main-compat/` for this bounded frontend evidence.
+
+## Historical concurrency-package verification (da7b4d6) — 2026-09-18
 
 Node 24.19.0 / npm 11.17.0; existing manifest-matched dependency links only,
 with worktree-local writable caches:

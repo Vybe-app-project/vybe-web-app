@@ -4,8 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { compactNumber, displayName, followerCount, type PublicUser } from '../lib/hooks';
-import { Avatar, Badge, Button, Card, SkeletonRow, Skeleton, useToast, type ButtonSize } from './ui';
-import { BadgeCheck, Check, UserPlus } from './icons';
+import { Avatar, Badge, Button, Card, SkeletonRow, Skeleton, humanize, useToast, type ButtonSize } from './ui';
+import { BadgeCheck, Check, Lock, UserPlus } from './icons';
 
 export type FollowState = 'none' | 'following' | 'requested';
 
@@ -14,6 +14,10 @@ function initialFollowState(user: PublicUser): FollowState {
   if (user.followStatus === 'requested' || user.followStatus === 'pending') return 'requested';
   return 'none';
 }
+
+/** Private account (API sends `isPrivate`; profiles also carry settings.privacy). */
+export const isPrivateAccount = (user?: Pick<PublicUser, 'isPrivate' | 'settings'> | null) =>
+  user?.isPrivate === true || user?.settings?.privacy === 'private';
 
 /**
  * Follow / Following / Requested toggle. Primary when there is no
@@ -98,16 +102,31 @@ export function FollowButton({
   );
 }
 
+/** Small lock after the handle of a private account, so the state is known before tapping through. */
+export function PrivateMark({ user, size = 12 }: { user?: Pick<PublicUser, 'isPrivate' | 'settings'> | null; size?: number }) {
+  if (!isPrivateAccount(user)) return null;
+  return (
+    <span role="img" aria-label="Private account" title="Private account" className="inline-flex shrink-0 text-text-3">
+      <Lock size={size} />
+    </span>
+  );
+}
+
 /**
  * Role badges shared by rows and profile headers. `compact` (list rows) keeps
  * the name on one line: verified becomes the check glyph and only Coach stays
  * as a small badge.
+ *
+ * The check is the operator-set `isIdentityVerified`, never `isVerified`:
+ * the latter only means the e-mail was confirmed, which every active
+ * account has, so it rendered a "Verified" badge on everybody.
  */
 export function UserBadges({ user, compact = false }: { user: PublicUser; compact?: boolean }) {
+  const verified = user.isIdentityVerified === true;
   if (compact) {
     return (
       <>
-        {user.isVerified ? (
+        {verified ? (
           <span role="img" aria-label="Verified" title="Verified" className="inline-flex shrink-0 text-brand">
             <BadgeCheck size={16} />
           </span>
@@ -122,7 +141,7 @@ export function UserBadges({ user, compact = false }: { user: PublicUser; compac
   }
   return (
     <>
-      {user.isVerified ? (
+      {verified ? (
         <Badge tone="brand">
           <BadgeCheck size={12} />
           Verified
@@ -156,13 +175,32 @@ export default function UserRow({ user, trailing }: { user: PublicUser; trailing
           <UserBadges user={user} compact />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-2">
-          <span className="truncate">@{user.username}</span>
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <span className="truncate">@{user.username}</span>
+            <PrivateMark user={user} />
+          </span>
           {followers > 0 ? (
             <span className="tabular shrink-0">
               {compactNumber(followers)} {followers === 1 ? 'follower' : 'followers'}
             </span>
           ) : null}
         </div>
+        {(user.isCoach || user.isTrainer) && user.fields?.length ? (
+          <ul className="mt-1.5 flex flex-wrap gap-1" aria-label="Coaching specialties">
+            {user.fields.slice(0, 4).map((f) => (
+              <li key={f}>
+                <Badge tone="info" size="sm">
+                  {humanize(f)}
+                </Badge>
+              </li>
+            ))}
+            {user.fields.length > 4 ? (
+              <li>
+                <Badge size="sm">+{user.fields.length - 4}</Badge>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
         {user.bio ? <p className="mt-1 line-clamp-2 text-xs text-text-2">{user.bio}</p> : null}
       </div>
       <div className="shrink-0">{trailing ?? <FollowButton user={user} size="sm" />}</div>

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { shareOrCopy, shareUrls } from '../lib/share';
 import {
   Avatar,
   Badge,
@@ -30,7 +31,7 @@ import {
 } from './ui';
 import type { MenuItem } from './ui';
 import { Utensils, Plus, Trash, Edit, Heart, Check, Clock, Bookmark, Copy, Link as LinkIcon, Globe, ShareUp } from './icons';
-import { MacroLine, MEAL_TYPE_OPTIONS, defaultMealType, mealTypeLabel, plural } from './Meals';
+import { FoodSearch, MacroLine, MEAL_TYPE_OPTIONS, defaultMealType, mealTypeLabel, plural, selectedFoodNutrition, type SelectedFood } from './Meals';
 
 /* ------------------------------------------------------------------ types */
 
@@ -108,21 +109,7 @@ const totalsOf = (t: MealTemplate): TemplateNutrition => {
 
 const ownerOf = (t: MealTemplate): TemplateOwner | undefined => (typeof t.user === 'object' && t.user ? t.user : undefined);
 
-const shareUrlFor = (token: string) => `${location.origin}/meals/templates?shared=${encodeURIComponent(token)}`;
-
-async function shareOrCopy(url: string, title: string, toast: ReturnType<typeof useToast>) {
-  try {
-    if (typeof navigator.share === 'function') {
-      await navigator.share({ title, url });
-      return;
-    }
-    await navigator.clipboard.writeText(url);
-    toast.success('Share link copied');
-  } catch (e) {
-    if ((e as { name?: string })?.name === 'AbortError') return;
-    toast.info(`Share link: ${url}`, { duration: 8000 });
-  }
-}
+const shareUrlFor = shareUrls.template;
 
 const FOOD_LIMIT = 4;
 
@@ -208,6 +195,33 @@ function TemplateModal({ open, editing, onClose }: { open: boolean; editing: Mea
   }
 
   const update = (i: number, patch: Partial<FoodDraft>) => setFoods((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
+
+  const isBlank = (f: FoodDraft) => !f.food_name.trim() && !f.calories && !f.protein && !f.carbs && !f.fat;
+  const fmt = (v?: number) => (v == null ? '' : String(Math.round(v * 10) / 10));
+
+  /**
+   * A catalog pick fills a food row (the last blank one, or a new one) with
+   * its name, brand, serving and per-serving macros. Every field stays
+   * editable, so the manual path is still there for foods not in the catalog.
+   */
+  const addFromCatalog = (picked: SelectedFood) => {
+    const perServing = selectedFoodNutrition({ ...picked, servings: 1 });
+    const draft: FoodDraft = {
+      food_name: picked.name,
+      brandName: picked.brand ?? '',
+      servingSize: picked.servingLabel,
+      servings: 1,
+      calories: fmt(perServing.calories),
+      protein: fmt(perServing.protein),
+      carbs: fmt(perServing.carbs),
+      fat: fmt(perServing.fat),
+    };
+    setErrors((er) => ({ ...er, foods: undefined }));
+    setFoods((prev) => {
+      const last = prev[prev.length - 1];
+      return last && isBlank(last) ? [...prev.slice(0, -1), draft] : [...prev, draft];
+    });
+  };
 
   const totals = useMemo(
     () =>
@@ -324,6 +338,7 @@ function TemplateModal({ open, editing, onClose }: { open: boolean; editing: Mea
 
         <fieldset className="space-y-3">
           <legend className="type-label mb-2 text-text-2">Foods</legend>
+          <FoodSearch onAdd={addFromCatalog} label="Search foods to add" placeholder="Greek yogurt, rolled oats, chicken breast…" />
           {foods.map((food, i) => (
             <div key={i} className="space-y-3 rounded-md border border-line bg-surface-1 p-3">
               <div className="flex items-end gap-2">
@@ -565,12 +580,12 @@ function TemplateCard({
 
   const logTemplate = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post(`/meal-templates/${template._id}/log`);
+      const { data } = await api.post(`/meal-templates/${template._id}/log`, { timezoneOffsetMinutes: new Date().getTimezoneOffset() });
       return data as { message?: string };
     },
     onSuccess: () => {
       const n = template.foods?.length ?? 0;
-      toast.success(`Logged ${template.name} as ${mealTypeLabel(template.meal_type).toLowerCase()}${n > 1 ? ` (${n} foods)` : ''}`, {
+      toast.success(`Logged ${template.name} as one ${mealTypeLabel(template.meal_type).toLowerCase()}${n > 1 ? ` (${n} foods)` : ''}`, {
         action: { label: 'View meals', onClick: () => navigate('/meals', { viewTransition: true }) },
       });
       qc.invalidateQueries({ queryKey: ['meals'] });
@@ -603,6 +618,7 @@ function TemplateCard({
     onError: (e) => toast.error(errMsg(e, 'Could not update sharing')),
   });
 
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
   const revoke = useMutation({
     mutationFn: async () => {
       const { data } = await api.delete(`/meal-templates/${template._id}/share-token`);
@@ -610,6 +626,7 @@ function TemplateCard({
     },
     onSuccess: () => toast.success('Share links revoked'),
     onError: (e) => toast.error(errMsg(e, 'Could not revoke share links')),
+    onSettled: () => setConfirmRevoke(false),
   });
 
   const ownerMenu: MenuItem[] = [
@@ -621,7 +638,7 @@ function TemplateCard({
       icon: <Globe size={18} />,
       onSelect: () => profileShare.mutate(),
     },
-    { label: 'Revoke share links', icon: <ShareUp size={18} />, onSelect: () => revoke.mutate() },
+    { label: 'Revoke share links', description: 'Every link you sent stops working', icon: <ShareUp size={18} />, onSelect: () => setConfirmRevoke(true) },
     { label: 'Delete template', icon: <Trash size={18} />, danger: true, divider: true, onSelect: () => onDelete(template) },
   ];
 
@@ -708,6 +725,16 @@ function TemplateCard({
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmRevoke}
+        title="Revoke every share link?"
+        message={`Anyone you sent a link to “${template.name}” will see that it expired. You can create a fresh link afterwards.`}
+        confirmLabel="Revoke links"
+        destructive
+        loading={revoke.isPending}
+        onCancel={() => setConfirmRevoke(false)}
+        onConfirm={() => revoke.mutate()}
+      />
     </Card>
   );
 }

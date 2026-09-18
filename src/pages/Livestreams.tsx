@@ -29,31 +29,14 @@ import {
 } from './ui';
 import { CalendarDays, ChevronLeft, ChevronRight, Eye, Image as ImageIcon, Play, Plus, Radio, Users, X } from './icons';
 import LiveRoom from './LiveRoom';
+import { liveVideoEnabled, useCapabilities } from '../lib/capabilities';
 import { CATEGORY_OPTIONS, at, categoryLabel, hostOf, hostName, viewersOf, type Stream } from './liveTypes';
 
 /* ------------------------------------------------------------------ types */
 
-/** GET /api/capabilities — the server's honest report of what is configured. */
-type ServerCapabilities = {
-  livestreamRelay?: boolean;
-  turnRelay?: boolean;
-  [k: string]: unknown;
-};
-
 type ListTab = 'live' | 'featured' | 'scheduled' | 'mine';
 
 const PAGE = 18;
-
-function useCapabilities() {
-  return useQuery({
-    queryKey: ['capabilities'],
-    staleTime: 5 * 60 * 1000,
-    queryFn: async () => {
-      const { data } = await api.get('/capabilities');
-      return (data?.capabilities || {}) as ServerCapabilities;
-    },
-  });
-}
 
 /* ------------------------------------------------------------------ pieces */
 
@@ -403,8 +386,8 @@ function LiveUnavailable({ streamId }: { streamId?: string }) {
   return (
     <div className="space-y-4">
       {streamId ? (
-        <Callout tone="info" title="This stream cannot be opened">
-          You followed a link to a stream, but live video is switched off on this server.
+        <Callout tone="info" title="This stream can’t be opened">
+          You followed a link to a stream, but live video isn’t available here yet.
         </Callout>
       ) : null}
       <Card className="flex flex-col items-center gap-5 py-12 text-center">
@@ -412,10 +395,8 @@ function LiveUnavailable({ streamId }: { streamId?: string }) {
           <Radio size={32} />
         </span>
         <div className="max-w-md space-y-2">
-          <h2 className="type-heading text-xl text-text-1">Live video is not enabled here</h2>
-          <p className="text-base leading-relaxed text-text-2">
-            This Vybe server runs without a live video relay, so streams cannot be hosted or watched right now. It is a server setting, not something on your device, and the rest of the app is unaffected.
-          </p>
+          <h2 className="type-heading text-xl text-text-1">Live video isn’t available yet</h2>
+          <p className="text-base leading-relaxed text-text-2">Watch stories or explore the community instead — everything else works as usual.</p>
         </div>
         <div className="flex flex-wrap items-center justify-center gap-2">
           <ButtonLink to="/stories" variant="primary" icon={<Play size={18} />}>
@@ -442,7 +423,7 @@ export default function Livestreams() {
   useEffect(() => setPage(1), [tab]);
 
   const capabilities = useCapabilities();
-  const enabled = capabilities.data?.livestreamRelay === true;
+  const enabled = liveVideoEnabled(capabilities.data);
 
   const openStream = useCallback(
     (id: string, options?: { instant?: boolean }) =>

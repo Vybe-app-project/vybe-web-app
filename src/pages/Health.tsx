@@ -9,6 +9,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,6 +17,7 @@ import {
 } from 'recharts';
 import { format, isValid, parseISO, subDays } from 'date-fns';
 import { api, errMsg } from '../lib/api';
+import { displayWeight, formatWeight, useUnits, weightUnit } from '../lib/units';
 import {
   Button,
   Callout,
@@ -105,11 +107,19 @@ type WorkoutAnalytics = HealthAnalytics['workoutStats'] & {
   personalBests: { calories: number; duration: number; frequency: number };
 };
 
-type NutritionAnalytics = HealthAnalytics['nutritionStats'] & {
+type NutritionAnalytics = Omit<HealthAnalytics['nutritionStats'], 'mealTypes'> & {
   timeWindow: TimeWindow;
   nutritionBalance: { protein: number; carbs: number; fat: number };
+  /** Per meal type: how many and the average kcal of each. */
+  mealTypes: Record<string, { count: number; avgCalories: number } | number>;
   topFoods: Record<string, { count: number; totalCalories: number; avgCalories: number }>;
 };
+
+type HealthGoalsSummary = { dailyCalorieGoal?: number; macroGoals?: { protein?: number; carbs?: number; fat?: number } };
+
+const MEAL_TYPE_ORDER = ['breakfast', 'lunch', 'dinner', 'snack'];
+const mealTypeStats = (value: { count: number; avgCalories: number } | number | undefined) =>
+  typeof value === 'number' ? { count: value, avgCalories: 0 } : value ?? { count: 0, avgCalories: 0 };
 
 // How much manual daily-entry history the Health page requests. The API
 // caps a range at 365 days; 60 covers the charts without a large payload.
@@ -324,6 +334,8 @@ export default function Health() {
   const [searchParams, setSearchParams] = useSearchParams();
   // Sparklines need ~72px; on 2-up phone tiles they would crowd the numeral.
   const compact = useIsCompact();
+  const system = useUnits((s) => s.system);
+  const wUnit = weightUnit(system);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('week');
   const [entryModal, setEntryModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<DailyEntry | null>(null);
@@ -369,6 +381,16 @@ export default function Health() {
     queryFn: async (): Promise<NutritionAnalytics> => {
       const { data } = await api.get<{ analytics: NutritionAnalytics }>('/health/nutrition-analytics', { params });
       return data.analytics;
+    },
+  });
+
+  // The calorie goal draws the target line on the chart and anchors the
+  // "average vs goal" comparison. No goals yet is a normal state.
+  const goals = useQuery({
+    queryKey: ['health-goals'],
+    queryFn: async (): Promise<HealthGoalsSummary> => {
+      const { data } = await api.get<{ data: HealthGoalsSummary }>('/health-goals');
+      return data.data ?? {};
     },
   });
 
@@ -424,11 +446,26 @@ export default function Health() {
         return {
           date: isValid(d) ? format(d, 'yyyy-MM-dd') : e.date,
           label: isValid(d) ? format(d, 'd MMM') : e.date,
-          weight: e.weightKg as number,
+          weight: displayWeight(e.weightKg as number, system),
         };
       });
     return rows.sort((a, b) => a.date.localeCompare(b.date));
-  }, [entries.data]);
+  }, [entries.data, system]);
+
+  const calorieGoal = goals.data?.dailyCalorieGoal ?? 0;
+  const nutritionInsights = useMemo(() => {
+    const n = nutrition.data;
+    if (!n) return null;
+    const days = n.dailyNutrition ?? [];
+    const loggedDays = days.filter((d) => d.meals > 0);
+    const avgPerLoggedDay = loggedDays.length ? Math.round(loggedDays.reduce((s, d) => s + d.calories, 0) / loggedDays.length) : 0;
+    const topFoods = Object.entries(n.topFoods ?? {})
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.count - a.count || b.totalCalories - a.totalCalories)
+      .slice(0, 5);
+    const mealTypes = MEAL_TYPE_ORDER.map((type) => ({ type, ...mealTypeStats(n.mealTypes?.[type]) })).filter((m) => m.count > 0);
+    return { avgPerLoggedDay, loggedDays: loggedDays.length, topFoods, mealTypes };
+  }, [nutrition.data]);
 
   const calorieSeries = useMemo(
     () =>
@@ -456,6 +493,7 @@ export default function Health() {
   );
   const weightSpark = weightSeries.map((w) => w.weight);
   const weightDelta = weightSeries.length >= 2 ? Math.round((weightSeries[weightSeries.length - 1].weight - weightSeries[0].weight) * 10) / 10 : null;
+  const macroGoal = goals.data?.macroGoals;
 
   const animation = chartTheme.animationDuration;
   const chartAnim = { isAnimationActive: animation > 0, animationDuration: animation };
@@ -472,7 +510,7 @@ export default function Health() {
         title="Health"
         subtitle="Training, nutrition and body stats, built from what you log."
         actions={logButton}
-        mobileActions={<IconButton label="Log weight or steps" variant="primary" onClick={openNewEntry}><Plus size={22} /></IconButton>}
+        mobileActions={<IconButton label="Log weight or steps" onClick={openNewEntry}><Plus size={22} /></IconButton>}
       />
 
       <Tabs
@@ -529,11 +567,11 @@ export default function Health() {
             <StatTile
               loading={overview.isLoading}
               label="Weight"
-              value={metrics?.weight != null ? formatStat(metrics.weight) : '—'}
-              unit={metrics?.weight != null ? 'kg' : undefined}
+              value={metrics?.weight != null ? formatStat(displayWeight(metrics.weight, system)) : '—'}
+              unit={metrics?.weight != null ? wUnit : undefined}
               icon={<Scale size={18} />}
               spark={compact ? undefined : weightSpark}
-              delta={weightDelta != null ? { value: `${weightDelta > 0 ? '+' : ''}${formatStat(weightDelta)} kg`, direction: 'flat', label: 'since first entry' } : undefined}
+              delta={weightDelta != null ? { value: `${weightDelta > 0 ? '+' : ''}${formatStat(weightDelta)} ${wUnit}`, direction: 'flat', label: 'since first entry' } : undefined}
               hint={metrics?.bmi != null ? `BMI ${formatStat(metrics.bmi)}` : 'Log a weight to track it'}
             />
             <StatTile
@@ -593,7 +631,7 @@ export default function Health() {
                   <CartesianGrid {...chartTheme.cartesianGrid} />
                   <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
                   <YAxis {...chartTheme.axisProps} width={44} domain={['dataMin - 2', 'dataMax + 2']} />
-                  <Tooltip {...chartTheme.tooltip} formatter={(v) => [`${formatStat(Number(v ?? 0))} kg`, 'Weight']} />
+                  <Tooltip {...chartTheme.tooltip} formatter={(v) => [`${formatStat(Number(v ?? 0))} ${wUnit}`, 'Weight']} />
                   <Line type="monotone" dataKey="weight" stroke={VIZ.brand} strokeWidth={2} dot={{ r: 3, fill: VIZ.brand, strokeWidth: 0 }} activeDot={{ r: 5 }} {...chartAnim} />
                 </LineChart>
               </ResponsiveContainer>
@@ -630,15 +668,128 @@ export default function Health() {
                     <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
                     <YAxis {...chartTheme.axisProps} width={44} />
                     <Tooltip {...chartTheme.tooltip} formatter={(v) => [`${formatStat(Math.round(Number(v ?? 0)))} kcal`, 'Calories']} />
+                    {calorieGoal > 0 ? (
+                      <ReferenceLine y={calorieGoal} stroke={VIZ.brand} strokeDasharray="4 4" ifOverflow="extendDomain" label={{ value: `Goal ${formatStat(calorieGoal)}`, position: 'insideTopRight', fill: VIZ.brand, fontSize: 11 }} />
+                    ) : null}
                     <Area type="monotone" dataKey="calories" stroke={VIZ.kcal} strokeWidth={2} fill="url(#healthCaloriesFill)" {...chartAnim} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+              {nutritionInsights ? (
+                <p className="mt-3 text-xs text-text-2">
+                  Average <span className="tabular font-semibold text-text-1">{formatStat(nutritionInsights.avgPerLoggedDay)} kcal</span> on the{' '}
+                  <span className="tabular font-semibold text-text-1">{nutritionInsights.loggedDays}</span> {dayUnit(nutritionInsights.loggedDays)} you logged
+                  {calorieGoal > 0 ? (
+                    <>
+                      , {nutritionInsights.avgPerLoggedDay <= calorieGoal ? (
+                        <>
+                          <span className="tabular font-semibold text-text-1">{formatStat(calorieGoal - nutritionInsights.avgPerLoggedDay)} kcal</span> under
+                        </>
+                      ) : (
+                        <>
+                          <span className="tabular font-semibold text-accent-text">{formatStat(nutritionInsights.avgPerLoggedDay - calorieGoal)} kcal</span> over
+                        </>
+                      )}{' '}
+                      your {formatStat(calorieGoal)} kcal goal.
+                    </>
+                  ) : (
+                    <>
+                      . <a href="/health/goals" className="underline-offset-2 hover:underline">Set a calorie goal</a> to see the target line.
+                    </>
+                  )}
+                </p>
+              ) : null}
               {nutrition.data ? <MacroBalance {...nutrition.data.nutritionBalance} /> : null}
             </>
           )}
         </Card>
       </div>
+
+      {nutrition.data && nutritionInsights && calorieSeries.length > 0 ? (
+        <Section title="Nutrition" description={`Macros per day, meal types and the foods you log most ${WINDOW_NOUN[timeWindow]}.`}>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+            <Card>
+              <CardHeader title="Macros per day" subtitle="Grams of protein, carbs and fat, stacked" />
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={calorieSeries} margin={CHART_MARGIN} barGap={2}>
+                    <CartesianGrid {...chartTheme.cartesianGrid} />
+                    <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
+                    <YAxis {...chartTheme.axisProps} width={44} />
+                    <Tooltip
+                      {...chartTheme.tooltip}
+                      formatter={(v, name) => [`${formatStat(Math.round(Number(v ?? 0)))} g`, name === 'protein' ? 'Protein' : name === 'carbs' ? 'Carbs' : 'Fat']}
+                    />
+                    <Bar dataKey="protein" stackId="macros" fill={chartTheme.macro.protein} maxBarSize={28} {...chartAnim} />
+                    <Bar dataKey="carbs" stackId="macros" fill={chartTheme.macro.carbs} maxBarSize={28} {...chartAnim} />
+                    <Bar dataKey="fat" stackId="macros" fill={chartTheme.macro.fat} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                {(
+                  [
+                    ['protein', 'Protein', chartTheme.macro.protein, macroGoal?.protein],
+                    ['carbs', 'Carbs', chartTheme.macro.carbs, macroGoal?.carbs],
+                    ['fat', 'Fat', chartTheme.macro.fat, macroGoal?.fat],
+                  ] as const
+                ).map(([key, label, color, goal]) => {
+                  const perDay = nutritionInsights.loggedDays
+                    ? Math.round(calorieSeries.filter((d) => d.meals > 0).reduce((s, d) => s + d[key], 0) / nutritionInsights.loggedDays)
+                    : 0;
+                  return (
+                    <div key={key} className="inline-flex items-center gap-1.5">
+                      <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: color }} />
+                      <dt className="text-text-2">{label}</dt>
+                      <dd className="tabular font-semibold text-text-1">
+                        {formatStat(perDay)} g<span className="font-normal text-text-3">/day{goal ? ` of ${formatStat(goal)}` : ''}</span>
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </Card>
+
+            <div className="space-y-4">
+              <Card>
+                <CardHeader title="Meals by type" subtitle="How many, and the average size of each" />
+                {nutritionInsights.mealTypes.length === 0 ? (
+                  <p className="text-sm text-text-2">No meals in this window.</p>
+                ) : (
+                  <ul className="flex flex-wrap gap-2" aria-label="Meals by type">
+                    {nutritionInsights.mealTypes.map((m) => (
+                      <li key={m.type} className="rounded-md bg-surface-2 px-3 py-2">
+                        <p className="text-sm font-semibold text-text-1">
+                          {m.type.charAt(0).toUpperCase() + m.type.slice(1)} <span className="tabular text-text-2">× {formatStat(m.count)}</span>
+                        </p>
+                        <p className="tabular text-xs text-text-2">{formatStat(Math.round(m.avgCalories))} kcal each</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+              <Card>
+                <CardHeader title="Top foods" subtitle="What you logged most often" />
+                {nutritionInsights.topFoods.length === 0 ? (
+                  <p className="text-sm text-text-2">Log a few meals and your regulars show up here.</p>
+                ) : (
+                  <ol className="divide-y divide-line" aria-label="Top foods">
+                    {nutritionInsights.topFoods.map((food, i) => (
+                      <li key={food.name} className="flex items-center gap-3 py-2">
+                        <span className="type-stat w-5 text-sm text-text-3">{i + 1}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-1">{food.name}</span>
+                        <span className="tabular shrink-0 text-xs text-text-2">
+                          {formatStat(food.count)}× · {formatStat(Math.round(food.avgCalories))} kcal
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </Card>
+            </div>
+          </div>
+        </Section>
+      ) : null}
 
       <Card>
         <CardHeader title="Workout volume" subtitle="Minutes trained and calories burned per session day" />

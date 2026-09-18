@@ -1,6 +1,21 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
+import { UnitsControl } from '../components/UnitsControl';
+import {
+  cmToFeetInches,
+  displayWeight,
+  feetInchesToCm,
+  formatWeight,
+  goalRanges,
+  kgToLb,
+  lbToKg,
+  paceUnit,
+  parseWeight,
+  useUnits,
+  weightUnit,
+  type UnitSystem,
+} from '../lib/units';
 import {
   Button,
   ButtonLink,
@@ -130,10 +145,19 @@ function MacroTarget({ label, grams, tone }: { label: string; grams: number; ton
 
 /* ------------------------------------------------------------------- page */
 
+/**
+ * Form values live in the units the person chose (kg/cm or lb/ft-in); the API
+ * is always metric. Conversions happen at the edges: seeding the form from
+ * saved goals, switching units, and building the save payload.
+ */
 type FormState = {
   currentWeight: string;
   targetWeight: string;
+  /** Metric: centimetres. */
   heightCm: string;
+  /** Imperial: whole feet and inches. */
+  heightFt: string;
+  heightIn: string;
   age: string;
   gender: string;
   activityLevel: string;
@@ -141,16 +165,48 @@ type FormState = {
   weeklyGoal: string;
 };
 
-const formFrom = (g?: HealthGoals | null): FormState => ({
-  currentWeight: g?.currentWeight != null ? String(g.currentWeight) : '',
-  targetWeight: g?.targetWeight != null ? String(g.targetWeight) : '',
-  heightCm: g?.heightCm != null ? String(g.heightCm) : '',
-  age: g?.age != null ? String(g.age) : '',
-  gender: g?.gender ?? 'male',
-  activityLevel: g?.activityLevel ?? 'moderately_active',
-  goal: g?.goal ?? 'maintain_weight',
-  weeklyGoal: g?.weeklyGoal != null ? String(g.weeklyGoal) : '0',
-});
+const str = (v: number | undefined | null) => (v == null ? '' : String(v));
+
+const formFrom = (g: HealthGoals | null | undefined, system: UnitSystem): FormState => {
+  const feetInches = g?.heightCm != null ? cmToFeetInches(g.heightCm) : null;
+  return {
+    currentWeight: g?.currentWeight != null ? str(displayWeight(g.currentWeight, system)) : '',
+    targetWeight: g?.targetWeight != null ? str(displayWeight(g.targetWeight, system)) : '',
+    heightCm: g?.heightCm != null ? str(Math.round(g.heightCm)) : '',
+    heightFt: feetInches ? str(feetInches.feet) : '',
+    heightIn: feetInches ? str(feetInches.inches) : '',
+    age: g?.age != null ? str(g.age) : '',
+    gender: g?.gender ?? 'male',
+    activityLevel: g?.activityLevel ?? 'moderately_active',
+    goal: g?.goal ?? 'maintain_weight',
+    weeklyGoal: g?.weeklyGoal != null ? str(system === 'imperial' ? kgToLb(g.weeklyGoal) : g.weeklyGoal) : '0',
+  };
+};
+
+/** Re-express what is typed when the unit switch flips, so nothing is lost. */
+const convertForm = (f: FormState, from: UnitSystem, to: UnitSystem): FormState => {
+  if (from === to) return f;
+  const w = (raw: string) => {
+    const n = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(n)) return raw;
+    return str(to === 'imperial' ? kgToLb(n) : lbToKg(n));
+  };
+  let heightCm = f.heightCm;
+  let heightFt = f.heightFt;
+  let heightIn = f.heightIn;
+  if (to === 'imperial' && f.heightCm.trim() !== '') {
+    const fi = cmToFeetInches(Number(f.heightCm));
+    heightFt = str(fi.feet);
+    heightIn = str(fi.inches);
+  } else if (to === 'metric' && (f.heightFt.trim() !== '' || f.heightIn.trim() !== '')) {
+    heightCm = str(Math.round(feetInchesToCm(Number(f.heightFt) || 0, Number(f.heightIn) || 0)));
+  }
+  return { ...f, currentWeight: w(f.currentWeight), targetWeight: w(f.targetWeight), weeklyGoal: w(f.weeklyGoal), heightCm, heightFt, heightIn };
+};
+
+/** Height in cm from whatever the form holds for the active unit system. */
+const heightCmOf = (f: FormState, system: UnitSystem): number =>
+  system === 'imperial' ? feetInchesToCm(Number(f.heightFt) || 0, Number(f.heightIn) || 0) : Number(f.heightCm);
 
 const inRange = (raw: string, min: number, max: number) => {
   const n = Number(raw);
@@ -160,9 +216,26 @@ const inRange = (raw: string, min: number, max: number) => {
 export default function HealthGoals() {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState<FormState>(formFrom(null));
+  const system = useUnits((s) => s.system);
+  const [form, setForm] = useState<FormState>(formFrom(null, system));
+  const [formSystem, setFormSystem] = useState<UnitSystem>(system);
   const [seeded, setSeeded] = useState(false);
   const [attempted, setAttempted] = useState(false);
+
+  // The Units switch (here or in Settings) re-expresses what is typed.
+  if (formSystem !== system) {
+    setForm((f) => convertForm(f, formSystem, system));
+    setFormSystem(system);
+  }
+  const wUnit = weightUnit(system);
+  const ranges = goalRanges(system);
+  const heightOk = () => {
+    if (system === 'imperial') {
+      const totalIn = (Number(form.heightFt) || 0) * 12 + (Number(form.heightIn) || 0);
+      return form.heightFt.trim() !== '' && inRange(String(totalIn), ranges.heightIn.min, ranges.heightIn.max) && inRange(form.heightIn || '0', 0, 11.99);
+    }
+    return inRange(form.heightCm, ranges.heightIn.min, ranges.heightIn.max);
+  };
 
   const goalsQuery = useQuery({
     queryKey: ['health-goals'],
@@ -174,7 +247,7 @@ export default function HealthGoals() {
 
   if (goalsQuery.data && !seeded) {
     setSeeded(true);
-    setForm(formFrom(goalsQuery.data));
+    setForm(formFrom(goalsQuery.data, system));
   }
 
   const summaryQuery = useQuery({
@@ -196,26 +269,29 @@ export default function HealthGoals() {
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
 
+  const weightMessage = `Enter a weight between ${ranges.weight.min} and ${ranges.weight.max.toLocaleString()} ${wUnit}.`;
+  const heightMessage = system === 'imperial' ? 'Enter a height between 2 ft 7 in and 8 ft 6 in.' : 'Enter a height between 80 and 260 cm.';
   const errors = {
-    currentWeight: attempted && !inRange(form.currentWeight, 20, 500) ? 'Enter a weight between 20 and 500 kg.' : undefined,
-    heightCm: attempted && !inRange(form.heightCm, 80, 260) ? 'Enter a height between 80 and 260 cm.' : undefined,
+    currentWeight: attempted && !inRange(form.currentWeight, ranges.weight.min, ranges.weight.max) ? weightMessage : undefined,
+    heightCm: attempted && !heightOk() ? heightMessage : undefined,
     age: attempted && !inRange(form.age, 13, 120) ? 'Enter an age between 13 and 120.' : undefined,
-    targetWeight: attempted && form.targetWeight.trim() !== '' && !inRange(form.targetWeight, 20, 500) ? 'Enter a weight between 20 and 500 kg.' : undefined,
-    weeklyGoal: attempted && form.weeklyGoal.trim() !== '' && !inRange(form.weeklyGoal, 0, 2) ? 'Enter a pace between 0 and 2 kg per week.' : undefined,
+    targetWeight: attempted && form.targetWeight.trim() !== '' && !inRange(form.targetWeight, ranges.weight.min, ranges.weight.max) ? weightMessage : undefined,
+    weeklyGoal: attempted && form.weeklyGoal.trim() !== '' && !inRange(form.weeklyGoal, ranges.pace.min, ranges.pace.max) ? `Enter a pace between 0 and ${ranges.pace.max} ${wUnit} per week.` : undefined,
   };
   const hasErrors = Object.values(errors).some(Boolean);
 
   const save = useMutation({
     mutationFn: async () => {
+      // The API stays metric; only the form speaks the chosen units.
       const { data } = await api.put<{ data: HealthGoals }>('/health-goals', {
-        currentWeight: Number(form.currentWeight),
-        targetWeight: form.targetWeight ? Number(form.targetWeight) : undefined,
-        heightCm: Number(form.heightCm),
+        currentWeight: parseWeight(Number(form.currentWeight), system),
+        targetWeight: form.targetWeight ? parseWeight(Number(form.targetWeight), system) : undefined,
+        heightCm: Math.round(heightCmOf(form, system) * 10) / 10,
         age: Number(form.age),
         gender: form.gender,
         activityLevel: form.activityLevel,
         goal: form.goal,
-        weeklyGoal: Number(form.weeklyGoal) || 0,
+        weeklyGoal: form.weeklyGoal ? parseWeight(Number(form.weeklyGoal), system) : 0,
       });
       return data.data;
     },
@@ -223,8 +299,10 @@ export default function HealthGoals() {
       toast.success('Goals saved');
       setAttempted(false);
       qc.setQueryData(['health-goals'], data);
+      setForm(formFrom(data, system));
       qc.invalidateQueries({ queryKey: ['health-goals'] });
       qc.invalidateQueries({ queryKey: ['nutrition-summary'] });
+      qc.invalidateQueries({ queryKey: ['water'] });
     },
     onError: (e) => toast.error(errMsg(e, 'Could not save goals')),
   });
@@ -245,11 +323,11 @@ export default function HealthGoals() {
   const submit = () => {
     setAttempted(true);
     if (
-      !inRange(form.currentWeight, 20, 500) ||
-      !inRange(form.heightCm, 80, 260) ||
+      !inRange(form.currentWeight, ranges.weight.min, ranges.weight.max) ||
+      !heightOk() ||
       !inRange(form.age, 13, 120) ||
-      (form.targetWeight.trim() !== '' && !inRange(form.targetWeight, 20, 500)) ||
-      (form.weeklyGoal.trim() !== '' && !inRange(form.weeklyGoal, 0, 2))
+      (form.targetWeight.trim() !== '' && !inRange(form.targetWeight, ranges.weight.min, ranges.weight.max)) ||
+      (form.weeklyGoal.trim() !== '' && !inRange(form.weeklyGoal, ranges.pace.min, ranges.pace.max))
     ) {
       return;
     }
@@ -295,11 +373,11 @@ export default function HealthGoals() {
             <StatTile label="Resting (BMR)" value={formatStat(Math.round(goals.bmr ?? 0))} unit="kcal" icon={<Flame size={18} />} hint="Estimated burn at rest" />
             <StatTile
               label="Target weight"
-              value={goals.targetWeight ? formatStat(goals.targetWeight) : '—'}
-              unit={goals.targetWeight ? 'kg' : undefined}
+              value={goals.targetWeight ? formatStat(displayWeight(goals.targetWeight, system)) : '—'}
+              unit={goals.targetWeight ? wUnit : undefined}
               hint={
                 goals.targetWeight && goals.currentWeight
-                  ? `${formatStat(Math.abs(Math.round((goals.targetWeight - goals.currentWeight) * 10) / 10))} kg ${goals.targetWeight < goals.currentWeight ? 'to lose' : goals.targetWeight > goals.currentWeight ? 'to gain' : 'to hold'}`
+                  ? `${formatWeight(Math.abs(goals.targetWeight - goals.currentWeight), system)} ${goals.targetWeight < goals.currentWeight ? 'to lose' : goals.targetWeight > goals.currentWeight ? 'to gain' : 'to hold'}`
                   : 'Add one below'
               }
             />
@@ -375,7 +453,7 @@ export default function HealthGoals() {
       </Card>
 
       <Card id="goals-form">
-        <CardHeader title="Your stats" subtitle="Targets are recalculated every time you save" />
+        <CardHeader title="Your stats" subtitle="Targets are recalculated every time you save" action={<UnitsControl size="sm" />} />
         <form
           className="space-y-5"
           noValidate
@@ -389,12 +467,12 @@ export default function HealthGoals() {
               label="Current weight"
               type="number"
               inputMode="decimal"
-              min={20}
-              max={500}
+              min={ranges.weight.min}
+              max={ranges.weight.max}
               step="0.1"
               required
-              placeholder="74.5"
-              trailing={<span className="text-xs font-semibold">kg</span>}
+              placeholder={system === 'imperial' ? '164' : '74.5'}
+              trailing={<span className="text-xs font-semibold">{wUnit}</span>}
               value={form.currentWeight}
               error={errors.currentWeight}
               onChange={(e) => set('currentWeight', e.target.value)}
@@ -403,28 +481,60 @@ export default function HealthGoals() {
               label="Target weight"
               type="number"
               inputMode="decimal"
-              min={20}
-              max={500}
+              min={ranges.weight.min}
+              max={ranges.weight.max}
               step="0.1"
               placeholder="Optional"
-              trailing={<span className="text-xs font-semibold">kg</span>}
+              trailing={<span className="text-xs font-semibold">{wUnit}</span>}
               value={form.targetWeight}
               error={errors.targetWeight}
               onChange={(e) => set('targetWeight', e.target.value)}
             />
-            <Input
-              label="Height"
-              type="number"
-              inputMode="numeric"
-              min={80}
-              max={260}
-              required
-              placeholder="178"
-              trailing={<span className="text-xs font-semibold">cm</span>}
-              value={form.heightCm}
-              error={errors.heightCm}
-              onChange={(e) => set('heightCm', e.target.value)}
-            />
+            {system === 'imperial' ? (
+              <fieldset className="grid grid-cols-2 gap-2">
+                <legend className="type-label mb-1.5 col-span-2 block text-text-2">Height</legend>
+                <Input
+                  label="Height, feet"
+                  hideLabel
+                  type="number"
+                  inputMode="numeric"
+                  min={2}
+                  max={8}
+                  required
+                  placeholder="5"
+                  trailing={<span className="text-xs font-semibold">ft</span>}
+                  value={form.heightFt}
+                  error={errors.heightCm}
+                  onChange={(e) => set('heightFt', e.target.value)}
+                />
+                <Input
+                  label="Height, inches"
+                  hideLabel
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={11}
+                  placeholder="11"
+                  trailing={<span className="text-xs font-semibold">in</span>}
+                  value={form.heightIn}
+                  onChange={(e) => set('heightIn', e.target.value)}
+                />
+              </fieldset>
+            ) : (
+              <Input
+                label="Height"
+                type="number"
+                inputMode="numeric"
+                min={80}
+                max={260}
+                required
+                placeholder="178"
+                trailing={<span className="text-xs font-semibold">cm</span>}
+                value={form.heightCm}
+                error={errors.heightCm}
+                onChange={(e) => set('heightCm', e.target.value)}
+              />
+            )}
             <Input
               label="Age"
               type="number"
@@ -448,13 +558,17 @@ export default function HealthGoals() {
               type="number"
               inputMode="decimal"
               min={0}
-              max={2}
+              max={ranges.pace.max}
               step="0.1"
-              trailing={<span className="text-xs font-semibold">kg / week</span>}
+              trailing={<span className="text-xs font-semibold">{paceUnit(system)}</span>}
               className="pr-20"
               value={form.weeklyGoal}
               error={errors.weeklyGoal}
-              hint={form.goal === 'maintain_weight' ? 'Not used while your goal is to maintain' : 'How much to change each week; 0.25–1 kg is typical. Your goal sets the direction.'}
+              hint={
+                form.goal === 'maintain_weight'
+                  ? 'Not used while your goal is to maintain'
+                  : `How much to change each week; ${system === 'imperial' ? '0.5–2 lb' : '0.25–1 kg'} is typical. Your goal sets the direction.`
+              }
               onChange={(e) => set('weeklyGoal', e.target.value)}
             />
           </div>

@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg, mediaUrl } from '../lib/api';
+import { api, errMsg, fieldErrorsOf, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   ACCEPTED_IMAGE_TYPES,
@@ -28,19 +28,17 @@ import {
   PairFigure,
   Section,
   Skeleton,
-  SkeletonTile,
   Spinner,
-  StatGrid,
-  StatTile,
+  StatStrip,
   Tabs,
   Textarea,
   cx,
-  formatStat,
   useToast,
 } from './ui';
 import { Award, Calendar, Camera, ChevronRight, Edit, MapPin, Settings as SettingsIcon, ShareUp, Users } from './icons';
 import { UserBadges } from './UserRow';
-import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileSaved, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { HighlightsRow } from './StoryTray';
 
 const tzOffset = () => new Date().getTimezoneOffset();
 
@@ -263,7 +261,24 @@ export default function Profile() {
       setEditing(false);
       toast.success('Profile saved');
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save your profile.')),
+    onError: (e) => {
+      const message = errMsg(e, 'Could not save your profile.');
+      const field = fieldErrorsOf(e);
+      // A taken or malformed handle belongs under the field, where the
+      // person is looking, with focus moved there; the toast alone left the
+      // input looking valid.
+      if (field.username || /username/i.test(message)) {
+        setErrors((er) => ({ ...er, username: field.username || message }));
+        document.getElementById('pf-username')?.focus();
+        return;
+      }
+      if (field.fullName) {
+        setErrors((er) => ({ ...er, fullName: field.fullName }));
+        document.getElementById('pf-name')?.focus();
+        return;
+      }
+      toast.error(message);
+    },
   });
 
   const saveAvatar = useMutation({
@@ -359,11 +374,7 @@ export default function Profile() {
             </div>
           </div>
         </Card>
-        <StatGrid>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonTile key={i} />
-          ))}
-        </StatGrid>
+        <Skeleton className="h-16 w-full rounded-lg" />
       </div>
     );
   }
@@ -449,12 +460,17 @@ export default function Profile() {
         </div>
       </Card>
 
-      <StatGrid>
-        <StatTile label="Posts" value={formatStat(postCount(me))} onClick={() => setTab('posts')} />
-        <StatTile label="Followers" value={formatStat(followerCount(me))} to="/friends" />
-        <StatTile label="Following" value={formatStat(followingCount(me))} to="/friends" />
-        <StatTile label="Workouts" value={formatStat(me.stats?.workouts || 0)} onClick={() => setTab('workouts')} tone="brand" />
-      </StatGrid>
+      <HighlightsRow userId={me._id} isOwn author={me} />
+
+      <StatStrip
+        aria-label="Profile stats"
+        items={[
+          { label: 'Posts', value: postCount(me), onClick: () => setTab('posts') },
+          { label: 'Followers', value: followerCount(me), to: '/profile/followers' },
+          { label: 'Following', value: followingCount(me), to: '/profile/following' },
+          { label: 'Workouts', value: me.stats?.workouts || 0, onClick: () => setTab('workouts'), tone: 'brand' },
+        ]}
+      />
 
       <ProfileShortcuts />
 
@@ -469,6 +485,7 @@ export default function Profile() {
           {tab === 'posts' && <ProfilePosts userId={me._id} isOwn />}
           {tab === 'workouts' && <ProfileWorkouts userId={me._id} isOwn />}
           {tab === 'meals' && <ProfileMeals userId={me._id} isOwn />}
+          {tab === 'saved' && <ProfileSaved />}
         </div>
       </section>
 

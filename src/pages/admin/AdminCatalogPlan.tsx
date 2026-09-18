@@ -21,9 +21,10 @@ import {
   humanize,
   useOnline,
   useToast,
+  plural,
 } from '../../components/ui';
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Flame, Layers, Plus, Search, Trash, X } from '../../components/icons';
-import { AdminPageHeader, Pager } from './AdminLayout';
+import { AdminPageHeader, Pager, Stamp } from './AdminLayout';
 import {
   CATALOG_LEVELS,
   catalogKeys,
@@ -46,7 +47,6 @@ import {
   LevelBadge,
   SaveErrorCallout,
   WholeNumberInput,
-  fmtDateTime,
   fmtKcal,
   fmtMinutes,
   useUnsavedChangesWarning,
@@ -67,7 +67,6 @@ import {
   planSession,
   planSessionBody,
   planWeeks,
-  plural,
   rangeLabel,
   reslotEntry,
   seedableRecord,
@@ -829,8 +828,8 @@ export default function AdminCatalogPlan() {
                 <FactList
                   facts={[
                     { label: 'Engagement', value: `${plural(baseline.likesCount, 'like')}, ${plural(baseline.commentsCount, 'comment')}` },
-                    { label: 'Created', value: fmtDateTime(baseline.createdAt) },
-                    { label: 'Last updated', value: fmtDateTime(baseline.updatedAt) },
+                    { label: 'Created', value: <Stamp iso={baseline.createdAt} /> },
+                    { label: 'Last updated', value: <Stamp iso={baseline.updatedAt} /> },
                     { label: 'Plan ID', value: baseline._id, mono: true },
                   ]}
                 />

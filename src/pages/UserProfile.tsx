@@ -16,12 +16,9 @@ import {
   Menu,
   PageHeader,
   Skeleton,
-  SkeletonTile,
-  StatGrid,
-  StatTile,
+  StatStrip,
   Tabs,
   cx,
-  formatStat,
   humanize,
   useToast,
   type MenuItem,
@@ -30,7 +27,8 @@ import { Calendar, Check, Copy, Flag, Lock, MapPin, MessageCircle, ShareUp, Shie
 import { FollowButton, UserBadges } from './UserRow';
 import { useReportModal } from './Report';
 import { PAGE, ProfileCover } from './Profile';
-import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { PUBLIC_PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { HighlightsRow } from './StoryTray';
 
 type FriendStatus = 'none' | 'requested' | 'incoming' | 'friends' | 'pending' | string;
 
@@ -51,7 +49,8 @@ export default function UserProfile() {
   const { report, reportModal } = useReportModal();
 
   const tabParam = params.get('tab');
-  const tab: ProfileTabKey = isProfileTab(tabParam) ? tabParam : 'posts';
+  // Saved posts are private to their owner; that tab does not exist here.
+  const tab: ProfileTabKey = isProfileTab(tabParam) && tabParam !== 'saved' ? tabParam : 'posts';
   const setTab = (next: string) => {
     setParams(
       (prev) => {
@@ -132,6 +131,19 @@ export default function UserProfile() {
     onError: (e) => toast.error(errMsg(e, 'Could not accept the request.')),
   });
 
+  // The receiver's route. DELETE /friends/requests/:id is the sender's
+  // withdraw and answers 404 for the receiver.
+  const declineFriend = useMutation({
+    mutationFn: async (requestId: string) => {
+      await api.delete(`/friends/incoming/${requestId}`);
+    },
+    onSuccess: () => {
+      toast.success('Friend request declined');
+      refreshRelationship();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not decline the request.')),
+  });
+
   const removeFriend = useMutation({
     mutationFn: async () => {
       await api.delete(`/friends/${id}`);
@@ -197,11 +209,7 @@ export default function UserProfile() {
             </div>
           </div>
         </Card>
-        <StatGrid>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonTile key={i} />
-          ))}
-        </StatGrid>
+        <Skeleton className="h-16 w-full rounded-lg" />
       </div>
     );
   }
@@ -231,7 +239,7 @@ export default function UserProfile() {
   const friendStatus: FriendStatus = user.friendStatus || 'none';
   const requestId = user.friendRequestId;
   const joined = joinedLabel(user.createdAt);
-  const friendBusy = addFriend.isPending || cancelFriend.isPending || acceptFriend.isPending;
+  const friendBusy = addFriend.isPending || cancelFriend.isPending || acceptFriend.isPending || declineFriend.isPending;
 
   const menuItems: MenuItem[] = [
     { label: 'Share profile', icon: <ShareUp size={18} />, onSelect: shareProfile },
@@ -256,15 +264,26 @@ export default function UserProfile() {
         Friends
       </Badge>
     ) : friendStatus === 'incoming' && requestId ? (
-      <Button
-        variant="secondary"
-        icon={<Check size={18} />}
-        loading={acceptFriend.isPending}
-        disabled={friendBusy}
-        onClick={() => acceptFriend.mutate(requestId)}
-      >
-        Accept request
-      </Button>
+      <>
+        <Button
+          variant="secondary"
+          icon={<Check size={18} />}
+          loading={acceptFriend.isPending}
+          disabled={friendBusy}
+          onClick={() => acceptFriend.mutate(requestId)}
+        >
+          Accept request
+        </Button>
+        <IconButton
+          label={`Decline ${name}’s friend request`}
+          variant="secondary"
+          disabled={friendBusy}
+          aria-busy={declineFriend.isPending || undefined}
+          onClick={() => declineFriend.mutate(requestId)}
+        >
+          <X size={20} />
+        </IconButton>
+      </>
     ) : friendStatus === 'requested' || friendStatus === 'pending' ? (
       <Button
         variant="secondary"
@@ -305,7 +324,7 @@ export default function UserProfile() {
             <div className="flex flex-wrap items-center gap-2 sm:pb-1">
               <FollowButton user={user} onChanged={() => userQuery.refetch()} />
               {friendControl}
-              <IconButton to={`/messages?to=${user._id}`} label={`Message ${name}`} variant="secondary">
+              <IconButton to={`/messages/new?to=${user._id}`} state={{ peer: user }} label={`Message ${name}`} variant="secondary">
                 <MessageCircle size={20} />
               </IconButton>
               <span className="hidden lg:inline-flex">
@@ -352,17 +371,17 @@ export default function UserProfile() {
         </div>
       </Card>
 
-      <StatGrid>
-        <StatTile label="Posts" value={formatStat(postCount(user))} onClick={canViewContent ? () => setTab('posts') : undefined} />
-        <StatTile label="Followers" value={formatStat(followerCount(user))} />
-        <StatTile label="Following" value={formatStat(followingCount(user))} />
-        <StatTile
-          label="Workouts"
-          value={formatStat(user.stats?.workouts || 0)}
-          onClick={canViewContent ? () => setTab('workouts') : undefined}
-          tone="brand"
-        />
-      </StatGrid>
+      {canViewContent ? <HighlightsRow userId={user._id} author={user} /> : null}
+
+      <StatStrip
+        aria-label="Profile stats"
+        items={[
+          { label: 'Posts', value: postCount(user), onClick: canViewContent ? () => setTab('posts') : undefined },
+          { label: 'Followers', value: followerCount(user), to: canViewContent ? `/u/${user._id}/followers` : undefined },
+          { label: 'Following', value: followingCount(user), to: canViewContent ? `/u/${user._id}/following` : undefined },
+          { label: 'Workouts', value: user.stats?.workouts || 0, onClick: canViewContent ? () => setTab('workouts') : undefined, tone: 'brand' },
+        ]}
+      />
 
       {!canViewContent ? (
         <Card>
@@ -377,7 +396,7 @@ export default function UserProfile() {
         <section className="space-y-4" aria-label={`${name}’s activity`}>
           <Tabs
             aria-label="Profile content"
-            tabs={PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
+            tabs={PUBLIC_PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
             value={tab}
             onChange={setTab}
           />
@@ -405,7 +424,7 @@ export default function UserProfile() {
       <ConfirmDialog
         open={confirmBlock}
         title={`Block ${name}?`}
-        message="You will no longer see each other’s posts, comments or messages, and any follow or friend relationship is removed."
+        message="You will no longer see each other’s posts, comments or messages, and any follow or friend relationship is removed. You can unblock them later under Settings › Blocked accounts."
         confirmLabel="Block"
         destructive
         loading={block.isPending}

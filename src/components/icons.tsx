@@ -115,6 +115,7 @@ export const Timer = make('Timer', <><circle cx="12" cy="13.5" r="7.5"/><path d=
 export const Mail = make('Mail', <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6 8.5-6"/></>);
 export const Lock = make('Lock', <><rect x="4.5" y="10" width="15" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>);
 export const Shield = make('Shield', <><path d="M12 3 5 6v6c0 4.5 3 7.7 7 9 4-1.3 7-4.5 7-9V6z"/></>);
+export const AlignLeft = make('AlignLeft', <><path d="M4 6h16M4 12h10M4 18h13"/></>);
 export const FileText = make('FileText', <><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></>);
 export const List = make('List', <><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></>);
 export const Server = make('Server', <><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></>);

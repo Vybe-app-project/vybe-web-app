@@ -147,6 +147,40 @@ if (!playwright) {
         assert.equal(state.saves[1].payload.setRecordsVersion, 1);
       } finally { await context.close(); }
     });
+    test('historical private exercise minutes and lb are displayed without reinterpreting the stored values', async () => {
+      const legacy = { ...fixture(), setRecordsVersion: undefined, exercises: [{ name: 'Carry', sets: 1, reps: 1, weight: 20, weightUnit: 'lb', duration: 180 }] };
+      const { context, page, state } = await setup({ logs: [legacy] });
+      try {
+        await page.goto(`${base}/workouts/logs`);
+        await page.getByText('3 h', { exact: true }).waitFor();
+        await page.getByText('20 lb', { exact: true }).waitFor();
+        await edit(page);
+        const dialog = page.getByRole('dialog', { name: 'Edit session', exact: true });
+        assert.equal(await dialog.getByLabel('Exercise 1 duration (min)', { exact: true }).inputValue(), '180');
+        await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+        await dialog.waitFor({ state: 'hidden' });
+        assert.equal(state.saves[0].payload.exercises[0].duration, 180);
+        assert.equal(state.saves[0].payload.exercises[0].weightUnit, 'lb');
+      } finally { await context.close(); }
+    });
+    test('delayed modal autofocus does not steal a field the user has already started editing', async () => {
+      const { context, page } = await setup();
+      try {
+        await page.goto(`${base}/workouts/logs`);
+        await page.getByRole('button', { name: 'Options for Strength session', exact: true }).waitFor();
+        await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
+        await page.clock.pauseAt(new Date('2030-01-01T00:00:01Z'));
+        await edit(page);
+        const dialog = page.getByRole('dialog', { name: 'Edit session', exact: true });
+        const reps = dialog.getByLabel('Exercise 1 set 1 reps', { exact: true });
+        await reps.fill('7');
+        await page.clock.runFor(20);
+        assert.equal(await reps.evaluate(element => element === document.activeElement), true);
+        await reps.pressSequentially('8');
+        assert.equal(await reps.inputValue(), '78');
+        assert.equal(await dialog.getByLabel('Session name', { exact: true }).inputValue(), 'Strength session');
+      } finally { await context.close(); }
+    });
     test('log-again has prior values, fresh IDs and incomplete sets, with invalid and conflict errors preserved', async () => {
       const { context, page, state } = await setup();
       try {

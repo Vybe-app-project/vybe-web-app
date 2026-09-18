@@ -1,9 +1,19 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { errMsg } from '../lib/api';
+
+import { signOutReason } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import {
+  loginFailure,
+  loginNoticeFor,
+  postLoginTarget,
+  type FromLocation,
+  type LoginFailure,
+  type LoginNotice,
+} from '../lib/authRedirect';
+import { clearDraftEmail, readDraftEmail, writeDraftEmail } from '../lib/authDrafts';
 import { isEmail } from '../lib/hooks';
-import { Brand, BrandMark, Button, Callout, IconButton, Input, cx } from './ui';
+import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, cx, useDocumentTitle } from './ui';
 import { Eye, EyeOff } from './icons';
 
 /* ------------------------------------------------------------------ *
@@ -17,6 +27,7 @@ import { Eye, EyeOff } from './icons';
 
 export function AuthShell({
   title,
+  documentTitle,
   subtitle,
   children,
   footer,
@@ -24,12 +35,18 @@ export function AuthShell({
   tagline = 'Log the work, share the wins and keep each other honest.',
 }: {
   title: string;
+  /** Tab / history title when it should differ from the on-page heading. */
+  documentTitle?: string;
   subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   headline?: string;
   tagline?: string;
 }) {
+  // The app shell titles every in-app page ("Home · Vybe"); the signed-out
+  // pages sit outside it and used to leave the tab reading just "Vybe".
+  useDocumentTitle(documentTitle ?? title);
+
   return (
     <div className="min-h-dvh bg-bg text-text-1 lg:grid lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
       <aside className="dark safe-top relative flex flex-col bg-bg text-text-1 lg:min-h-dvh lg:justify-between lg:px-14 lg:py-12">
@@ -61,6 +78,24 @@ export function AuthShell({
       </main>
     </div>
   );
+}
+
+/**
+ * Move focus to the first field in error so keyboard and screen-reader users
+ * hear it at once. Deferred by frames so the error text (aria-describedby)
+ * is in the DOM when focus lands, and retried for a few frames because after
+ * a failed request the field is still `disabled` until the submitting state
+ * commits -- a disabled input silently refuses focus.
+ */
+export function focusField(id: string, attempts = 6) {
+  requestAnimationFrame(() => {
+    const el = document.getElementById(id) as HTMLElement | null;
+    if (el && !(el as HTMLInputElement).disabled) {
+      el.focus();
+      if (document.activeElement === el) return;
+    }
+    if (attempts > 1) focusField(id, attempts - 1);
+  });
 }
 
 /** Password input with a 40 px show/hide control that keeps the field's label. */
@@ -97,30 +132,30 @@ export function PasswordField({
   );
 }
 
-/** Links to the legal pages shipped in `public/`. */
+/**
+ * Links to the legal pages shipped in `public/`. They open in a new tab so a
+ * half-finished sign-up or sign-in is not thrown away, and each is a 44 px
+ * target (the inline text alone measured 14 px tall on a phone).
+ */
+const LEGAL_LINK = 'inline-flex min-h-11 items-center rounded-sm px-1 -mx-1 font-semibold text-text-2 underline-offset-2 hover:underline';
+
 export function LegalLine({ className }: { className?: string }) {
   return (
     <p className={cx('text-center text-xs leading-relaxed text-text-3', className)}>
       By continuing you agree to the Vybe{' '}
-      <a href="/terms-and-conditions.html" className="font-semibold text-text-2 underline-offset-2 hover:underline">
-        Terms
+      <a href="/terms-and-conditions.html" target="_blank" rel="noopener noreferrer" className={LEGAL_LINK}>
+        Terms<span className="sr-only"> (opens in a new tab)</span>
       </a>{' '}
       and{' '}
-      <a href="/privacy-policy.html" className="font-semibold text-text-2 underline-offset-2 hover:underline">
-        Privacy Policy
+      <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className={LEGAL_LINK}>
+        Privacy Policy<span className="sr-only"> (opens in a new tab)</span>
       </a>
       .
     </p>
   );
 }
 
-/** Only same-origin absolute paths may be used as a post-login destination. */
-function safePath(p?: string | null): string | null {
-  if (!p || !p.startsWith('/') || p.startsWith('//') || p.startsWith('/login')) return null;
-  return p;
-}
-
-type FromState = { from?: { pathname?: string; search?: string } } | null;
+type LoginState = { from?: FromLocation; email?: string } | null;
 
 export default function Login() {
   const login = useAuth((s) => s.login);
@@ -128,42 +163,69 @@ export default function Login() {
   const location = useLocation();
   const [params] = useSearchParams();
 
-  const from = (location.state as FromState)?.from;
-  const target =
-    safePath(from?.pathname ? `${from.pathname}${from.search ?? ''}` : null) ??
-    safePath(params.get('next')) ??
-    '/';
+  const state = location.state as LoginState;
+  const target = postLoginTarget({ from: state?.from, next: params.get('next') });
 
-  const [email, setEmail] = useState('');
+  // A completed password reset hands the account's email over in router
+  // state; otherwise the last typed email survives a reload (sessionStorage,
+  // tab-scoped). The password never persists.
+  const [email, setEmail] = useState(() => state?.email ?? readDraftEmail(sessionStorage));
+  const [prefilled] = useState(() => email.length > 0);
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
   const [fieldError, setFieldError] = useState<{ email?: string; password?: string }>({});
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LoginFailure | null>(null);
+  // Read once on mount: the 401 interceptor and "Sign out of all devices"
+  // leave a note explaining why the user is looking at this page.
+  const [reason] = useState(() => signOutReason.take());
+  const [notice, setNotice] = useState<LoginNotice | null>(
+    () => loginNoticeFor(params)
+      ?? (reason === 'signed-out-all'
+        ? { kind: 'signed-out-all', tone: 'success', text: 'Signed out of all devices. Sign in again on the ones you still use.' }
+        : null),
+  );
   const [submitting, setSubmitting] = useState(false);
 
-  const notice =
-    params.get('reset') === '1'
-      ? 'Password updated. Sign in with your new password.'
-      : params.get('registered') === '1'
-        ? 'Account created. Welcome to Vybe.'
-        : null;
+  useEffect(() => {
+    writeDraftEmail(sessionStorage, email.trim());
+  }, [email]);
+  const sessionNotice =
+    reason === 'session-ended'
+      ? 'You were signed out. This happens after a password change, after “Sign out of all devices” on another device, or when a session expires. Sign in again to continue.'
+      : null;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    // Acting on the form retires the arrival notice, so "Password updated"
+    // never sits above a fresh error.
+    setNotice(null);
 
     const trimmed = email.trim();
     const next: { email?: string; password?: string } = {};
     if (!isEmail(trimmed)) next.email = 'Enter a valid email address.';
     if (!password) next.password = 'Enter your password.';
     setFieldError(next);
-    if (next.email || next.password) return;
+    if (next.email || next.password) {
+      focusField(next.email ? 'login-email' : 'login-password');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await login(trimmed, password);
+      await login(trimmed, password, { remember });
+      clearDraftEmail(sessionStorage);
       navigate(target, { replace: true });
     } catch (e2) {
-      setError(errMsg(e2, 'Could not sign in. Check your details and try again.'));
+      const failure = loginFailure(e2, {
+        online: navigator.onLine,
+        fallback: 'Could not sign in. Check your details and try again.',
+      });
+      setError(failure);
+      if (failure.offerReset) {
+        setPassword('');
+        focusField('login-password');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -172,12 +234,18 @@ export default function Login() {
   return (
     <AuthShell
       title="Welcome back"
+      documentTitle="Sign in"
       subtitle="Sign in to pick up where you left off."
       footer={<LegalLine />}
     >
       {notice ? (
-        <Callout tone="success" className="mb-5">
-          {notice}
+        <Callout tone={notice.tone} className="mb-5">
+          {notice.text}
+        </Callout>
+      ) : null}
+      {sessionNotice ? (
+        <Callout tone="warning" title="Signed out on this device" className="mb-5">
+          {sessionNotice}
         </Callout>
       ) : null}
 
@@ -197,7 +265,7 @@ export default function Login() {
             if (fieldError.email) setFieldError((f) => ({ ...f, email: undefined }));
           }}
           disabled={submitting}
-          autoFocus
+          autoFocus={!prefilled}
         />
 
         <PasswordField
@@ -212,18 +280,46 @@ export default function Login() {
             if (fieldError.password) setFieldError((f) => ({ ...f, password: undefined }));
           }}
           disabled={submitting}
+          autoFocus={prefilled}
         />
 
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-x-3">
+          <Checkbox
+            id="login-remember"
+            checked={remember}
+            onChange={setRemember}
+            disabled={submitting}
+            label="Keep me signed in"
+            description="Untick on a shared or public computer."
+            className="py-1.5"
+          />
           <Link
             to="/forgot-password"
+            state={{ email: email.trim() }}
             className="inline-flex min-h-11 items-center rounded-sm px-1 text-sm font-semibold text-text-2 hover:text-text-1"
           >
             Forgot password?
           </Link>
         </div>
 
-        {error ? <Callout tone="danger">{error}</Callout> : null}
+        {error ? (
+          <Callout
+            tone="danger"
+            action={
+              error.offerReset ? (
+                <Link
+                  to="/forgot-password"
+                  state={{ email: email.trim() }}
+                  className="inline-flex min-h-11 items-center rounded-sm px-2 text-sm font-semibold text-text-1 underline-offset-2 hover:underline"
+                >
+                  Reset password
+                </Link>
+              ) : undefined
+            }
+          >
+            {error.text}
+          </Callout>
+        ) : null}
 
         <Button type="submit" variant="primary" size="lg" block loading={submitting}>
           Sign in

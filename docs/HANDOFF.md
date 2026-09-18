@@ -26,7 +26,64 @@ Web-specific essentials:
 - After a release run the live suite `~/scratch/2026-09-17-vybe-full-build/uitest/run-all.sh`
   (11 groups incl. axe in both themes).
 
-## Current local draft-concurrency package — 2026-09-18
+## Current-main compatibility integration — 2026-09-18
+
+The parent-owned isolated `aaa-a656-fleet-recovery-e2e` resolves the in-progress
+merge of `77c14ec22626834c3f159ff40cee8712d2cba313` into
+`6c4b04b6fc0d848ec73b4baa51a812dc0c2d91b3` (parent fixture commits `d4ff555` /
+`6c4b04b`, guarded recovery lineage `da7b4d6`). All automatic main changes are
+retained: lazy navigation/preload, route boundaries/not-found/public posts,
+connections/welcome, live gating, signed-avatar refresh, remember-me, scoped
+logout, safe expired-login destination, and PWA preload/precache exclusions.
+
+The six semantic conflicts retain draft generation/verified-owner/CAS/tombstone
+protection, strict NetworkOnly API/private-media policies and legacy cleanup.
+Auth and drafts now share a noncyclic local/session token reader. Minimal
+snapshots are credential-bound and share its storage lifetime; they never
+authorize drafts. Session checks/refreshes are token-and-epoch scoped; account
+changes replace the private query client and provider subtree. Only the pinned
+backend's two auth-policy 403 messages revoke sessions, not arbitrary forbidden
+responses. See `session-recovery.md`.
+
+Catalog exercise seconds convert to private-log minutes only when seeding a
+new draft; historic records remain minutes. Both kg/lb and `formatSeconds`
+display are retained. See `workout-drafts.md` for pinned wire evidence.
+
+No Mongo or real backend E2E is run in this compatibility task. The parent
+previously reported five real-backend/browser-restart passes against backend
+`f9d0c53888ef625f2894d64777ef1e78b5152e1b` **before** this merge and must rerun
+that gate afterward. Parent harness files remain untouched; the pure browser
+storage-module fixture additionally serves its new shared-reader import, and
+old UI fixtures/assertions are adapted only to intentional merged semantics.
+Parallel browser validation exposed delayed modal autofocus stealing text from
+the chosen input. The focus trap now leaves an already-focused descendant alone;
+a clock-controlled Chromium regression retains all original form assertions.
+Matching dependency links/local caches remain for the parent. No push/deploy,
+main/other-worktree edit or full-release completion is claimed.
+
+Final compatibility evidence (Node 24.19.0/npm 11.17.0):
+
+- `npm run verify`: **361 passed, zero failures/cancellations**, with **one
+  explicit real-backend E2E skip**. Scan, zero-finding production audit,
+  contracts, typecheck/build and artifact verification passed (126 files,
+  two entry assets).
+- All **34** pure/mock-browser files against that newly rebuilt artifact:
+  **361 passed, zero failures/skips/cancellations**, including six Chromium
+  suites. Only `workout-drafts.local-e2e.test.mjs` is separately gated.
+- Static route audit also passed against an exact read-only export of backend
+  `f9d0c53888ef625f2894d64777ef1e78b5152e1b`: 336 resolved calls, 390 routes,
+  zero dynamic/unmatched/shadowed/unresolved-base cases. No backend execution.
+- The actual parent real-E2E harness, timer/set helpers, dependency manifests
+  and release guards were compared unchanged with the pre-merge parent.
+
+Logs and the complete merge-file manifest are retained under ignored
+`logs/fleet-web-current-main-compat/`. Source-contract assertions were moved
+with their helpers or tightened for verified identity; behavioral assertions
+remain, with real tests for both persistence modes, offline recovery, avatar
+refresh, late responses/dedup, private-cache isolation, logout/purge, units and
+the focus race. The parent resumes ownership and reruns real E2E afterward.
+
+## Historical local draft-concurrency package — 2026-09-18
 
 `aaa-a656-fleet-workout-recovery-web` starts from the clean reconciled
 `7e5b308b755d4d794f1069b8b0003875a95ec972` below and merges preserved draft/timer

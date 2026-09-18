@@ -54,3 +54,13 @@ export function useCapability(key: GatedCapability | 'livestreamRelay' | 'turnRe
   const query = useCapabilities();
   return { ...query, enabled: capabilityEnabled(query.data, key) };
 }
+
+/**
+ * Live video needs a media relay. Until the server has confirmed one exists,
+ * the feature is not promoted anywhere: on servers without a relay this
+ * avoids a flash of "Live" in the sidebar that then disappears, and on
+ * servers with one the entry points appear once, a moment after first paint.
+ */
+export function liveVideoEnabled(caps: ServerCapabilities | undefined): boolean {
+  return caps?.livestreamRelay === true;
+}

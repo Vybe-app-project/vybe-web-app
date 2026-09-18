@@ -4,6 +4,15 @@ import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from
 import { api, errMsg } from '../lib/api';
 import { displayName, timeAgo, useInfiniteScroll, type AppNotification } from '../lib/hooks';
 import {
+  isSystemNotification,
+  notificationCopy,
+  notificationHref,
+  notificationText,
+  type NotificationFamily,
+  type NotificationGlyph,
+} from '../lib/notificationCopy';
+import { isUnread } from '../lib/notificationInbox';
+import {
   Avatar,
   Button,
   Card,
@@ -17,19 +26,30 @@ import {
   useToast,
   type MenuItem,
 } from './ui';
+import type { IconComponent } from './icons';
 import {
+  BadgeCheck,
   Bell,
+  Building,
   Check,
   CheckCircle,
+  ClipboardList,
+  Copy,
   Dumbbell,
-  Hash,
   Heart,
+  Image as ImageIcon,
   Inbox,
   MessageCircle,
+  Settings,
+  Share,
+  Shield,
   Trash,
   UserPlus,
   Users,
+  Utensils,
 } from './icons';
+
+export { notificationHref } from '../lib/notificationCopy';
 
 type Page = {
   notifications: AppNotification[];
@@ -38,70 +58,34 @@ type Page = {
   hasNextPage: boolean;
 };
 
-const TYPE_TEXT: Record<string, string> = {
-  post_like: 'liked your post',
-  comment_like: 'liked your comment',
-  post_comment: 'commented on your post',
-  comment: 'commented on your post',
-  comment_reply: 'replied to your comment',
-  follow: 'started following you',
-  follow_request: 'requested to follow you',
-  follow_accept: 'accepted your follow request',
-  friend_request: 'sent you a friend request',
-  friend_accept: 'accepted your friend request',
-  message: 'sent you a message',
-  workout_post: 'shared a new workout',
-  mention: 'mentioned you',
+/** Copy lives in lib/notificationCopy.ts (keyed on the API enum); this maps its glyph names to icons. */
+const GLYPH_ICON: Record<NotificationGlyph, IconComponent> = {
+  heart: Heart,
+  comment: MessageCircle,
+  'user-plus': UserPlus,
+  'user-check': BadgeCheck,
+  users: Users,
+  inbox: Inbox,
+  dumbbell: Dumbbell,
+  utensils: Utensils,
+  clipboard: ClipboardList,
+  image: ImageIcon,
+  copy: Copy,
+  share: Share,
+  building: Building,
+  shield: Shield,
+  bell: Bell,
+  settings: Settings,
 };
 
-/** Small glyph on the avatar so the kind of event reads before the text does. */
-const TYPE_GLYPH: Record<string, { icon: ReactNode; className: string }> = {
-  post_like: { icon: <Heart size={12} filled />, className: 'bg-danger-soft text-danger' },
-  comment_like: { icon: <Heart size={12} filled />, className: 'bg-danger-soft text-danger' },
-  post_comment: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
-  comment: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
-  comment_reply: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
-  follow: { icon: <UserPlus size={12} />, className: 'bg-brand-soft text-brand-text' },
-  follow_request: { icon: <UserPlus size={12} />, className: 'bg-brand-soft text-brand-text' },
-  follow_accept: { icon: <UserPlus size={12} />, className: 'bg-brand-soft text-brand-text' },
-  friend_request: { icon: <Users size={12} />, className: 'bg-brand-soft text-brand-text' },
-  friend_accept: { icon: <Users size={12} />, className: 'bg-brand-soft text-brand-text' },
-  message: { icon: <Inbox size={12} />, className: 'bg-info-soft text-info-text' },
-  workout_post: { icon: <Dumbbell size={12} />, className: 'bg-accent-soft text-accent-text' },
-  mention: { icon: <Hash size={12} />, className: 'bg-surface-3 text-text-2' },
+/** Badge fill per family, on the existing soft tokens so dark mode follows. */
+const FAMILY_CLASS: Record<NotificationFamily, string> = {
+  like: 'bg-danger-soft text-danger',
+  conversation: 'bg-info-soft text-info-text',
+  people: 'bg-brand-soft text-brand-text',
+  content: 'bg-accent-soft text-accent-text',
+  system: 'bg-surface-3 text-text-2',
 };
-
-function notificationText(n: AppNotification): string {
-  return n.body || n.message || TYPE_TEXT[n.type] || 'sent you an update';
-}
-
-const idOf = (v: unknown): string | null => {
-  if (!v) return null;
-  if (typeof v === 'string') return v;
-  if (typeof v === 'object' && '_id' in (v as object)) return String((v as { _id: unknown })._id);
-  return null;
-};
-
-/** Canonical destinations: posts live at `/p/:postId`, threads at `/messages/:roomId`. */
-export function notificationHref(n: AppNotification): string | null {
-  const d = n.data || {};
-  const postId = idOf(d.postId) || idOf(d.post);
-  if (postId) return `/p/${postId}`;
-
-  if (n.type === 'message' || d.roomId || d.chatRoom || d.room) {
-    const room = idOf(d.roomId) || idOf(d.chatRoom) || idOf(d.room);
-    return room ? `/messages/${room}` : '/messages';
-  }
-  if (n.type === 'friend_request' || n.type === 'follow_request') return '/friends';
-
-  const senderId = idOf(n.sender?._id) || idOf(d.sender) || idOf(d.userId) || idOf(d.followerId);
-  if (senderId) return `/u/${senderId}`;
-  return null;
-}
-
-function isUnread(n: AppNotification) {
-  return !(n.isRead ?? n.read ?? false);
-}
 
 type Bucket = 'Today' | 'Yesterday' | 'This week' | 'Earlier';
 const BUCKET_ORDER: Bucket[] = ['Today', 'Yesterday', 'This week', 'Earlier'];
@@ -131,8 +115,13 @@ function NotificationRow({
 }) {
   const href = notificationHref(n);
   const unread = isUnread(n);
-  const glyph = TYPE_GLYPH[n.type];
+  const copy = notificationCopy(n.type);
+  const Glyph = GLYPH_ICON[copy.glyph];
   const text = notificationText(n);
+  // Security, system and account rows have no human actor: the API sets
+  // `sender` to the user themselves, which used to render "<Your name> Your
+  // password was changed." with your own avatar, linking to your own profile.
+  const system = isSystemNotification(n.type);
 
   const items: MenuItem[] = [
     ...(unread ? [{ label: 'Mark as read', icon: <Check size={18} />, onSelect: onRead, disabled: busy }] : []),
@@ -142,19 +131,29 @@ function NotificationRow({
   const body = (
     <>
       <span className="relative shrink-0">
-        <Avatar src={n.sender?.avatar} name={displayName(n.sender)} size={44} />
-        {glyph ? (
+        {system ? (
           <span
-            aria-hidden="true"
-            className={cx('absolute -bottom-0.5 -right-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-surface-1', glyph.className)}
+            role="img"
+            aria-label={n.type === 'security' ? 'Security notice' : 'Vybe notice'}
+            className={cx('inline-flex h-11 w-11 items-center justify-center rounded-full', FAMILY_CLASS.system)}
           >
-            {glyph.icon}
+            <Glyph size={22} />
           </span>
-        ) : null}
+        ) : (
+          <>
+            <Avatar src={n.sender?.avatar} name={displayName(n.sender)} size={44} />
+            <span
+              aria-hidden="true"
+              className={cx('absolute -bottom-0.5 -right-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-surface-1', FAMILY_CLASS[copy.family])}
+            >
+              <Glyph size={12} filled={copy.glyph === 'heart'} />
+            </span>
+          </>
+        )}
       </span>
       <span className="min-w-0 flex-1">
         <span className={cx('block text-sm leading-snug', unread ? 'text-text-1' : 'text-text-2')}>
-          {n.sender ? <span className="font-semibold text-text-1">{displayName(n.sender)} </span> : null}
+          {!system && n.sender ? <span className="font-semibold text-text-1">{displayName(n.sender)} </span> : null}
           {text}
         </span>
         {n.title && n.title !== text ? <span className="mt-0.5 block truncate text-xs text-text-2">{n.title}</span> : null}
@@ -323,13 +322,12 @@ export default function Notifications() {
 
   return (
     <>
-      <PageHeader title="Notifications" subtitle={subtitle} actions={markAllButton('md')} />
+      {/* The action lives in the page header on every viewport (top bar on phones); the phone
+          row below only repeats the unread count, so there is one "Mark all read" on screen. */}
+      <PageHeader title="Notifications" subtitle={subtitle} actions={unreadCount > 0 ? markAllButton('md') : undefined} mobileActions={unreadCount > 0 ? markAllButton('sm') : null} />
       <div className="w-full max-w-form space-y-4">
-        {query.isSuccess && notifications.length > 0 ? (
-          <div className="flex min-h-10 items-center justify-between gap-3 lg:hidden">
-            <p className="text-sm text-text-2">{subtitle}</p>
-            {unreadCount > 0 ? markAllButton('sm') : null}
-          </div>
+        {query.isSuccess && notifications.length > 0 && subtitle ? (
+          <p className="flex min-h-10 items-center text-sm text-text-2 lg:hidden">{subtitle}</p>
         ) : null}
 
         {query.isLoading ? <ListSkeleton /> : null}

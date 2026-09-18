@@ -186,7 +186,7 @@ if (!playwright) {
         await dialog.getByLabel('Sets', { exact: true }).fill('4');
         await dialog.getByLabel('Reps', { exact: true }).fill('9');
         await dialog.getByLabel('Weight (kg)', { exact: true }).fill('25');
-        await dialog.getByLabel('Minutes', { exact: true }).fill('7');
+        await dialog.getByLabel('Seconds', { exact: true }).fill('180');
         await dialog.getByLabel('Notes', { exact: true }).fill('Steady pace');
         await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
         await dialog.waitFor({ state: 'hidden' });
@@ -195,7 +195,7 @@ if (!playwright) {
           payload: {
             title: 'Reconciled plan', description: 'Updated prescription', category: 'cardio',
             level: 'advanced', duration: 42, caloriesBurned: 321, hashtags: ['reconciled', 'strength'],
-            isPublic: false, exercises: [{ name: 'Loaded carry', sets: 4, reps: 9, weight: 25, duration: 7, notes: 'Steady pace' }],
+            isPublic: false, exercises: [{ name: 'Loaded carry', sets: 4, reps: 9, weight: 25, duration: 180, notes: 'Steady pace' }],
           },
         });
         await page.getByRole('heading', { name: 'Reconciled plan', exact: true }).first().waitFor();
@@ -207,7 +207,7 @@ if (!playwright) {
         for (const [label, expected] of [
           ['Duration (min)', '42'], ['Calories (kcal)', '321'], ['Exercise 1 name', 'Loaded carry'],
           ['Exercise 1 total sets', '4'], ['Exercise 1 reps per set', '9'], ['Exercise 1 weight', '25'],
-          ['Exercise 1 duration (min)', '7'], ['Exercise 1 notes', 'Steady pace'],
+          ['Exercise 1 duration (min)', '3'], ['Exercise 1 notes', 'Steady pace'],
         ]) assert.equal(await logger.getByLabel(label, { exact: true }).inputValue(), expected);
         await logger.getByRole('button', { name: 'Record individual sets for exercise 1', exact: true }).click();
         assert.equal(await logger.getByLabel('Exercise 1 set 1 reps', { exact: true }).inputValue(), '0');
@@ -227,7 +227,7 @@ if (!playwright) {
         assert.equal(saved.payload.caloriesBurned, 321);
         assert.equal(saved.payload.setRecordsVersion, 1);
         assert.equal(saved.payload.exercises[0].sets, undefined);
-        assert.equal(saved.payload.exercises[0].duration, 7);
+        assert.equal(saved.payload.exercises[0].duration, 3);
         assert.equal(saved.payload.exercises[0].notes, 'Steady pace');
         const set = saved.payload.exercises[0].setRecords[0];
         assert.ok(set.id);
