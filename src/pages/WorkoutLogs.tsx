@@ -46,26 +46,17 @@ import {
 import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, Zap } from './icons';
 import {
   CATEGORY_OPTIONS,
-  ExerciseRows,
   MetaList,
-  emptyExercise,
-  exerciseDraftFrom,
-  toExercisePayload,
-  type ExerciseDraft,
   type SocialWorkout,
 } from './Workouts';
+import { WorkoutSetEditor } from './WorkoutSetEditor';
+import {
+  emptyLogExercise, logExerciseDraftFrom, toLogExercisePayload, repeatedExercises, sessionVolume,
+  type LogExercise, type LogExerciseDraft,
+} from './workout-set-records';
+export { sessionVolume } from './workout-set-records';
 
 /* ------------------------------------------------------------------ types */
-
-type LogExercise = {
-  name: string;
-  sets?: number;
-  reps?: number;
-  weight?: number;
-  duration?: number;
-  distance?: number;
-  notes?: string;
-};
 
 type WorkoutLog = {
   _id: string;
@@ -79,6 +70,8 @@ type WorkoutLog = {
   hashtags?: string[];
   isCompleted?: boolean;
   createdAt?: string;
+  setRecordsVersion?: number;
+  revision?: number;
 };
 
 type LogsResponse = {
@@ -89,7 +82,7 @@ type LogsResponse = {
 };
 
 /** A session seeded from a workout or a previous log; no `_id` means it will be created. */
-type LogSeed = Partial<Omit<WorkoutLog, '_id'>>;
+type LogSeed = Partial<Omit<WorkoutLog, '_id'>> & { previousExercises?: LogExercise[] };
 
 /* -------------------------------------------------------------- utilities */
 
@@ -98,16 +91,6 @@ const num = (v: string): number | undefined => {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 };
-
-/** Total tonnage for a session: sum of sets x reps x weight per exercise. */
-export function sessionVolume(log: Pick<WorkoutLog, 'exercises'>): number {
-  return (log.exercises ?? []).reduce((sum, ex) => {
-    const sets = Number(ex.sets) || 0;
-    const reps = Number(ex.reps) || 0;
-    const weight = Number(ex.weight) || 0;
-    return sum + sets * reps * weight;
-  }, 0);
-}
 
 const parseDate = (value?: string): Date | null => {
   if (!value) return null;
@@ -130,7 +113,7 @@ type FormState = {
   duration: string;
   caloriesBurned: string;
   notes: string;
-  exercises: ExerciseDraft[];
+  exercises: LogExerciseDraft[];
 };
 
 const formFrom = (log?: LogSeed | null): FormState => {
@@ -142,7 +125,7 @@ const formFrom = (log?: LogSeed | null): FormState => {
     duration: log?.duration != null && log.duration !== 0 ? String(log.duration) : '',
     caloriesBurned: log?.caloriesBurned != null && log.caloriesBurned !== 0 ? String(log.caloriesBurned) : '',
     notes: log?.notes ?? '',
-    exercises: log?.exercises?.length ? log.exercises.map(exerciseDraftFrom) : [emptyExercise()],
+    exercises: log?.exercises?.length ? log.exercises.map(logExerciseDraftFrom) : [emptyLogExercise()],
   };
 };
 
@@ -163,14 +146,20 @@ const seedFromWorkout = (w: SocialWorkout): LogSeed => ({
 });
 
 /** Seed a fresh session from a past one ("Log again"): same content, dated now. */
-const seedFromLog = (log: WorkoutLog): LogSeed => ({
-  name: log.name,
-  type: log.type,
-  duration: log.duration,
-  caloriesBurned: log.caloriesBurned,
-  notes: log.notes,
-  exercises: log.exercises,
-});
+const seedFromLog = (log: WorkoutLog): LogSeed => {
+  const exercises = repeatedExercises(log.exercises);
+  return {
+    name: log.name, type: log.type, duration: log.duration,
+    caloriesBurned: log.caloriesBurned, notes: log.notes, exercises,
+    previousExercises: log.exercises.map((exercise, i) => ({
+      ...exercise, exerciseId: exercises[i].exerciseId,
+      ...(exercise.setRecords === undefined ? {} : { setRecords: exercise.setRecords.map((set, j) => ({
+        ...set, id: exercises[i].setRecords![j].id,
+      })) }),
+    })),
+    setRecordsVersion: log.setRecordsVersion,
+  };
+};
 
 /* --------------------------------------------------------------- log modal */
 
@@ -196,19 +185,30 @@ function LogModal({
   const [form, setForm] = useState<FormState>(() => formFrom(editing ?? seed));
   const [formKey, setFormKey] = useState('');
   const [errors, setErrors] = useState<{ date?: string; exercises?: string }>({});
+  const [saveError, setSaveError] = useState('');
 
   const key = `${open ? 'open' : 'closed'}:${editing?._id ?? 'new'}:${seedKey ?? ''}`;
   if (key !== formKey) {
     setFormKey(key);
     setForm(formFrom(editing ?? seed));
     setErrors({});
+    setSaveError('');
   }
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = useMutation({
     mutationFn: async () => {
-      const exercises: LogExercise[] = form.exercises.map(toExercisePayload).filter((e) => e.name.length > 0);
+      setSaveError('');
+      if ((editing?.setRecordsVersion ?? seed?.setRecordsVersion ?? 1) !== 1) {
+        throw new Error('This session uses a newer set format. Update the app before editing it.');
+      }
+      let exercises: LogExercise[];
+      try { exercises = form.exercises.map(toLogExercisePayload); }
+      catch (error) {
+        setErrors({ exercises: (error as Error).message });
+        throw Object.assign(new Error('validation'), { silent: true });
+      }
       const parsed = new Date(form.date);
       const next: typeof errors = {};
       if (!exercises.length) next.exercises = 'Add at least one exercise with a name.';
@@ -222,9 +222,12 @@ function LogModal({
         date: parsed.toISOString(),
         duration: num(form.duration) ?? 0,
         caloriesBurned: num(form.caloriesBurned) ?? 0,
-        notes: form.notes.trim() || undefined,
+        notes: form.notes.trim(),
         exercises,
-        isCompleted: true,
+        isCompleted: editing?.isCompleted ?? true,
+        ...(editing?.setRecordsVersion === 1 || seed?.setRecordsVersion === 1 || exercises.some(ex => ex.setRecords !== undefined)
+          ? { setRecordsVersion: 1 } : {}),
+        ...(editing ? { expectedRevision: editing.revision ?? 0 } : {}),
       };
 
       if (editing) {
@@ -241,7 +244,12 @@ function LogModal({
     },
     onError: (e) => {
       if ((e as { silent?: boolean })?.silent) return;
-      toast.error(errMsg(e, 'Could not save session'));
+      if ((e as { response?: { status?: number } }).response?.status === 409) {
+        qc.invalidateQueries({ queryKey: ['workout-logs'] });
+      }
+      const message = errMsg(e, 'Could not save session');
+      setSaveError(message);
+      toast.error(message);
     },
   });
 
@@ -315,15 +323,23 @@ function LogModal({
           />
         </div>
 
-        <ExerciseRows
+        <WorkoutSetEditor
           value={form.exercises}
-          showNotes={false}
+          previous={editing?.exercises ?? seed?.previousExercises ?? seed?.exercises}
+          allowSetEntry={!editing}
+          disabled={save.isPending}
           error={errors.exercises}
           onChange={(v) => {
             set('exercises', v);
             if (errors.exercises) setErrors((er) => ({ ...er, exercises: undefined }));
           }}
         />
+        {saveError ? (
+          <div role="alert" className="space-y-2 rounded-md border border-border-1 p-3 text-sm text-danger">
+            <p>{saveError}</p>
+            <p>Your entries are still here. Retry after a rejected request. If a new log’s response was lost, check history first to avoid duplicates. For conflicts, copy your edits before reopening refreshed history.</p>
+          </div>
+        ) : null}
 
         <Textarea
           label="Notes"
@@ -393,14 +409,23 @@ function SessionCard({
           {exercises.map((ex, i) => {
             const facts = [
               ex.sets ? `${formatStat(ex.sets)} × ${formatStat(ex.reps ?? 0)}` : ex.reps ? `${formatStat(ex.reps)} reps` : null,
-              ex.weight ? `${formatStat(ex.weight)} kg` : null,
+              ex.weight ? `${formatStat(ex.weight)} ${ex.weightUnit ?? 'kg'}` : null,
               ex.duration ? `${formatStat(ex.duration)} min` : null,
               ex.distance ? `${formatStat(ex.distance)} km` : null,
             ].filter(Boolean) as string[];
             return (
               <li key={`${log._id}-${i}`} className="flex min-h-10 items-center justify-between gap-3 rounded-sm bg-surface-2 px-3 py-1.5 text-sm">
                 <span className="truncate font-medium text-text-1">{ex.name}</span>
-                {facts.length ? (
+                {ex.setRecords !== undefined ? (
+                  <details className="min-w-0 text-sm text-text-2">
+                    <summary className="min-h-11 cursor-pointer py-2">{ex.setRecords.filter(set => set.completed).length}/{ex.setRecords.length} sets completed</summary>
+                    <ol className="space-y-1">
+                      {ex.setRecords.map((set, setIndex) => <li key={set.id}>
+                        Set {setIndex + 1}: {set.reps} × {set.weight} {set.weightUnit} · {set.completed ? 'completed' : 'not completed'}
+                      </li>)}
+                    </ol>
+                  </details>
+                ) : facts.length ? (
                   <span className="type-stat shrink-0 text-sm text-text-2">
                     {facts.map((f, j) => (
                       <span key={f} className={cx(j > 0 && 'ml-2.5')}>
@@ -447,7 +472,7 @@ function WeekChart({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="type-heading text-lg text-text-1">Last 7 days</h2>
-          <p className="text-xs text-text-2">{meta.key === 'volume' ? 'Sets × reps × weight, per day' : meta.key === 'minutes' ? 'Time trained per day' : 'Sessions per day'}</p>
+          <p className="text-xs text-text-2">{meta.key === 'volume' ? 'Completed sets plus legacy aggregates, converted to kg' : meta.key === 'minutes' ? 'Time trained per day' : 'Sessions per day'}</p>
         </div>
         <SegmentedControl
           aria-label="Chart metric"
