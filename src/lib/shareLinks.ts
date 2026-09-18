@@ -24,11 +24,17 @@ export function isShareType(value: unknown): value is ShareType {
   return typeof value === 'string' && (SHARE_TYPES as readonly string[]).includes(value);
 }
 
+/** A meal share token as minted by the API (32 random bytes, hex). */
+const MEAL_SHARE_TOKEN = /^[a-f0-9]{64}$/i;
+
 /**
  * Canonical in-app destination for a share target, or null when the link is
  * malformed. Templates and weekly plans travel as share tokens (or a public
  * plan id), which their pages read from `?shared=`; gyms open their detail
- * modal from `?gym=`.
+ * modal from `?gym=`. A meal travels as its share token when the sender
+ * shared it from the app (the recipient may not be allowed to see the meal by
+ * id), so a token lands on the shared-meal page and only a plain id on the
+ * meal itself.
  */
 export function shareDestination(type: string | null, id: string | null): string | null {
   if (!isShareType(type) || typeof id !== 'string' || !SHARE_ENTITY_ID.test(id)) return null;
@@ -39,7 +45,7 @@ export function shareDestination(type: string | null, id: string | null): string
     case 'profile':
       return `/u/${q}`;
     case 'meal':
-      return `/meals/${q}`;
+      return MEAL_SHARE_TOKEN.test(id) ? `/meals/shared/${q}` : `/meals/${q}`;
     case 'meal-template':
       return `/meals/templates?shared=${q}`;
     case 'meal-plan':

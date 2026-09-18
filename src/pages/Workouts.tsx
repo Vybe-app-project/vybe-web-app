@@ -494,7 +494,8 @@ export function WorkoutModal({
         exercises,
       };
       if (editing) {
-        const { data } = await api.patch<{ data?: SocialWorkout; workout?: SocialWorkout }>(`/workouts/${editing._id}`, payload);
+        // PATCH /workouts/:id only flips visibility; the full edit is PUT /workouts/update/:id.
+        const { data } = await api.put<{ data?: SocialWorkout; workout?: SocialWorkout }>(`/workouts/update/${editing._id}`, payload);
         return data?.data ?? data?.workout;
       }
       const { data } = await api.post<{ data?: SocialWorkout; workout?: SocialWorkout }>('/workouts/create', payload);
