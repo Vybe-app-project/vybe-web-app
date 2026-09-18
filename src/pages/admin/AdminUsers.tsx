@@ -37,11 +37,8 @@ type Suspension = {
 function UserStatusBadges({ u }: { u: AdminUser }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {u.isVerified ? (
-        <Badge tone="success"><Check size={12} /> Verified</Badge>
-      ) : (
-        <Badge tone="neutral">Unverified</Badge>
-      )}
+      {u.isIdentityVerified ? <Badge tone="success"><Check size={12} /> Verified</Badge> : null}
+      {u.isVerified ? null : <Badge tone="neutral">Email unconfirmed</Badge>}
       {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
       {u.isPremium ? <Badge tone="info">Premium</Badge> : null}
       {u.isDeleted ? (
@@ -63,6 +60,8 @@ type AdminUser = {
   isActive?: boolean;
   isDeleted?: boolean;
   isVerified?: boolean;
+  /** Operator-granted public badge; isVerified only means the e-mail was confirmed. */
+  isIdentityVerified?: boolean;
   isPremium?: boolean;
   createdAt?: string;
   lastLogin?: string | null;
@@ -317,8 +316,35 @@ export default function AdminUsers() {
   const go = (next: number) =>
     setPage(Math.min(Math.max(next, MIN_PAGE), Math.min(MAX_PAGE, totalPages)));
 
+  /** PATCH /admin/users/:id/verification: the public badge, flipped optimistically and rolled back on a rejection. */
+  const verification = useMutation({
+    mutationFn: async ({ user, isIdentityVerified }: { user: AdminUser; isIdentityVerified: boolean }) => {
+      const { data } = await adminApi.patch(`/admin/users/${user._id}/verification`, { isIdentityVerified });
+      return data as { user?: AdminUser };
+    },
+    onMutate: async ({ user, isIdentityVerified }) => {
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<UsersResponse>(queryKey);
+      qc.setQueryData<UsersResponse>(queryKey, (current) =>
+        current ? { ...current, users: current.users.map((row) => (row._id === user._id ? { ...row, isIdentityVerified } : row)) } : current,
+      );
+      return { previous };
+    },
+    onError: (e, vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+      toastError(e, errMsg(e, vars.isIdentityVerified ? 'Could not grant the badge.' : 'Could not remove the badge.'));
+    },
+    onSuccess: (_d, vars) => {
+      success(vars.isIdentityVerified ? `${displayName(vars.user)} is now Verified` : `Removed the Verified badge from ${displayName(vars.user)}`);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+  });
+
   const rowBusy = (u: AdminUser) =>
     (suspension.isPending && suspension.variables?.user._id === u._id) ||
+    (verification.isPending && verification.variables?.user._id === u._id) ||
     (remove.isPending && pending?._id === u._id);
 
   function RowActions({ user: u }: { user: AdminUser }) {
@@ -326,6 +352,19 @@ export default function AdminUsers() {
     const busy = rowBusy(u);
     return (
       <>
+        {u.isDeleted ? null : (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Check size={16} />}
+            onClick={() => verification.mutate({ user: u, isIdentityVerified: !u.isIdentityVerified })}
+            disabled={busy}
+            aria-label={u.isIdentityVerified ? `Remove the Verified badge from ${displayName(u)}` : `Give ${displayName(u)} the Verified badge`}
+            title={u.isIdentityVerified ? 'Remove the public Verified badge' : 'Grant the public Verified badge (recorded in the audit log)'}
+          >
+            {u.isIdentityVerified ? 'Remove badge' : 'Verify'}
+          </Button>
+        )}
         {u.isDeleted ? null : suspended ? (
           <Button
             size="sm"

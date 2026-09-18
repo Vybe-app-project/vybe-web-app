@@ -6,7 +6,7 @@ import { differenceInCalendarDays, differenceInMinutes, format, isSameDay, isThi
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../lib/auth';
-import { uploadImage, type UploadedMedia } from '../lib/hooks';
+import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, uploadImage, uploadOwnedMedia, type UploadedMedia } from '../lib/hooks';
 import {
   ACCEPTED_TYPES,
   ACCEPTED_TYPES_LABEL,
@@ -923,6 +923,87 @@ function RenameGroupModal({ open, onClose, room, meId }: { open: boolean; onClos
   );
 }
 
+/**
+ * The group's picture. PATCH /messages/rooms/:id already accepted roomAvatar
+ * (an owned upload key, or '' to clear); this is the control the web lacked.
+ */
+function GroupPictureModal({ open, onClose, room, meId }: { open: boolean; onClose: () => void; room: ChatRoom; meId?: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [uploading, setUploading] = useState(false);
+  const current = room.roomAvatar || '';
+
+  const save = useMutation({
+    mutationFn: async (roomAvatar: string) => {
+      const { data } = await api.patch(`/messages/rooms/${room._id}`, { roomAvatar });
+      return data as { chatRoom?: ChatRoom };
+    },
+    onSuccess: (data, roomAvatar) => {
+      toast.success(roomAvatar ? 'Group picture updated' : 'Group picture removed');
+      if (data.chatRoom) {
+        qc.setQueryData<ChatRoom[]>(['chatRooms'], (rooms) => rooms?.map((r) => (r._id === room._id ? { ...r, ...data.chatRoom, totalUnread: r.totalUnread } : r)));
+        qc.setQueryData(['chatRoom', room._id], data.chatRoom);
+      }
+      qc.invalidateQueries({ queryKey: ['chatRooms'] });
+      onClose();
+    },
+    onError: (e) => toast.error(e, 'Could not change the group picture'),
+  });
+
+  async function onPick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      toast.error(new Error('Unsupported picture type'), 'Use a JPEG, PNG, WebP or HEIC picture.');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(new Error('Picture too large'), 'The picture is over 10 MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const uploaded = await uploadOwnedMedia(file);
+      save.mutate(uploaded.key);
+    } catch (err) {
+      toast.error(err, 'Could not upload the picture');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Group picture"
+      description="Everyone in the group sees it in their list and at the top of the thread."
+      size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+          {current ? (
+            <Button variant="secondary" onClick={() => save.mutate('')} loading={save.isPending} disabled={uploading}>
+              Remove picture
+            </Button>
+          ) : null}
+        </>
+      }
+    >
+      <div className="flex items-center gap-4">
+        <Avatar src={roomAvatarSrc(room, meId)} name={roomTitle(room, meId)} size={64} />
+        <label className={cx('inline-flex min-h-11 cursor-pointer items-center justify-center rounded-sm border border-line bg-surface px-4 text-sm font-semibold text-text-1 hover:bg-surface-2', (uploading || save.isPending) && 'pointer-events-none opacity-60')}>
+          <input type="file" accept={ACCEPTED_IMAGE_TYPES.join(',')} className="sr-only" onChange={onPick} disabled={uploading || save.isPending} aria-label="Choose a group picture" />
+          {uploading || save.isPending ? 'Uploading…' : current ? 'Choose a new picture' : 'Choose a picture'}
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
 function AddPeopleModal({ open, onClose, room, meId }: { open: boolean; onClose: () => void; room: ChatRoom; meId?: string }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -1705,6 +1786,7 @@ function Thread({
   const [pendingDelete, setPendingDelete] = useState<{ id: string; mine: boolean } | null>(null);
   const [members, setMembers] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [picturing, setPicturing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [lightbox, setLightbox] = useState<{ items: MessageMedia[]; index: number } | null>(null);
@@ -1980,6 +2062,7 @@ function Thread({
           { label: 'Members', description: `${room?.participants?.length ?? 0} people`, icon: <Users size={18} />, onSelect: () => setMembers(true) } as MenuItem,
           { label: 'Add people', icon: <UserPlus size={18} />, onSelect: () => setAdding(true) } as MenuItem,
           { label: 'Rename group', icon: <Edit size={18} />, onSelect: () => setRenaming(true) } as MenuItem,
+          { label: 'Group picture', icon: <ImageIcon size={18} />, onSelect: () => setPicturing(true) } as MenuItem,
         ]
       : []),
     ...(room ? [{ label: 'Archive conversation', description: 'Hide it from your list', icon: <Inbox size={18} />, onSelect: archive, divider: true } as MenuItem] : []),
@@ -2201,6 +2284,7 @@ function Thread({
             }}
           />
           <RenameGroupModal open={renaming} onClose={() => setRenaming(false)} room={room} meId={meId} />
+          <GroupPictureModal open={picturing} onClose={() => setPicturing(false)} room={room} meId={meId} />
           <AddPeopleModal open={adding} onClose={() => setAdding(false)} room={room} meId={meId} />
           <ConfirmDialog
             open={leaving}
