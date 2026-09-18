@@ -98,7 +98,7 @@ if (!playwright) {
             const payload = route.request().postDataJSON();
             state.saves.push({ path: url.pathname, method, payload });
             status = 201;
-            body = { workout: { ...payload, _id: 'recorded-session', revision: 1 } };
+            body = { workout: { ...payload, user: user._id, _id: 'recorded-session', revision: 1 } };
           } else {
             body = { workouts: [], total: 0, page: 1, hasNextPage: false };
           }
