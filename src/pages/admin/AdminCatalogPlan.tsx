@@ -673,7 +673,7 @@ export default function AdminCatalogPlan() {
               {overrun.length ? (
                 <section className="mb-4 rounded-md border border-danger bg-danger-soft/40 p-3" aria-labelledby="catalog-overrun-heading">
                   <h4 id="catalog-overrun-heading" className="text-sm font-semibold text-danger">
-                    Past the end of this {plural(weeks, 'week')} plan
+                    Scheduled after the plan ends ({plural(weeks, 'week')})
                   </h4>
                   <p className="mt-0.5 text-xs text-text-2">Pick a week within the plan for each, or remove it.</p>
                   <ul className="mt-2 divide-y divide-line rounded-md border border-line bg-surface-1">
@@ -700,10 +700,12 @@ export default function AdminCatalogPlan() {
                   return (
                     <section key={week} aria-labelledby={`catalog-week-${week}`} className="rounded-md border border-line">
                       <header className="flex items-center justify-between gap-3 bg-surface-2 px-3 py-2">
-                        <h4 id={`catalog-week-${week}`} className="text-sm font-semibold text-text-1">
-                          Week {week}
-                          <span className="ml-2 text-xs font-normal text-text-2">{inWeek.length ? plural(inWeek.length, 'workout') : 'No workouts yet'}</span>
-                        </h4>
+                        <div className="flex items-baseline gap-2">
+                          <h4 id={`catalog-week-${week}`} className="text-sm font-semibold text-text-1">
+                            Week {week}
+                          </h4>
+                          <span className="text-xs text-text-2">{inWeek.length ? plural(inWeek.length, 'workout') : 'No workouts yet'}</span>
+                        </div>
                         <Button
                           id={`catalog-add-week-${week}`}
                           size="sm"

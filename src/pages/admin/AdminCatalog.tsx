@@ -188,8 +188,10 @@ function DeleteCatalogDialog({ target, onClose, onDeleted }: { target: DeleteTar
 
   // The detail route reports how many plans (premade or member-owned)
   // schedule this workout, so the admin knows what the cascade will touch.
+  // Keyed outside the workouts prefix: invalidating the list after the
+  // delete must not refetch this and 404 on the record that just went away.
   const usage = useQuery({
-    queryKey: [...catalogKeys.workout(workoutId ?? ''), 'usage'],
+    queryKey: catalogKeys.workoutUsage(workoutId ?? ''),
     queryFn: () => getCatalogWorkout(workoutId as string),
     enabled: Boolean(workoutId),
     staleTime: 0,
@@ -204,6 +206,7 @@ function DeleteCatalogDialog({ target, onClose, onDeleted }: { target: DeleteTar
         ? ` and removed it from ${plural(result.detachedFromPlans, 'plan')}`
         : '';
       toast.success(`Deleted “${t.item.title}”${detached}`);
+      qc.removeQueries({ queryKey: catalogKeys.workoutUsage(t.item._id) });
       void qc.invalidateQueries({ queryKey: catalogKeys.workouts });
       // Deleting a workout rewrites the plans that scheduled it.
       void qc.invalidateQueries({ queryKey: catalogKeys.plans });
@@ -241,7 +244,7 @@ function DeleteCatalogDialog({ target, onClose, onDeleted }: { target: DeleteTar
                   : usage.isError
                     ? 'Could not check which plans schedule it; deleting still removes it from all of them.'
                     : usedBy > 0
-                      ? `It is scheduled in ${plural(usedBy, 'plan')}, including members’ own plans. Deleting removes it from each and adjusts their calorie totals.`
+                      ? `${plural(usedBy, 'plan schedules it', 'plans schedule it')} (premade or members’ own). Deleting removes it from each one and adjusts their calorie totals.`
                       : 'No plan schedules this workout.'}
               </span>
             ) : (
@@ -344,7 +347,7 @@ export default function AdminCatalog() {
               leading={<Search size={18} />}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder={tab === 'workouts' ? 'Search title, description or category' : 'Search title or description'}
+              placeholder={tab === 'workouts' ? 'Search title, description or category' : 'Search title, description or goal'}
               maxLength={LIMITS.search.max}
               trailing={
                 searchInput ? (
@@ -386,7 +389,7 @@ export default function AdminCatalog() {
             <EmptyState
               variant="no-results"
               title={`No matching ${noun}s`}
-              message={`Nothing matched “${search}”. Search looks at titles, descriptions and categories.`}
+              message={`Nothing matched “${search}”. Search looks at titles, descriptions and ${tab === 'workouts' ? 'categories' : 'goals'}.`}
               action={{ label: 'Clear search', onClick: clearSearch, variant: 'secondary' }}
             />
           ) : tab === 'workouts' ? (

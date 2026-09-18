@@ -144,6 +144,8 @@ export const catalogKeys = {
   workouts: ['admin', 'catalog', 'workouts'] as const,
   workoutList: (params: CatalogListParams) => ['admin', 'catalog', 'workouts', 'list', params] as const,
   workout: (id: string) => ['admin', 'catalog', 'workouts', 'item', id] as const,
+  /** Deliberately outside the `workouts` prefix; see DeleteCatalogDialog. */
+  workoutUsage: (id: string) => ['admin', 'catalog', 'workout-usage', id] as const,
   plans: ['admin', 'catalog', 'plans'] as const,
   planList: (params: CatalogListParams) => ['admin', 'catalog', 'plans', 'list', params] as const,
   plan: (id: string) => ['admin', 'catalog', 'plans', 'item', id] as const,

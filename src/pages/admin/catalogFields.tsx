@@ -165,6 +165,8 @@ export function HashtagsField({
         error={error ?? problem}
         onChange={(e) => {
           const value = e.target.value;
+          // A note about a skipped tag is about the last entry; typing starts a new one.
+          setProblem(null);
           if (/[,\s]/.test(value)) commit(value);
           else setDraft(value);
         }}
@@ -306,13 +308,14 @@ export function CoverImageField({
             Remove
           </Button>
         ) : null}
+        {/* Driven by the visible Upload button; hidden from assistive tech so it is not announced twice. */}
         <input
           ref={inputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp,.heic"
           className="sr-only"
           tabIndex={-1}
-          aria-labelledby={labelId}
+          aria-hidden="true"
           onChange={(e) => void pick(e.target.files?.[0])}
         />
       </div>
@@ -392,9 +395,10 @@ export function SaveErrorCallout({
     );
   }
   const fieldCount = Object.keys(details.fields).length + Object.keys(details.rows).length;
+  const sentence = /[.!?]$/.test(details.message) ? details.message : `${details.message}.`;
   return (
     <Callout tone="danger" title={details.offline ? 'You’re offline' : 'Could not save'}>
-      {details.message}
+      {sentence}
       {fieldCount ? ' The highlighted fields explain what to fix.' : ''}
     </Callout>
   );
