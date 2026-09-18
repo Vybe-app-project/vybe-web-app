@@ -200,7 +200,10 @@ export default function Search() {
     },
   });
   const options = suggestions.data || [];
-  useEffect(() => setActiveIndex(-1), [debounced, focused]);
+  // New words, new list: nothing is highlighted until the person arrows down.
+  // (Not tied to `focused`: reopening the list with ArrowDown highlights the
+  // first option, and this must not undo that.)
+  useEffect(() => setActiveIndex(-1), [debounced]);
 
   /* ---------------- recent + trending ---------------- */
   const recent = useQuery({
@@ -295,7 +298,12 @@ export default function Search() {
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (!showSuggestions) {
-      if (e.key === 'Escape' && term) {
+      if (e.key === 'ArrowDown' && options.length && debounced.length >= 2) {
+        // Closed with Escape, or focus returned: the arrow reopens the list.
+        e.preventDefault();
+        setFocused(true);
+        setActiveIndex(0);
+      } else if (e.key === 'Escape' && term) {
         e.preventDefault();
         clearAll();
       }
@@ -379,7 +387,11 @@ export default function Search() {
             aria-controls={LISTBOX_ID}
             aria-activedescendant={showSuggestions && activeIndex >= 0 ? optionId(activeIndex) : undefined}
             className={cx(!!term && 'pr-12')}
-            onChange={(e) => setTerm(e.target.value)}
+            onChange={(e) => {
+              setTerm(e.target.value);
+              // Typing after Escape reopens the list.
+              setFocused(true);
+            }}
             onKeyDown={onKeyDown}
             onFocus={() => {
               if (blurTimer.current) window.clearTimeout(blurTimer.current);
