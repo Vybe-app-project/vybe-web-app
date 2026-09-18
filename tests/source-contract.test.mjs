@@ -37,6 +37,36 @@ test('the consumer and administration route families are present', () => {
   }
 });
 
+test('the staff console exposes password recovery without a session', () => {
+  const app = read('src/App.tsx');
+  const guardedTree = app.indexOf('element={<RequireAdmin>');
+  assert.ok(guardedTree > 0, 'RequireAdmin route missing');
+  for (const route of ['/admin/forgot-password', '/admin/reset-password']) {
+    const match = app.match(new RegExp(`path=["']${route}["']`));
+    assert.ok(match, `${route} must be routed`);
+    // Both pages are reached from an email or the sign-in page, so they must
+    // be declared outside the RequireAdmin tree.
+    assert.ok(match.index < guardedTree, `${route} must be public (declared before RequireAdmin)`);
+  }
+
+  const login = read('src/pages/admin/AdminLogin.tsx');
+  assert.match(login, /to=["']\/admin\/forgot-password["']/);
+  assert.match(login, /Forgot password\?/);
+
+  // The pages talk to the two public admin routes, and only those.
+  const forgot = read('src/pages/admin/AdminForgotPassword.tsx');
+  assert.match(forgot, /adminApi\.post\(['"]\/admins\/request-reset['"]/);
+  assert.doesNotMatch(forgot, /bootstrapAdmin/, 'forgot-password must not probe the session (401 interceptor bounces to /admin/login)');
+  const reset = read('src/pages/admin/AdminResetPassword.tsx');
+  assert.match(reset, /adminApi\.post\(['"]\/admins\/reset-password['"]/);
+  assert.match(reset, /to=["']\/admin\/login["']/, 'success state must link back to sign-in');
+  assert.match(reset, /['"]\/admin\/forgot-password['"]/, 'invalid-link states must offer a new request');
+  assert.match(reset, /forgetAdminSession\(\)/, 'a successful reset must drop the tab’s admin token');
+
+  // The token is read from ?token=, which is how email_service/adminResetMailer.js writes the link.
+  assert.match(read('src/lib/passwordReset.ts'), /get\(['"]token['"]\)/);
+});
+
 test('the production client defaults to same-origin API routing', () => {
   const api = read('src/lib/api.ts');
   assert.match(api, /import\.meta\.env\.VITE_API_BASE/);

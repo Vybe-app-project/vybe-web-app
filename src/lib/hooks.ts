@@ -132,23 +132,9 @@ export function pickNotificationSettings(raw: any): NotificationSettings {
  * Password / username policy (mirrors the API validators).
  * ------------------------------------------------------------------ */
 
-export type PasswordRule = { id: string; label: string; ok: boolean };
-
-export function passwordRules(pw: string): PasswordRule[] {
-  return [
-    { id: 'len', label: '12–128 characters', ok: pw.length >= 12 && pw.length <= 128 },
-    { id: 'lower', label: 'One lowercase letter', ok: /[a-z]/.test(pw) },
-    { id: 'upper', label: 'One uppercase letter', ok: /[A-Z]/.test(pw) },
-    { id: 'number', label: 'One number', ok: /[0-9]/.test(pw) },
-    {
-      id: 'symbol',
-      label: 'One symbol (!@#$…)',
-      ok: /[^A-Za-z0-9]/.test(pw),
-    },
-  ];
-}
-
-export const isPasswordValid = (pw: string) => passwordRules(pw).every((r) => r.ok);
+// The password policy lives in its own import-free module so node:test can
+// load it without a bundler; re-exported here so call sites keep one path.
+export { passwordRules, isPasswordValid, type PasswordRule } from './passwordPolicy';
 
 export const USERNAME_RE = /^[A-Za-z0-9._]{3,30}$/;
 

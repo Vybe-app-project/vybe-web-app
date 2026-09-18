@@ -34,6 +34,8 @@ type AuthState = {
   adminLogin: (email: string, password: string) => Promise<void>;
   logout: () => void;
   adminLogout: () => void;
+  /** Drop the local admin session only; used when the API has already revoked it. */
+  forgetAdminSession: () => void;
 };
 
 export const useAuth = create<AuthState>((set) => ({
@@ -114,5 +116,14 @@ export const useAuth = create<AuthState>((set) => ({
     tokenStore.clearAdmin();
     set({ admin: null });
     location.href = '/admin/login';
+  },
+
+  forgetAdminSession: () => {
+    // After a password reset the API has bumped tokenVersion, so any admin
+    // token this tab still holds is already dead. Forgetting it here means the
+    // next visit to /admin/login shows the form straight away instead of first
+    // failing a /admins/me call with the stale bearer.
+    tokenStore.clearAdmin();
+    set({ admin: null, adminLoading: false });
   },
 }));
