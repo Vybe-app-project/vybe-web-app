@@ -89,6 +89,9 @@ test('Reports reads the preview contract the API sends and shows removed targets
   // Redundant / impossible actions are disabled with a reason before the round trip.
   assert.match(source, /function unavailableReason\(/);
   assert.match(source, /'Already applied'/);
+  // An actioned report only accepts Restore account; the server 409s every other
+  // action ('This report already has an enforced action'), so the tiles say so up front.
+  assert.match(source, /if \(report\.status === 'actioned' && action !== 'restore_user'\) return 'Report already actioned';/);
   assert.match(source, /disabled=\{Boolean\(unavailable\)\}/);
   // The conflict callout is two sentences, the header badge names its tab.
   assert.match(source, /ensureSentence\(conflict\)/);
@@ -144,6 +147,11 @@ test('Dashboard cannot overflow a phone and names authors', () => {
   const source = read('src/pages/admin/AdminDashboard.tsx');
   assert.doesNotMatch(source, /className="grid gap-4 lg:grid-cols-2"/, '1fr tracks size to min-content and overflow the viewport');
   assert.equal((source.match(/grid-cols-\[minmax\(0,1fr\)\] gap-4 lg:grid-cols-\[repeat\(2,minmax\(0,1fr\)\)\]/g) || []).length, 4);
+  // The API zero-fills the growth series, so 'no data' has to mean all-zero, not empty.
+  assert.match(source, /function isFlatZero\(/);
+  assert.match(source, /empty=\{isFlatZero\(userGrowth\)\}/);
+  assert.match(source, /empty=\{isFlatZero\(postGrowth\)\}/);
+  assert.doesNotMatch(source, /empty=\{(?:user|post)Growth\.length === 0\}/);
   assert.match(source, /<Card className="min-w-0 overflow-hidden">/);
   assert.match(source, /w-24 shrink-0 text-right/, 'the trending stats column has a fixed width');
   assert.match(source, /p\.author\?\.fullName \|\| p\.author\?\.name \|\| handle \|\| 'Unknown author'/);
@@ -219,6 +227,9 @@ test('Support links Member badges to the account and formats counts', () => {
 });
 
 test('the console renders every timestamp with its zone (no bare date-fns clock strings)', () => {
+  // Every admin surface that shows a clock. The review found Admins (View
+  // dialog), the catalog editors and System still on date-fns 'HH:mm' after
+  // the first pass because this list left them out.
   for (const file of [
     'src/pages/admin/AdminAudit.tsx',
     'src/pages/admin/AdminReports.tsx',
@@ -226,10 +237,34 @@ test('the console renders every timestamp with its zone (no bare date-fns clock 
     'src/pages/admin/AdminUsers.tsx',
     'src/pages/admin/AdminPosts.tsx',
     'src/pages/admin/AdminTrainers.tsx',
+    'src/pages/admin/AdminAdmins.tsx',
+    'src/pages/admin/AdminSystem.tsx',
+    'src/pages/admin/AdminCatalogPlan.tsx',
+    'src/pages/admin/AdminCatalogWorkout.tsx',
+    'src/pages/admin/catalogFields.tsx',
   ]) {
     const source = read(file);
-    assert.doesNotMatch(source, /format\(new Date\([^)]*\), '[^']*HH:mm/, `${file} renders a bare local clock`);
+    // Any date-fns format() call with a clock pattern, whatever the first argument is
+    // (format(new Date(iso), ...) and format(d, ...) both slipped through the old regex).
+    assert.doesNotMatch(source, /\bformat\([^'\n]*'[^']*HH:mm/, `${file} renders a bare local clock`);
+    assert.doesNotMatch(source, /import \{[^}]*\bformat\b[^}]*\} from 'date-fns'/, `${file} still imports date-fns format()`);
     assert.match(source, /Stamp/, `${file} must use <Stamp> / fmtStamp`);
+  }
+  // The specific rows the review saw as bare clocks.
+  const admins = read('src/pages/admin/AdminAdmins.tsx');
+  assert.match(admins, /\['Created', <Stamp iso=\{detail\.data\?\.createdAt\} \/>, false\]/);
+  assert.match(admins, /\['Last updated', <Stamp iso=\{detail\.data\?\.updatedAt\} \/>, false\]/);
+  assert.doesNotMatch(admins, /const fmtDate = /);
+  const system = read('src/pages/admin/AdminSystem.tsx');
+  assert.match(system, /Reported at <Stamp iso=\{health\.data\.timestamp\} seconds \/>/);
+  const fields = read('src/pages/admin/catalogFields.tsx');
+  assert.match(fields, /export const fmtDate = \(iso\?: string \| null\) => fmtStamp\(iso, \{ dateOnly: true \}\);/);
+  assert.match(fields, /export const fmtDateTime = \(iso\?: string \| null\) => fmtStamp\(iso\);/);
+  for (const file of ['src/pages/admin/AdminCatalogPlan.tsx', 'src/pages/admin/AdminCatalogWorkout.tsx']) {
+    const source = read(file);
+    assert.match(source, /\{ label: 'Created', value: <Stamp iso=\{baseline\.createdAt\} \/> \}/, `${file} Created row`);
+    assert.match(source, /\{ label: 'Last updated', value: <Stamp iso=\{baseline\.updatedAt\} \/> \}/, `${file} Last updated row`);
+    assert.doesNotMatch(source, /fmtDateTime/, `${file} should render <Stamp>, not a bare string`);
   }
 });
 

@@ -158,6 +158,7 @@ function unavailableReason(action: ModerationAction, report: Report): string | n
   const owner = report.targetOwner;
   const gone = preview?.removed === true || preview?.exists === false;
   if (report.status === 'actioned' && report.moderationAction === action) return 'Already applied';
+  if (report.status === 'actioned' && action !== 'restore_user') return 'Report already actioned';
   if (action === 'remove_content') {
     if (report.targetType === 'user') return 'Not available for account reports';
     if (gone) return 'Content already removed';

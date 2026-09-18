@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { adminApi, errMsg } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import {
@@ -23,7 +22,7 @@ import {
   useToast,
 } from '../../components/ui';
 import { Shield, Plus, Trash, Edit, Lock, Users, Eye } from '../../components/icons';
-import { AdminPageHeader, useCurrentAdmin } from './AdminLayout';
+import { AdminPageHeader, Stamp, useCurrentAdmin } from './AdminLayout';
 
 type Admin = {
   _id: string;
@@ -53,7 +52,6 @@ function passwordProblems(pw: string): string[] {
   return problems;
 }
 
-const fmtDate = (iso?: string) => (iso ? format(new Date(iso), 'MMM d, yyyy HH:mm') : '—');
 
 export default function AdminAdmins() {
   const qc = useQueryClient();
@@ -509,9 +507,9 @@ export default function AdminAdmins() {
                 ['Email', detail.data?.email || '—', false],
                 ['Role', roleLabel(detail.data?.role), false],
                 ['Admin ID', detail.data?._id || '—', true],
-                ['Created', fmtDate(detail.data?.createdAt), false],
-                ['Last updated', fmtDate(detail.data?.updatedAt), false],
-              ] as Array<[string, string, boolean]>
+                ['Created', <Stamp iso={detail.data?.createdAt} />, false],
+                ['Last updated', <Stamp iso={detail.data?.updatedAt} />, false],
+              ] as Array<[string, ReactNode, boolean]>
             ).map(([label, value, mono]) => (
               <div key={label} className="admin-kv">
                 <dt>{label}</dt>

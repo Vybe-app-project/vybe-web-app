@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { adminApi, ORIGIN_BASE, errMsg } from '../../lib/api';
 import {
   Badge,
@@ -19,7 +18,7 @@ import {
   plural,
 } from '../../components/ui';
 import { Server, Refresh, Check, X, Alert, BarChart, Zap } from '../../components/icons';
-import { AdminPageHeader } from './AdminLayout';
+import { AdminPageHeader, Stamp } from './AdminLayout';
 
 /* --------------------------------------------------------------- types */
 
@@ -304,7 +303,7 @@ export default function AdminSystem() {
                   : healthNotExposed
                     ? 'The path answered, but not with the API probe. Check the edge routing for /api/system/*.'
                     : health.data?.timestamp
-                      ? `Reported at ${format(new Date(health.data.timestamp), 'HH:mm:ss')}`
+                      ? <>Reported at <Stamp iso={health.data.timestamp} seconds /></>
                       : 'No timestamp reported'}
               </p>
             </>

@@ -97,6 +97,15 @@ const num = (v: unknown): number | null =>
 const fmtCount = (v: number | null): string => (v === null ? '—' : v.toLocaleString());
 
 /** Series come back in a few shapes across API versions; normalise defensively. */
+/**
+ * The API zero-fills the 30-day growth series, so an idle window arrives as 30
+ * rows of 0 rather than an empty array; both deserve the 'nothing in the last
+ * 30 days' copy instead of a flat line hugging the axis.
+ */
+function isFlatZero(series: Array<{ value: number }>): boolean {
+  return series.every((point) => !point.value);
+}
+
 function toSeries(raw: unknown, valueKeys: string[]): Array<{ label: string; value: number }> {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -336,7 +345,7 @@ export default function AdminDashboard() {
         <ChartCard
           title="User growth"
           subtitle="New accounts per day, last 30 days"
-          empty={userGrowth.length === 0}
+          empty={isFlatZero(userGrowth)}
           emptyTitle="No sign-ups in the last 30 days"
           emptyMessage="New accounts appear here per day as members register."
         >
@@ -345,7 +354,7 @@ export default function AdminDashboard() {
         <ChartCard
           title="Posts over time"
           subtitle="Posts published per day, last 30 days"
-          empty={postGrowth.length === 0}
+          empty={isFlatZero(postGrowth)}
           emptyTitle="No posts in the last 30 days"
           emptyMessage="Published posts appear here per day as members share them."
         >

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react';
-import { format } from 'date-fns';
 import { mediaUrl } from '../../lib/api';
+import { fmtStamp } from '../../lib/format';
 import { Badge, Button, ButtonLink, Callout, Chip, Input, cx, humanize, useToast } from '../../components/ui';
 import { Dumbbell, Hash, Image as ImageIcon, Layers, Upload, X } from '../../components/icons';
 import {
@@ -38,17 +38,11 @@ export function LevelBadge({ level }: { level: CatalogLevel | string | null | un
   return <Badge tone="neutral">{humanize(level)}</Badge>;
 }
 
-export const fmtDate = (iso?: string | null) => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isFinite(d.getTime()) ? format(d, 'MMM d, yyyy') : '—';
-};
+/** Join/creation dates in the catalog tables: date only, no clock, so no zone to label. */
+export const fmtDate = (iso?: string | null) => fmtStamp(iso, { dateOnly: true });
 
-export const fmtDateTime = (iso?: string | null) => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isFinite(d.getTime()) ? format(d, 'MMM d, yyyy HH:mm') : '—';
-};
+/** Clock stamps carry their zone ("Sep 18, 2026, 14:33 EDT"); prefer <Stamp> where a tooltip fits. */
+export const fmtDateTime = (iso?: string | null) => fmtStamp(iso);
 
 export const fmtMinutes = (minutes: number | null | undefined) => (minutes ? `${minutes} min` : '—');
 export const fmtKcal = (kcal: number | null | undefined) => (kcal === null || kcal === undefined ? '—' : `${kcal.toLocaleString()} kcal`);
