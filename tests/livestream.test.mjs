@@ -256,10 +256,15 @@ test('peer state walks idle → connecting → live and ends terminally', () => 
   assert.deepEqual(state, { phase: 'connecting', reconnecting: false, reason: null });
   state = reducePeerState(state, { type: 'connection', state: 'connecting' });
   assert.equal(state.phase, 'connecting');
+  // A remote track is attached with the description; nothing flows until ICE connects.
   state = reducePeerState(state, { type: 'track' });
+  assert.deepEqual(state, { phase: 'connecting', reconnecting: false, reason: null });
+  assert.deepEqual(reducePeerState(INITIAL_PEER_STATE, { type: 'track' }), { phase: 'connecting', reconnecting: false, reason: null });
+  state = reducePeerState(state, { type: 'connection', state: 'connected' });
   assert.deepEqual(state, { phase: 'live', reconnecting: false, reason: null });
-  const same = reducePeerState(state, { type: 'connection', state: 'connected' });
+  const same = reducePeerState(state, { type: 'track' });
   assert.equal(same, state, 'no-op transitions return the same object');
+  assert.equal(reducePeerState(state, { type: 'connection', state: 'connected' }), state);
   state = reducePeerState(state, { type: 'end', reason: 'maximum-duration' });
   assert.deepEqual(state, { phase: 'ended', reconnecting: false, reason: 'maximum-duration' });
   assert.equal(reducePeerState(state, { type: 'negotiate' }), state, 'ended is terminal');
@@ -280,7 +285,8 @@ test('peer state marks reconnection when the link drops or the other side leaves
   // A fresh offer after a drop keeps the reconnecting flag until media flows again.
   const renegotiated = reducePeerState(left, { type: 'negotiate' });
   assert.deepEqual(renegotiated, { phase: 'connecting', reconnecting: true, reason: null });
-  assert.deepEqual(reducePeerState(renegotiated, { type: 'track' }), live);
+  assert.deepEqual(reducePeerState(renegotiated, { type: 'connection', state: 'connected' }), live);
+  assert.equal(reducePeerState(renegotiated, { type: 'track' }), renegotiated, 'a track alone does not end the reconnect');
   // Renegotiating from live (host re-offers) is a reconnect too.
   assert.deepEqual(reducePeerState(live, { type: 'negotiate' }), { phase: 'connecting', reconnecting: true, reason: null });
 });

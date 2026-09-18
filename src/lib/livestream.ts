@@ -412,8 +412,10 @@ export function reducePeerState(state: PeerState, event: PeerEvent): PeerState {
       if (state.phase === 'connecting' && !state.reason) return state;
       return { phase: 'connecting', reconnecting: state.phase === 'live' || state.reconnecting, reason: null };
     case 'track':
-      if (state.phase === 'live') return state;
-      return { phase: 'live', reconnecting: false, reason: null };
+      // Remote tracks arrive with the description, before ICE has connected;
+      // media only flows once the connection itself reports 'connected'.
+      if (state.phase === 'idle') return { phase: 'connecting', reconnecting: false, reason: null };
+      return state;
     case 'fail':
       if (state.phase === 'failed' && state.reason === (event.reason ?? null)) return state;
       return { phase: 'failed', reconnecting: false, reason: event.reason ?? null };

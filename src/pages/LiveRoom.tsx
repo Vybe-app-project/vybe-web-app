@@ -9,6 +9,7 @@ import { useSharedSocket } from '../lib/socket';
 import {
   CandidateQueue,
   INITIAL_PEER_STATE,
+  MAX_MESH_VIEWERS,
   SignalBudget,
   canAcceptViewer,
   durationLabel,
@@ -97,7 +98,6 @@ import {
   hostId,
   hostName,
   hostOf,
-  likesOf,
   userIdOf,
   viewersOf,
   type Stream,
@@ -212,6 +212,7 @@ function VideoStage({
   label,
   children,
   placeholder,
+  veil,
 }: {
   videoRef: RefObject<HTMLVideoElement | null>;
   hasVideo: boolean;
@@ -221,6 +222,8 @@ function VideoStage({
   label: string;
   children?: ReactNode;
   placeholder?: ReactNode;
+  /** Shown over an attached but not yet flowing video (negotiated, ICE pending). */
+  veil?: ReactNode;
 }) {
   const portrait = orientation === 'portrait';
   return (
@@ -240,6 +243,7 @@ function VideoStage({
           className={cx('h-full w-full object-contain', mirrored && '-scale-x-100', !hasVideo && 'hidden')}
         />
         {!hasVideo ? <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">{placeholder}</div> : null}
+        {hasVideo && veil ? <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg/70 px-6 text-center">{veil}</div> : null}
         {children}
       </div>
     </div>
@@ -272,11 +276,14 @@ function useLiveChat({
   const reactionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heart = usePulse();
 
+  // Seed from the REST payload by value: the rooms re-wrap `stream` on every
+  // render, and re-seeding on object identity would undo socket updates.
+  const seedLikes = stream?.likeCount ?? 0;
+  const seedLiked = Boolean(stream?.isLiked);
   useEffect(() => {
-    if (!stream) return;
-    setLikeCount(likesOf(stream));
-    setLiked(Boolean(stream.isLiked));
-  }, [stream]);
+    setLikeCount(seedLikes);
+    setLiked(seedLiked);
+  }, [streamId, seedLikes, seedLiked]);
 
   const history = useQuery({
     queryKey: ['livestream', streamId, 'comments'],
@@ -521,8 +528,36 @@ type ViewerPeer = { socketId: string; name: string; avatar?: string; state: Conn
 /** How long a hidden tab may keep a paused camera before the broadcast ends for its viewers. */
 const BACKGROUND_GRACE_MS = 45_000;
 const MAX_SESSION_REFRESHES = 3;
+/**
+ * Relay-only ICE against an unreachable relay yields no candidate pair at
+ * all, and a peer with nothing to check sits in 'new' forever without ever
+ * reporting 'failed'. Both rooms treat a peer that has not connected by this
+ * deadline as failed.
+ */
+const CONNECT_TIMEOUT_MS = 20_000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** errMsg plus the one axios code the rooms hit in practice: a server that never answered. */
+const requestMessage = (e: unknown, fallback: string) =>
+  (e as { code?: string } | undefined)?.code === 'ECONNABORTED' ? 'The server took too long to answer. Try again.' : errMsg(e, fallback);
+
+/**
+ * start/join envelopes carry the host as a bare id (the controller does not
+ * populate it there); keep the populated host and moderators from the detail
+ * fetch so names and avatars survive the merge.
+ */
+function mergeStream(previous: Stream | undefined, next: unknown): Stream | undefined {
+  if (!next || typeof next !== 'object') return previous;
+  const incoming = next as Stream;
+  if (!previous) return incoming;
+  return {
+    ...previous,
+    ...incoming,
+    host: incoming.host && typeof incoming.host === 'object' ? incoming.host : previous.host,
+    moderators: incoming.moderators?.some((m) => typeof m === 'object') ? incoming.moderators : previous.moderators,
+  };
+}
 
 function useHostBroadcast({
   streamId,
@@ -567,13 +602,17 @@ function useHostBroadcast({
   const endingRef = useRef(false);
   const refreshesRef = useRef(0);
   const backgroundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Read through a ref in the unmount cleanup so a socket identity change can
+  // never be mistaken for leaving the page and end a live broadcast.
+  const socketRef = useRef<Socket | null>(socket);
 
   useEffect(() => {
     mediaRef.current = media;
     sessionRef.current = session;
     phaseRef.current = phase;
     maxViewersRef.current = maxViewers;
-  }, [media, session, phase, maxViewers]);
+    socketRef.current = socket;
+  }, [media, session, phase, maxViewers, socket]);
 
   useEffect(() => {
     setMaxViewers(roomCapacity(streamCapacity, capabilities?.maxViewers));
@@ -694,9 +733,9 @@ function useHostBroadcast({
       setSession(parsed);
       setPhase('live');
       qc.invalidateQueries({ queryKey: ['livestreams'] });
-      qc.setQueryData<StreamDetail | undefined>(['livestream', streamId], (old) => (old && data?.stream ? { ...old, stream: data.stream as Stream } : old));
+      qc.setQueryData<StreamDetail | undefined>(['livestream', streamId], (old) => (old ? { ...old, stream: mergeStream(old.stream, data?.stream) ?? old.stream } : old));
     } catch (e) {
-      setError(errMsg(e, 'The live broadcast could not start.'));
+      setError(requestMessage(e, 'The live broadcast could not start.'));
       setPhase('setup');
     }
   }, [capabilities, socket, resumeLive, streamId, qc]);
@@ -705,7 +744,9 @@ function useHostBroadcast({
     const activeSession = sessionRef.current;
     const local = mediaRef.current;
     if (!socket || !activeSession || !local || phaseRef.current !== 'live') return;
-    if (!canAcceptViewer(peers.current.size, maxViewersRef.current, peers.current.has(viewerSocketId))) return;
+    // The server enforces the real cap; ours only spares the host from offering
+    // past it, so an unknown cap falls back to the hard maximum rather than 0.
+    if (!canAcceptViewer(peers.current.size, maxViewersRef.current || MAX_MESH_VIEWERS, peers.current.has(viewerSocketId))) return;
     closePeer(viewerSocketId);
     const peer = createPeer(activeSession.iceServers);
     peers.current.set(viewerSocketId, peer);
@@ -719,9 +760,15 @@ function useHostBroadcast({
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState;
       setViewers((current) => current.map((v) => (v.socketId === viewerSocketId ? { ...v, state } : v)));
+      if (state === 'connected') clearTimeout(watchdog);
       // The viewer re-joins on failure and gets a fresh offer; keep no dead peers around.
       if (state === 'failed' || state === 'closed') closePeer(viewerSocketId);
     };
+    // A viewer that never connects must not hold a mesh slot; they re-join and
+    // receive a fresh offer when their side can reach the relay.
+    const watchdog = setTimeout(() => {
+      if (peers.current.get(viewerSocketId) === peer && peer.connectionState !== 'connected') closePeer(viewerSocketId);
+    }, CONNECT_TIMEOUT_MS);
     try {
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
@@ -898,15 +945,16 @@ function useHostBroadcast({
   // Leaving the page (route change) ends an abandoned broadcast, as the
   // mobile screen does on unmount.
   useEffect(() => () => {
+    const live = socketRef.current;
     if (phaseRef.current === 'live' && !endingRef.current) {
       void api.put(`/livestreams/${streamId}/end`).catch(() => undefined);
-      if (socket?.connected) void leaveLivestreamRoom(socket, streamId).catch(() => undefined);
+      if (live?.connected) void leaveLivestreamRoom(live, streamId).catch(() => undefined);
     }
     peers.current.forEach((peer) => peer.close());
     peers.current.clear();
     pending.current.clear();
     stopMedia(mediaRef.current);
-  }, [streamId, socket]);
+  }, [streamId]);
 
   const toggleMute = () => {
     const next = !muted;
@@ -949,8 +997,7 @@ function useHostBroadcast({
   };
 }
 
-function HostRoom({ stream, capabilities, refetch }: { stream: Stream; capabilities: LivestreamCapabilities | null; refetch: () => unknown }) {
-  const navigate = useNavigate();
+function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: LivestreamCapabilities | null }) {
   const me = useAuth((s) => s.user);
   const myId = userIdOf(me);
   const online = useOnline();
@@ -1003,9 +1050,6 @@ function HostRoom({ stream, capabilities, refetch }: { stream: Stream; capabilit
             <ButtonLink to="/live" variant="primary">
               Back to Live
             </ButtonLink>
-            <Button variant="secondary" onClick={() => refetch()}>
-              View stream page
-            </Button>
           </div>
         </Card>
       </div>
@@ -1090,7 +1134,7 @@ function HostRoom({ stream, capabilities, refetch }: { stream: Stream; capabilit
               ) : null}
             </div>
             {host.media ? (
-              <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-center gap-2 bg-gradient-to-t from-bg/80 to-transparent px-3 pb-3 pt-8">
+              <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-center gap-2 bg-bg/70 px-3 py-3 backdrop-blur">
                 <IconButton label={host.muted ? 'Unmute microphone' : 'Mute microphone'} variant="secondary" aria-pressed={host.muted} onClick={host.toggleMute}>
                   {host.muted ? <MicOff size={20} /> : <Mic size={20} />}
                 </IconButton>
@@ -1222,7 +1266,7 @@ function HostRoom({ stream, capabilities, refetch }: { stream: Stream; capabilit
         onClose={() => setConfirmEnd(false)}
         onConfirm={() => {
           setConfirmEnd(false);
-          void host.endBroadcast().then(() => navigate('/live/' + stream._id, { replace: true }));
+          void host.endBroadcast();
         }}
       />
     </div>
@@ -1274,23 +1318,38 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
   const refreshesRef = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retriesRef = useRef(0);
+  const socketRef = useRef<Socket | null>(socket);
+  const joiningRef = useRef(false);
+  const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     sessionRef.current = session;
     phaseRef.current = phase;
-  }, [session, phase]);
+    socketRef.current = socket;
+  }, [session, phase, socket]);
 
+  // By value, for the same reason as the chat seed: presence events must win
+  // over a re-rendered but unchanged REST payload.
+  const seedViewers = stream ? viewersOf(stream) : 0;
   useEffect(() => {
-    if (stream) setViewerCount(viewersOf(stream));
-  }, [stream]);
+    setViewerCount(seedViewers);
+  }, [seedViewers]);
+
+  const clearConnectTimer = useCallback(() => {
+    if (connectTimer.current) {
+      clearTimeout(connectTimer.current);
+      connectTimer.current = null;
+    }
+  }, []);
 
   const closePeer = useCallback(() => {
+    clearConnectTimer();
     peerRef.current?.close();
     peerRef.current = null;
     hostSocketRef.current = null;
     pending.current.clear();
     setRemote(null);
-  }, []);
+  }, [clearConnectTimer]);
 
   const guardedSend = useCallback(async (send: () => Promise<unknown>) => {
     const wait = budget.current.waitMs();
@@ -1299,8 +1358,39 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     await send();
   }, []);
 
+  /**
+   * Re-join the room so the host receives 'viewer-ready' and re-offers, with
+   * growing delays; after the last attempt the failure is shown and the
+   * viewer retries by hand.
+   */
+  const scheduleRetry = useCallback((reason: string) => {
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    if (retriesRef.current >= RETRY_DELAYS_MS.length) {
+      // Drop the attached-but-silent tracks so the stage shows the failure
+      // instead of a black frame behind it.
+      closePeer();
+      dispatch({ type: 'fail', reason: `${reason} The relay may be unreachable from your network.` });
+      return;
+    }
+    const delay = RETRY_DELAYS_MS[retriesRef.current];
+    retriesRef.current += 1;
+    retryTimer.current = setTimeout(() => setJoinAttempt((n) => n + 1), delay);
+  }, [closePeer]);
+
+  const armConnectTimer = useCallback((peer: RTCPeerConnection) => {
+    clearConnectTimer();
+    connectTimer.current = setTimeout(() => {
+      connectTimer.current = null;
+      if (peerRef.current !== peer || peer.connectionState === 'connected') return;
+      scheduleRetry('The video relay did not answer.');
+    }, CONNECT_TIMEOUT_MS);
+  }, [clearConnectTimer, scheduleRetry]);
+
   /** REST join: registers the viewer and returns the scoped media session. */
   const join = useCallback(async () => {
+    // Strict-mode double effects and a fast retry can both call this twice.
+    if (joiningRef.current) return;
+    joiningRef.current = true;
     setPhase('joining');
     setError(null);
     try {
@@ -1310,15 +1400,13 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
       if (!hasRelayServer(parsed.iceServers)) throw new Error('The video relay is not available right now.');
       joinedRef.current = true;
       refreshesRef.current = 0;
-      if (data?.stream) {
-        qc.setQueryData<StreamDetail | undefined>(['livestream', streamId], (old) => (old ? { ...old, stream: data.stream as Stream } : old));
-      }
+      qc.setQueryData<StreamDetail | undefined>(['livestream', streamId], (old) => (old ? { ...old, stream: mergeStream(old.stream, data?.stream) ?? old.stream } : old));
       setSession(parsed);
       setPhase('connecting');
       dispatch({ type: 'negotiate' });
     } catch (e) {
       const status = (e as { response?: { status?: number } })?.response?.status;
-      const message = errMsg(e, 'This live session is unavailable.');
+      const message = requestMessage(e, 'This live session is unavailable.');
       if (status === 409 && /not live|maximum duration/i.test(message)) {
         setEndedReason(null);
         setPhase('ended');
@@ -1328,6 +1416,8 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
       }
       setError(message);
       setPhase('error');
+    } finally {
+      joiningRef.current = false;
     }
   }, [streamId, qc]);
 
@@ -1363,6 +1453,8 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
       void guardedSend(() => sendCandidate(socket, streamId, fromSocketId, candidate)).catch(() => undefined);
     };
     peer.ontrack = (event) => {
+      // Attach now so playback starts the instant frames arrive; the UI keeps
+      // showing "connecting" until the connection itself reports connected.
       const received = event.streams?.[0];
       if (received) {
         setRemote(received);
@@ -1372,25 +1464,23 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
         setRemote(assembled);
       }
       dispatch({ type: 'track' });
-      setPhase('watching');
     };
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState;
       dispatch({ type: 'connection', state });
       if (state === 'connected') {
+        clearConnectTimer();
         retriesRef.current = 0;
         setPhase('watching');
       } else if (state === 'failed') {
-        // Re-join the room so the host receives 'viewer-ready' and re-offers.
+        clearConnectTimer();
         setPhase('connecting');
-        const delay = RETRY_DELAYS_MS[Math.min(retriesRef.current, RETRY_DELAYS_MS.length - 1)];
-        retriesRef.current += 1;
-        if (retryTimer.current) clearTimeout(retryTimer.current);
-        retryTimer.current = setTimeout(() => setJoinAttempt((n) => n + 1), delay);
+        scheduleRetry('The video connection failed.');
       } else if (state === 'disconnected') {
         setPhase('connecting');
       }
     };
+    armConnectTimer(peer);
     await peer.setRemoteDescription(description);
     for (const candidate of pending.current.drain(fromSocketId)) {
       await peer.addIceCandidate(candidate as RTCIceCandidateInit).catch(() => undefined);
@@ -1399,7 +1489,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     await peer.setLocalDescription(answer);
     if (!peer.localDescription) throw new Error('Could not answer the live video connection.');
     await guardedSend(() => sendDescription(socket, streamId, fromSocketId, peer.localDescription));
-  }, [socket, streamId, closePeer, guardedSend]);
+  }, [socket, streamId, closePeer, guardedSend, clearConnectTimer, scheduleRetry, armConnectTimer]);
 
   const handleSignal = useCallback(async (signal: LivestreamSignal) => {
     if (signal.kind === 'offer') {
@@ -1527,14 +1617,16 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
   }, [socket, streamId]);
 
   useEffect(() => () => {
+    const live = socketRef.current;
     if (retryTimer.current) clearTimeout(retryTimer.current);
+    if (connectTimer.current) clearTimeout(connectTimer.current);
     if (joinedRef.current && !leavingRef.current) {
       void api.post(`/livestreams/${streamId}/leave`).catch(() => undefined);
-      if (socket?.connected) void leaveLivestreamRoom(socket, streamId).catch(() => undefined);
+      if (live?.connected) void leaveLivestreamRoom(live, streamId).catch(() => undefined);
     }
     peerRef.current?.close();
     peerRef.current = null;
-  }, [socket, streamId]);
+  }, [streamId]);
 
   const retry = useCallback(() => {
     retriesRef.current = 0;
@@ -1636,15 +1728,20 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
     );
   }
 
-  const connecting = viewer.phase === 'joining' || viewer.phase === 'connecting' || (viewer.phase === 'watching' && !viewer.remote);
   const failed = viewer.phase === 'error' || viewer.peerState.phase === 'failed';
+  // Tracks are attached as soon as the offer is answered; only a connected
+  // peer actually delivers frames, so every "connected" cue keys off that.
+  const flowing = Boolean(viewer.remote) && viewer.peerState.phase === 'live';
+  const connecting = !failed && !flowing;
   const statusCopy = viewer.peerState.reconnecting
     ? 'Broadcaster is reconnecting…'
     : viewer.phase === 'joining'
       ? 'Joining the room…'
       : !connected
         ? 'Waiting for the live connection…'
-        : 'Connecting secure video…';
+        : viewer.remote
+          ? 'Connecting to the video relay…'
+          : 'Connecting secure video…';
 
   return (
     <div className="space-y-6">
@@ -1657,6 +1754,16 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
             orientation={orientation}
             muted={muted}
             label={`Live video from ${hostName(stream)}`}
+            veil={
+              connecting ? (
+                <>
+                  <Spinner size={28} className="text-brand" />
+                  <p className="text-sm font-semibold" role="status">
+                    {statusCopy}
+                  </p>
+                </>
+              ) : undefined
+            }
             placeholder={
               failed ? (
                 <>
@@ -1689,19 +1796,19 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
               <ViewerPill count={viewer.viewerCount} />
               {viewer.remote ? (
                 <span className="ml-auto">
-                  <ConnectionPill ready={viewer.peerState.phase === 'live' && connected} />
+                  <ConnectionPill ready={flowing && connected} label={flowing && connected ? 'Connected' : viewer.peerState.reconnecting ? 'Reconnecting' : 'Connecting'} />
                 </span>
               ) : null}
             </div>
-            {viewer.remote && (muted || blocked) ? (
+            {flowing && (muted || blocked) ? (
               <div className="absolute inset-0 flex items-center justify-center">
                 <Button variant="primary" size="lg" onClick={toggleMuted} icon={<Volume size={20} />} className="shadow-2">
                   {blocked ? 'Tap to play' : 'Tap to unmute'}
                 </Button>
               </div>
             ) : null}
-            {viewer.remote ? (
-              <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-bg/80 to-transparent px-3 pb-3 pt-8">
+            {flowing ? (
+              <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-bg/70 px-3 py-3 backdrop-blur">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold">{stream.title}</p>
                   <p className="truncate text-xs text-text-2">{hostName(stream)}</p>
@@ -1769,7 +1876,7 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
               ))}
             </div>
           ) : null}
-          {connecting && !failed ? <p className="sr-only" role="status">{statusCopy}</p> : null}
+          {connecting && !viewer.remote ? <p className="sr-only" role="status">{statusCopy}</p> : null}
         </section>
 
         <ChatPanel stream={stream} chat={chat} myId={myId} canModerate={false} className="max-h-[70dvh] lg:sticky lg:top-20 lg:h-[calc(100dvh-8rem)]" />
@@ -1839,7 +1946,7 @@ export default function LiveRoom({ streamId }: { streamId: string }) {
 
   const isHost = Boolean(myId) && hostId(stream) === myId;
   return isHost ? (
-    <HostRoom stream={stream} capabilities={detail.data?.capabilities ?? null} refetch={() => detail.refetch()} />
+    <HostRoom stream={stream} capabilities={detail.data?.capabilities ?? null} />
   ) : (
     <ViewerRoom stream={stream} refetch={() => detail.refetch()} />
   );
