@@ -25,11 +25,11 @@ import {
   cx,
   formatStat,
   humanize,
-  useToast,
   type MenuItem,
+  useToast,
 } from './ui';
 import { Activity, Clock, Copy, Dumbbell, Edit, Flag, Flame, Heart, MessageCircle, Send, ShareUp, Trash } from './icons';
-import { LikeButton, WorkoutModal, shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise } from './Workouts';
+import { LikeButton, WorkoutModal, shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise, type WorkoutPlan } from './Workouts';
 import { useReportModal } from './Report';
 
 type WorkoutComment = {
@@ -127,6 +127,19 @@ export default function WorkoutDetail() {
       return data.data;
     },
     enabled: Boolean(workoutId),
+  });
+
+  // The mobile app shares workout *plans* under the same "workout" link type,
+  // so an id that is not a workout may be a plan: try that before giving up.
+  const notFound = isError && (error as { response?: { status?: number } } | null)?.response?.status === 404;
+  const plan = useQuery({
+    queryKey: ['workout-plan', workoutId],
+    enabled: notFound && Boolean(workoutId),
+    retry: false,
+    queryFn: async (): Promise<WorkoutPlan> => {
+      const { data } = await api.get<{ success: boolean; data: WorkoutPlan }>(`/workouts/plan/single-plan/${workoutId}`);
+      return data.data;
+    },
   });
 
   // Card comment links land on #comments: scroll there and focus the composer.
@@ -236,6 +249,15 @@ export default function WorkoutDetail() {
   }
 
   if (isError || !data) {
+    if (plan.isLoading) {
+      return (
+        <>
+          <PageHeader title="Workout plan" />
+          <DetailSkeleton />
+        </>
+      );
+    }
+    if (plan.data) return <PlanDetail plan={plan.data} />;
     return (
       <>
         <PageHeader title="Workout" />
@@ -445,5 +467,67 @@ export default function WorkoutDetail() {
       />
       {reportModal}
     </div>
+  );
+}
+
+/** Read view for a shared workout plan: the schedule, week by week. */
+function PlanDetail({ plan }: { plan: WorkoutPlan }) {
+  const cover = plan.image?.uri ? mediaUrl(plan.image.uri) : '';
+  const byWeek = new Map<number, NonNullable<WorkoutPlan['workouts']>>();
+  for (const entry of plan.workouts ?? []) {
+    if (!entry.workout) continue;
+    const list = byWeek.get(entry.week) ?? [];
+    list.push(entry);
+    byWeek.set(entry.week, list);
+  }
+  const weeks = [...byWeek.keys()].sort((a, b) => a - b);
+  const author = plan.createdBy?.fullName || plan.createdBy?.username;
+  return (
+    <>
+      <PageHeader title={plan.title} back="/workouts" />
+      <div className="space-y-4">
+        {cover ? <img src={cover} alt="" className="aspect-[16/9] w-full rounded-lg object-cover" /> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {plan.level ? <Badge>{plan.level}</Badge> : null}
+          {plan.durationWeeks ? <Badge tone="neutral">{plan.durationWeeks} weeks</Badge> : null}
+          {plan.goal ? <Badge tone="neutral">{plan.goal}</Badge> : null}
+          {author ? <span className="text-xs text-text-2">Plan by {author}</span> : null}
+        </div>
+        {plan.description ? <p className="text-sm text-text-2">{plan.description}</p> : null}
+        {weeks.length === 0 ? (
+          <EmptyState icon={<Dumbbell size={26} />} title="No sessions yet" message="This plan has no workouts scheduled." />
+        ) : (
+          weeks.map((week) => (
+            <Card key={week} className="p-0">
+              <h2 className="type-heading px-4 pt-4 text-sm text-text-1">Week {week}</h2>
+              <ul className="divide-y divide-line">
+                {(byWeek.get(week) ?? [])
+                  .slice()
+                  .sort((a, b) => a.day - b.day || (a.order ?? 0) - (b.order ?? 0))
+                  .map((entry) => (
+                    <li key={`${entry.week}-${entry.day}-${entry.workout?._id}`}>
+                      <Link
+                        to={`/workouts/${entry.workout?._id}`}
+                        viewTransition
+                        className="flex min-h-12 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-text-1">{entry.workout?.title}</span>
+                          <span className="block text-xs text-text-2">
+                            Day {entry.day}
+                            {entry.workout?.duration ? ` · ${entry.workout.duration} min` : ''}
+                            {entry.workout?.category ? ` · ${entry.workout.category}` : ''}
+                          </span>
+                        </span>
+                        <Activity size={16} className="shrink-0 text-text-3" />
+                      </Link>
+                    </li>
+                  ))}
+              </ul>
+            </Card>
+          ))
+        )}
+      </div>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
@@ -606,7 +607,18 @@ export default function Gyms() {
   const [tab, setTab] = useState<GymsTab>('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [openGym, setOpenGym] = useState<string | null>(null);
+  // Share links land here as /gyms?gym=<id> (see lib/shareLinks.ts); the
+  // detail modal opens for it and the parameter is dropped once it closes.
+  const [params, setParams] = useSearchParams();
+  const [openGym, setOpenGym] = useState<string | null>(() => params.get('gym'));
+  const closeGym = () => {
+    setOpenGym(null);
+    if (params.has('gym')) {
+      const next = new URLSearchParams(params);
+      next.delete('gym');
+      setParams(next, { replace: true });
+    }
+  };
   const [coords, setCoords] = useState<Coords | null>(null);
   const [radius, setRadius] = useState('10');
   const [locate, setLocate] = useState<LocateState>({ kind: 'idle' });
@@ -935,7 +947,7 @@ export default function Gyms() {
         </section>
       ) : null}
 
-      <GymDetailModal gymId={openGym} onClose={() => setOpenGym(null)} />
+      <GymDetailModal gymId={openGym} onClose={closeGym} />
     </div>
   );
 }

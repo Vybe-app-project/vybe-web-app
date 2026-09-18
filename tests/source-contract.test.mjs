@@ -88,6 +88,13 @@ test('admin sessions are tab-scoped and legacy paths still resolve', () => {
   // The button reset must stay layered or it overrides .btn-primary's colour.
   assert.match(read('src/styles.css'), /@layer base \{\s*button \{ font: inherit; color: inherit; \}/);
 
+  // Mobile share links are /open.html?type=…&id=…; the SPA must answer them.
+  const appSrc = read('src/App.tsx');
+  assert.match(appSrc, /path=["']\/open\.html["']/);
+  assert.match(read('src/lib/shareLinks.ts'), /'meal-template': .*shared=|case 'meal-template':\s*return `\/meals\/templates\?shared=/s);
+  assert.match(read('src/pages/Gyms.tsx'), /params\.get\('gym'\)/);
+  assert.match(read('src/pages/WeeklyPlans.tsx'), /params\.get\('shared'\)/);
+
   const app = read('src/App.tsx');
   for (const legacy of ['workout-logs', 'livestreams', 'meal-templates', 'health-goals', 'water', 'explore', 'inbox']) {
     assert.match(app, new RegExp(`path=["']${legacy}["']`), `legacy path /${legacy} must redirect`);

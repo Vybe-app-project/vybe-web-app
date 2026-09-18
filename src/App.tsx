@@ -27,6 +27,7 @@ const Gyms = lazy(() => import('./pages/Gyms'));
 const GymCommunity = lazy(() => import('./pages/GymCommunity'));
 const Livestreams = lazy(() => import('./pages/Livestreams'));
 const Support = lazy(() => import('./pages/Support'));
+const OpenHandoff = lazy(() => import('./pages/OpenHandoff'));
 
 const Workouts = lazy(() => import('./pages/Workouts'));
 const WorkoutDetail = lazy(() => import('./pages/WorkoutDetail'));
@@ -173,6 +174,10 @@ export default function App() {
 
           {/* Public help: works signed out, wears the app shell when signed in */}
           <Route path="/support" element={<SupportGate />} />
+
+          {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
+          <Route path="/open.html" element={<OpenHandoff />} />
+          <Route path="/open" element={<OpenHandoff />} />
 
           {/* Admin */}
           <Route path="/admin/login" element={<AdminLogin />} />

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
@@ -8,6 +8,7 @@ import {
   Avatar,
   Badge,
   Button,
+  Callout,
   Card,
   CardMedia,
   ConfirmDialog,
@@ -20,6 +21,7 @@ import {
   PageHeader,
   Select,
   Skeleton,
+  Spinner,
   Tabs,
   Textarea,
   cx,
@@ -748,6 +750,116 @@ function PlanCard({
   );
 }
 
+/* ---------------------------------------------------------- shared modal */
+
+/**
+ * A plan someone shared by link. Links carry a share token; a public plan
+ * shared before its owner minted one carries the plan id instead, so the
+ * token route is tried first and the id route second.
+ */
+function SharedPlanModal({ token, onClose }: { token: string | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const shared = useQuery({
+    queryKey: ['weekly-plans', 'shared-link', token],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: async (): Promise<WeeklyPlan> => {
+      const key = encodeURIComponent(token ?? '');
+      try {
+        const { data } = await api.get<WeeklyPlan>(`/weekly-plans/shared/${key}`);
+        return data;
+      } catch (e: unknown) {
+        const status = (e as { response?: { status?: number } })?.response?.status;
+        if (status !== 404) throw e;
+        const { data } = await api.get<WeeklyPlan>(`/weekly-plans/${key}`);
+        return data;
+      }
+    },
+  });
+  const copy = useMutation({
+    mutationFn: async () => {
+      if (!shared.data) throw new Error('Nothing to copy');
+      const { data } = await api.post(`/weekly-plans/${shared.data._id}/copy`);
+      return data;
+    },
+    onSuccess: () => {
+      toast.success('Plan copied to your plans');
+      qc.invalidateQueries({ queryKey: ['weekly-plans'] });
+      onClose();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not copy this plan.')),
+  });
+
+  const p = shared.data;
+  const owner = p ? ownerOf(p) : undefined;
+  const ownerName = owner?.fullName || owner?.username;
+  const description = p
+    ? [ownerName ? `By ${ownerName}` : null, humanize(p.goalType || 'balanced'), p.targetCalories ? `${p.targetCalories} kcal/day` : null]
+        .filter(Boolean)
+        .join(' · ')
+    : undefined;
+
+  return (
+    <Modal
+      open={Boolean(token)}
+      onClose={onClose}
+      title={p?.name ?? 'Shared meal plan'}
+      description={description}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+          {p && !p.isOwner ? (
+            <Button variant="primary" loading={copy.isPending} onClick={() => copy.mutate()} icon={<Copy size={16} />}>
+              Copy to my plans
+            </Button>
+          ) : null}
+        </>
+      }
+    >
+      {shared.isLoading ? (
+        <div className="flex justify-center py-8">
+          <Spinner className="text-brand" />
+        </div>
+      ) : shared.isError || !p ? (
+        <Callout tone="danger">This plan is no longer shared, or the link has expired.</Callout>
+      ) : (
+        <div className="space-y-3">
+          {p.description ? <p className="text-sm text-text-2">{p.description}</p> : null}
+          <ul className="divide-y divide-line rounded-md border border-line">
+            {DAYS.map((d) => {
+              const day = dayOf(p, d);
+              const meals = day?.meals ?? [];
+              const summary = meals.length
+                ? meals
+                    .map((m) => {
+                      const template = typeof m.templateId === 'object' && m.templateId ? m.templateId.name : undefined;
+                      const detail = template || (m.foods?.length ? plural(m.foods.length, 'food') : '');
+                      return detail ? `${mealTypeLabel(m.mealType)}: ${detail}` : mealTypeLabel(m.mealType);
+                    })
+                    .join(' · ')
+                : 'Nothing planned';
+              return (
+                <li key={d} className="flex items-start justify-between gap-3 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-text-1">{humanize(d)}</p>
+                    <p className="truncate text-xs text-text-2">{summary}</p>
+                  </div>
+                  {day?.dayNutrition?.calories ? (
+                    <span className="shrink-0 text-xs font-semibold text-text-2">{Math.round(day.dayNutrition.calories)} kcal</span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function CardSkeletons({ count = 3 }: { count?: number }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading plans">
@@ -780,6 +892,14 @@ export default function WeeklyPlans() {
   const [planModal, setPlanModal] = useState<{ open: boolean; editing: WeeklyPlan | null }>({ open: false, editing: null });
   const [addMealTarget, setAddMealTarget] = useState<{ plan: WeeklyPlan; day: Day } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WeeklyPlan | null>(null);
+  // /meals/plans?shared=<token> comes from share links (lib/shareLinks.ts).
+  const [params, setParams] = useSearchParams();
+  const sharedToken = params.get('shared');
+  const closeShared = () => {
+    const next = new URLSearchParams(params);
+    next.delete('shared');
+    setParams(next, { replace: true });
+  };
 
   const mine = useQuery({
     queryKey: ['weekly-plans', 'mine'],
@@ -1008,6 +1128,7 @@ export default function WeeklyPlans() {
 
       <PlanModal open={planModal.open} editing={planModal.editing} onClose={() => setPlanModal({ open: false, editing: null })} />
       <AddMealModal target={addMealTarget} onClose={() => setAddMealTarget(null)} />
+      <SharedPlanModal token={sharedToken} onClose={closeShared} />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title="Delete this plan?"
