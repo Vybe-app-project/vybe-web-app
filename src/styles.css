@@ -150,7 +150,13 @@ body { margin: 0; }
 }
 
 button, [role='button'], a { -webkit-tap-highlight-color: transparent; }
-button { font: inherit; color: inherit; }
+/* Unlayered rules beat every @layer rule, so an unlayered `color: inherit`
+   here silently overrode `.btn-primary { color: var(--on-brand) }` and every
+   primary button rendered body text (white on mint in dark mode, 1.76:1).
+   Keep the reset inside the base layer where Tailwind's own preflight lives. */
+@layer base {
+  button { font: inherit; color: inherit; }
+}
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 ::selection { background: var(--brand-soft); color: var(--text-1); }
 

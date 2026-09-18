@@ -1,0 +1,13 @@
+# Vybe — the app itself is behind sign-in; only the public pages are worth indexing.
+User-agent: *
+Allow: /$
+Allow: /login
+Allow: /register
+Allow: /support
+Allow: /privacy-policy.html
+Allow: /terms-and-conditions.html
+Allow: /account-deletion.html
+Disallow: /api/
+Disallow: /admin
+Disallow: /uploads/
+Disallow: /

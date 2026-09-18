@@ -24,6 +24,7 @@ for (const relative of [
   'terms-and-conditions.html',
   'account-deletion.html',
   'healthz.json',
+  'robots.txt',
 ]) {
   const target = path.join(dist, relative);
   assert.ok(fs.statSync(target).size > 0, `missing or empty build asset: ${relative}`);

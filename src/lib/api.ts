@@ -29,6 +29,31 @@ export const tokenStore = {
   clearAdmin: () => sessionStorage.removeItem(ADMIN_TOKEN_KEY),
 };
 
+/**
+ * Revoke a bearer token on the server as the user signs out.
+ *
+ * Two things made the obvious `api.post('/auth/logout')` a no-op: the axios
+ * request interceptor reads the token store asynchronously, so clearing the
+ * store on the next line sent the request unauthenticated; and the page then
+ * navigates to /login, which aborts any in-flight XHR. This uses fetch with
+ * `keepalive`, which the browser completes after navigation, and puts the
+ * token on the request explicitly. Best-effort by design: signing out must
+ * never be blocked by the network.
+ */
+export function revokeSession(path: string, token: string | null): void {
+  if (!token) return;
+  try {
+    void fetch(`${API_BASE.replace(/\/$/, '')}${path}`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { Authorization: `Bearer ${token}`, 'X-Platform': 'web', 'Content-Type': 'application/json' },
+      body: '{}',
+    }).catch(() => undefined);
+  } catch {
+    // fetch itself can throw synchronously in exotic embeds; still sign out.
+  }
+}
+
 export const api = axios.create({ baseURL: API_BASE, timeout: 30000 });
 export const adminApi = axios.create({ baseURL: API_BASE, timeout: 30000 });
 

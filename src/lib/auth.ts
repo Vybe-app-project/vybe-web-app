@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, tokenStore, adminApi } from './api';
+import { api, tokenStore, adminApi, revokeSession } from './api';
 
 /**
  * Field names follow the backend `User` model: the photo is `avatar`
@@ -98,8 +98,9 @@ export const useAuth = create<AuthState>((set) => ({
     // request, so every outstanding token dies -- not only this tab's.
     // Best-effort and fire-and-forget: signing out must never be blocked by
     // the network, and a failed revocation still leaves the user signed out
-    // locally, which is the pre-existing behaviour.
-    void api.post('/auth/logout', {}).catch(() => undefined);
+    // locally, which is the pre-existing behaviour. revokeSession() carries
+    // the token explicitly and survives the navigation below; see api.ts.
+    revokeSession('/auth/logout', tokenStore.get());
     tokenStore.clear();
     set({ user: null });
     location.href = '/login';
@@ -109,7 +110,7 @@ export const useAuth = create<AuthState>((set) => ({
     // Same reasoning, via the admin-side route. This matters more for the
     // console, which shares the consumer origin: one leaked admin token is the
     // whole moderation surface.
-    void adminApi.post('/admins/logout', {}).catch(() => undefined);
+    revokeSession('/admins/logout', tokenStore.getAdmin());
     tokenStore.clearAdmin();
     set({ admin: null });
     location.href = '/admin/login';

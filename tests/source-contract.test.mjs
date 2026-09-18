@@ -72,6 +72,14 @@ test('admin sessions are tab-scoped and legacy paths still resolve', () => {
   assert.match(api, /getAdmin: \(\) => sessionStorage\.getItem\(ADMIN_TOKEN_KEY\)/);
   assert.match(api, /setAdmin: \(t: string\) => sessionStorage\.setItem\(ADMIN_TOKEN_KEY, t\)/);
   assert.doesNotMatch(api, /localStorage\.setItem\(ADMIN_TOKEN_KEY/);
+  // Sign-out must revoke on the server: the request has to carry the token
+  // explicitly and survive the navigation that follows (fetch keepalive).
+  assert.match(api, /keepalive: true/);
+  const auth = read('src/lib/auth.ts');
+  assert.match(auth, /revokeSession\('\/auth\/logout', tokenStore\.get\(\)\)/);
+  assert.match(auth, /revokeSession\('\/admins\/logout', tokenStore\.getAdmin\(\)\)/);
+  // The button reset must stay layered or it overrides .btn-primary's colour.
+  assert.match(read('src/styles.css'), /@layer base \{\s*button \{ font: inherit; color: inherit; \}/);
 
   const app = read('src/App.tsx');
   for (const legacy of ['workout-logs', 'livestreams', 'meal-templates', 'health-goals', 'water', 'explore', 'inbox']) {
