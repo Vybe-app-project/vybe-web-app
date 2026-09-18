@@ -343,6 +343,9 @@ export default function PostCard({
   );
   const [bookmarked, setBookmarked] = useState<boolean>(!!post.isBookmarked);
   const [commentCount, setCommentCount] = useState<number>(post.comments?.length || 0);
+  // Comments posted from this card, echoed beneath the composer so the reply
+  // is visibly part of the post instead of vanishing into a counter.
+  const [freshComments, setFreshComments] = useState<{ id: string; text: string }[]>([]);
 
   const refresh = () => invalidate.forEach((key) => qc.invalidateQueries({ queryKey: key }));
 
@@ -395,10 +398,10 @@ export default function PostCard({
       const { data } = await api.post('/posts/comment', { postId: post._id, text });
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data: { comment?: { _id?: string }; _id?: string } | undefined, text) => {
       setCommentText('');
       setCommentCount((n) => n + 1);
-      toast.success('Comment posted');
+      setFreshComments((prev) => [...prev, { id: String(data?.comment?._id ?? data?._id ?? `${Date.now()}`), text }]);
       refresh();
       qc.invalidateQueries({ queryKey: ['post', post._id] });
       qc.invalidateQueries({ queryKey: ['post-comments', post._id] });
@@ -656,6 +659,27 @@ export default function PostCard({
             <Send size={20} />
           </IconButton>
         </form>
+      ) : null}
+
+      {freshComments.length > 0 ? (
+        <div className="relative z-[2] mt-3 space-y-2" aria-live="polite">
+          <ul className="space-y-2">
+            {freshComments.map((c) => (
+              <li key={c.id} className="flex items-start gap-2">
+                <Avatar src={me?.avatar} name={me ? displayName(me) : 'You'} size={28} />
+                <div className="min-w-0 rounded-lg bg-surface-2 px-3 py-2">
+                  <p className="text-xs font-semibold text-text-1">
+                    {me ? displayName(me) : 'You'} <span className="font-normal text-text-3">· just now</span>
+                  </p>
+                  <p className="text-sm text-text-1 [overflow-wrap:anywhere]">{c.text}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <Link to={`${detailHref}#comments`} viewTransition className="inline-block text-xs font-semibold text-brand-text hover:underline">
+            View all {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
+          </Link>
+        </div>
       ) : null}
 
       {footer ? <div className="relative z-[2]">{footer}</div> : null}
