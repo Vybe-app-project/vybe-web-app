@@ -11,10 +11,14 @@ export type PublicUser = {
   fullName?: string;
   avatar?: string;
   bio?: string;
+  /** E-mail confirmed. Every active account has this; it is not a badge. */
   isVerified?: boolean;
+  /** Operator-set verification badge (identity-verified or notable accounts). */
+  isIdentityVerified?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
   isPremium?: boolean;
+  isPrivate?: boolean;
   location?: string;
   fields?: string[];
   coverPicture?: string;
