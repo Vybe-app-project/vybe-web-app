@@ -78,6 +78,13 @@ test('admin sessions are tab-scoped and legacy paths still resolve', () => {
   const auth = read('src/lib/auth.ts');
   assert.match(auth, /revokeSession\('\/auth\/logout', tokenStore\.get\(\)\)/);
   assert.match(auth, /revokeSession\('\/admins\/logout', tokenStore\.getAdmin\(\)\)/);
+  // Tertiary text must stay at or above 4.5:1 on every surface (axe sweep
+  // 2026-09-18): light #526b78 on #e3ece8 = 4.67, dark #869eab on #143247 = 4.75.
+  const css = read('src/styles.css');
+  assert.match(css, /--text-3: #526b78;/);
+  assert.match(css, /--text-3: #869eab;/);
+  // aria-expanded is only valid on a combobox; the search input declares the role.
+  assert.match(read('src/pages/Search.tsx'), /role="combobox"\s+aria-autocomplete="list"/);
   // The button reset must stay layered or it overrides .btn-primary's colour.
   assert.match(read('src/styles.css'), /@layer base \{\s*button \{ font: inherit; color: inherit; \}/);
 

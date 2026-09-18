@@ -205,6 +205,7 @@ export default function Search() {
             placeholder="Search people, posts and hashtags"
             value={term}
             enterKeyHint="search"
+            role="combobox"
             aria-autocomplete="list"
             aria-expanded={showSuggestions}
             aria-controls="search-suggestions"
