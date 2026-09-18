@@ -1,9 +1,11 @@
 import axios, { AxiosError } from 'axios';
+import { invalidateWorkoutDrafts } from './workoutDrafts';
 
 declare module 'axios' {
   interface AxiosRequestConfig {
     /** The auth store handles the result and lets route guards navigate. */
     sessionVerification?: boolean;
+    workoutSessionToken?: string;
   }
 }
 
@@ -29,8 +31,11 @@ try {
 
 export const tokenStore = {
   get: () => localStorage.getItem(TOKEN_KEY),
-  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
+  set: (t: string) => {
+    if (localStorage.getItem(TOKEN_KEY) !== t) invalidateWorkoutDrafts();
+    localStorage.setItem(TOKEN_KEY, t);
+  },
+  clear: () => { invalidateWorkoutDrafts(); localStorage.removeItem(TOKEN_KEY); },
   getAdmin: () => sessionStorage.getItem(ADMIN_TOKEN_KEY),
   setAdmin: (t: string) => sessionStorage.setItem(ADMIN_TOKEN_KEY, t),
   clearAdmin: () => sessionStorage.removeItem(ADMIN_TOKEN_KEY),
@@ -66,6 +71,9 @@ export const adminApi = axios.create({ baseURL: API_BASE, timeout: 30000 });
 
 api.interceptors.request.use((config) => {
   const t = tokenStore.get();
+  if (config.workoutSessionToken && config.workoutSessionToken !== t) {
+    throw new Error('Your account changed. This workout request was not sent.');
+  }
   if (t) config.headers.Authorization = `Bearer ${t}`;
   config.headers['X-Platform'] = 'web';
   return config;
