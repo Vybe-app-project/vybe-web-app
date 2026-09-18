@@ -14,6 +14,7 @@ import {
   subDays,
 } from 'date-fns';
 import { api, errMsg } from '../lib/api';
+import { formatSeconds } from '../lib/duration';
 import {
   Badge,
   Button,
@@ -146,7 +147,10 @@ const formFrom = (log?: LogSeed | null): FormState => {
   };
 };
 
-/** Seed a fresh session from a library workout ("Log this workout"). */
+/**
+ * Seed a fresh session from a library workout ("Log this workout"). Exercise
+ * durations stay in seconds on both sides; the session `duration` is minutes.
+ */
 const seedFromWorkout = (w: SocialWorkout): LogSeed => ({
   name: w.title,
   type: w.category,
@@ -394,7 +398,7 @@ function SessionCard({
             const facts = [
               ex.sets ? `${formatStat(ex.sets)} × ${formatStat(ex.reps ?? 0)}` : ex.reps ? `${formatStat(ex.reps)} reps` : null,
               ex.weight ? `${formatStat(ex.weight)} kg` : null,
-              ex.duration ? `${formatStat(ex.duration)} min` : null,
+              ex.duration ? formatSeconds(ex.duration) : null,
               ex.distance ? `${formatStat(ex.distance)} km` : null,
             ].filter(Boolean) as string[];
             return (
