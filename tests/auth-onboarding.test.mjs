@@ -31,6 +31,7 @@ async function loadModule(relative) {
 
 const redirect = await loadModule('src/lib/authRedirect.ts');
 const drafts = await loadModule('src/lib/authDrafts.ts');
+const a11y = await loadModule('src/lib/a11y.ts');
 
 /* ------------------------------------------------------------------ redirects */
 
@@ -150,6 +151,32 @@ test('a restored step 3 needs a live registration proof; a dead one goes back to
   assert.deepEqual(readRegisterDraft(storage, now), { step: 1, email: 'qa8@mrmosby.com' });
   writeRegisterDraft(storage, { step: 3, email: 'qa8@mrmosby.com', preToken: jwtWithExp(Math.floor(now / 1000) + 2) });
   assert.deepEqual(readRegisterDraft(storage, now), { step: 1, email: 'qa8@mrmosby.com' });
+});
+
+test('a restored step 3 brings the typed name and handle back, sanitised, and step 2 never carries them', () => {
+  const { readRegisterDraft, writeRegisterDraft } = drafts;
+  const now = 1_800_000_000_000;
+  const storage = memoryStorage();
+  const live = jwtWithExp(Math.floor(now / 1000) + 9 * 60);
+
+  writeRegisterDraft(storage, { step: 3, email: 'qa8@mrmosby.com', preToken: live, fullName: '  QA Eight ', username: 'qa8 eight' });
+  assert.deepEqual(readRegisterDraft(storage, now), { step: 3, email: 'qa8@mrmosby.com', preToken: live, sentAt: undefined, fullName: 'QA Eight', username: 'qa8eight' });
+
+  // Oversized or non-string values are clipped or dropped, never thrown on.
+  storage.setItem('vybe.registerDraft', JSON.stringify({ step: 3, email: 'qa8@mrmosby.com', preToken: live, fullName: 'x'.repeat(500), username: 42 }));
+  const clipped = readRegisterDraft(storage, now);
+  assert.equal(clipped.fullName.length, 100);
+  assert.equal('username' in clipped, false);
+
+  // Empty strings are not restored as fields, and a dead proof drops them with the step.
+  writeRegisterDraft(storage, { step: 3, email: 'qa8@mrmosby.com', preToken: live, fullName: '', username: '   ' });
+  assert.deepEqual(readRegisterDraft(storage, now), { step: 3, email: 'qa8@mrmosby.com', preToken: live, sentAt: undefined });
+  writeRegisterDraft(storage, { step: 3, email: 'qa8@mrmosby.com', preToken: jwtWithExp(1), fullName: 'QA Eight', username: 'qa8eight' });
+  assert.deepEqual(readRegisterDraft(storage, now), { step: 1, email: 'qa8@mrmosby.com' });
+
+  // Step 2 has no form text to keep.
+  storage.setItem('vybe.registerDraft', JSON.stringify({ step: 2, email: 'qa8@mrmosby.com', sentAt: now - 1000, fullName: 'QA Eight', username: 'qa8eight' }));
+  assert.deepEqual(readRegisterDraft(storage, now), { step: 2, email: 'qa8@mrmosby.com', sentAt: now - 1000 });
 });
 
 test('the welcome marker is one-shot and survives a storage failure quietly', () => {
@@ -294,7 +321,13 @@ test('sign-up names the field in a 409, checks availability while typing, persis
   assert.doesNotMatch(register, /Unable to create account/);
   // Progress survives a reload: read on mount, written on change, cleared on success.
   assert.match(register, /readRegisterDraft\(sessionStorage\)/);
-  assert.match(register, /writeRegisterDraft\(sessionStorage, \{ step, email: trimmedEmail, sentAt, preToken: preToken \|\| undefined \}\)/);
+  assert.match(register, /writeRegisterDraft\(sessionStorage, \{\s*step,\s*email: trimmedEmail,\s*sentAt,\s*preToken: preToken \|\| undefined,\s*\.\.\.\(step === 3 \? \{ fullName: fullName\.trim\(\) \|\| undefined, username: trimmedUsername \|\| undefined \} : \{\}\),?\s*\}\)/);
+  assert.match(register, /useState\(draft\?\.username \?\? ''\)/);
+  assert.match(register, /useState\(draft\?\.fullName \?\? ''\)/);
+  // The name feeds the suggestions, so it is part of the availability key.
+  assert.match(register, /queryKey: \['username-available', debounced, debouncedName\]/);
+  // Sign-up lands where GuestOnly would: ?next= is honoured by both.
+  assert.match(register, /postLoginTarget\(\{ from, next: new URLSearchParams\(location\.search\)\.get\('next'\) \}\)/);
   assert.match(register, /resendSecondsLeft\(draft\?\.sentAt\)/);
   assert.equal((register.match(/clearRegisterDraft\(sessionStorage\)/g) || []).length, 2, 'cleared on both sign-in and account creation');
   // An existing account signed in through the code says so; the copy sets the expectation.
@@ -365,4 +398,46 @@ test('"Log out" keeps its label for the live suites and says it signs out every 
   assert.match(layout, /const LOGOUT_SCOPE = 'Signs you out on every device';/);
   assert.equal((layout.match(/\{ label: 'Log out', description: LOGOUT_SCOPE, icon: <LogOut size=\{18\} \/>, onSelect: logout, danger: true, divider: true \}/g) || []).length, 2);
   assert.match(layout, /label="Account menu"/);
+});
+
+/* ------------------------------------------------------------------ described-by wiring */
+
+test('a field keeps its error or hint description and appends, never replaces, what the caller adds', () => {
+  const { describedByIds } = a11y;
+  assert.equal(describedByIds('reg-username', undefined, 'Letters, numbers…'), 'reg-username-hint');
+  assert.equal(describedByIds('reg-username', 'That username is taken.', 'Letters, numbers…'), 'reg-username-error');
+  assert.equal(describedByIds('reg-username', undefined, undefined, 'reg-username-status'), 'reg-username-status');
+  // The regression: an error and a caller-supplied status id both survive, error first.
+  assert.equal(describedByIds('reg-username', 'Taken', undefined, 'reg-username-status'), 'reg-username-error reg-username-status');
+  assert.equal(describedByIds('reg-password', 'Too short', 'Use 8+ characters', 'reg-password-rules'), 'reg-password-error reg-password-rules');
+  assert.equal(describedByIds('x', undefined, undefined), undefined);
+  assert.equal(describedByIds('x', undefined, undefined, '   '), undefined);
+  assert.equal(describedByIds('x', undefined, undefined, null), undefined);
+  assert.equal(describedByIds('x', '', 0, undefined), undefined, 'falsy error and hint describe nothing');
+});
+
+test('Input merges a caller aria-describedby with its own, and the username field only names the status while it is rendered', () => {
+  const ui = read('src/components/ui.tsx');
+  assert.match(ui, /import \{ describedByIds \} from '\.\.\/lib\/a11y'/);
+  const input = ui.slice(ui.indexOf('export function Input('), ui.indexOf('export function SearchField('));
+  assert.match(input, /'aria-describedby': describedBy,\s*\.\.\.rest/, 'the caller value must be pulled out of ...rest so it cannot override the computed one');
+  assert.match(input, /aria-describedby=\{describedByIds\(inputId, error, hint, describedBy\)\}/);
+  assert.ok(input.indexOf('aria-describedby={describedByIds(') < input.indexOf('{...rest}'), 'the computed value precedes the spread');
+
+  const register = read('src/pages/Register.tsx');
+  assert.match(register, /aria-describedby=\{!usernameErrorText && availability\.state !== 'idle' \? 'reg-username-status' : undefined\}/);
+  assert.doesNotMatch(register, /aria-describedby=\{usernameErrorText \? undefined : 'reg-username-status'\}/, 'the old always-on status id pointed at an element that was not rendered');
+  // The status line renders under exactly the same condition it is announced.
+  assert.match(register, /\{!usernameErrorText && availability\.state !== 'idle' \? \(\s*<p id="reg-username-status"/);
+});
+
+test('the welcome sheet closes when a link inside it changes the page', () => {
+  const sheet = read('src/pages/WelcomeSheet.tsx');
+  assert.match(sheet, /import \{ useLocation, useSearchParams \} from 'react-router-dom'/);
+  assert.match(sheet, /const \{ pathname \} = useLocation\(\);/);
+  assert.match(sheet, /const openedOn = useRef<string \| null>\(null\);/);
+  assert.match(sheet, /openedOn\.current = pathname;\s*setOpen\(true\);/, 'the page the sheet opened on is recorded as it opens');
+  assert.match(sheet, /if \(open && openedOn\.current !== null && pathname !== openedOn\.current\) setOpen\(false\);/);
+  // People rows keep their real profile links (the live suites use the "Open … profile" names).
+  assert.match(read('src/pages/UserRow.tsx'), /aria-label=\{`Open \$\{displayName\(user\)\}’s profile`\}/);
 });

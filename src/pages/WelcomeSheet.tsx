@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -30,18 +30,29 @@ export default function WelcomeSheet() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const { pathname } = useLocation();
+  // The page the sheet opened on. The sheet lives beside <Layout/> for every
+  // signed-in route, so a link inside it (a person's name or avatar, "See
+  // more") changes the route underneath while the modal, its focus trap and
+  // the body lock would otherwise stay put over the new page.
+  const openedOn = useRef<string | null>(null);
 
   const viaParam = params.get(WELCOME_PARAM) === '1';
   useEffect(() => {
     const viaMarker = takeWelcomePending(sessionStorage);
     if (!viaParam && !viaMarker) return;
+    openedOn.current = pathname;
     setOpen(true);
     if (viaParam) {
       const next = new URLSearchParams(params);
       next.delete(WELCOME_PARAM);
       setParams(next, { replace: true });
     }
-  }, [viaParam, params, setParams]);
+  }, [viaParam, params, setParams, pathname]);
+
+  useEffect(() => {
+    if (open && openedOn.current !== null && pathname !== openedOn.current) setOpen(false);
+  }, [open, pathname]);
 
   const people = useQuery({
     queryKey: ['welcome-people'],

@@ -116,15 +116,18 @@ type Availability =
  */
 function useUsernameAvailability(username: string, fullName: string, enabled: boolean): Availability {
   const debounced = useDebounced(username, 300);
+  // The name feeds the suggestions (first.last), so it is part of the key:
+  // a name typed after the handle refreshes them instead of leaving stale ones.
+  const debouncedName = useDebounced(fullName.trim(), 300);
   const valid = enabled && debounced.length >= 3 && !usernameError(debounced);
   const query = useQuery({
-    queryKey: ['username-available', debounced],
+    queryKey: ['username-available', debounced, debouncedName],
     enabled: valid,
     staleTime: 30_000,
     retry: false,
     queryFn: async () => {
       const { data } = await api.get('/auth/username-available', {
-        params: { username: debounced, ...(fullName.trim() ? { fullName: fullName.trim() } : {}) },
+        params: { username: debounced, ...(debouncedName ? { fullName: debouncedName } : {}) },
       });
       return data as { available: boolean; suggestions?: string[] };
     },
@@ -146,7 +149,7 @@ export default function Register() {
   const toast = useToast();
   const setUser = useAuth((s) => s.setUser);
   const from = (location.state as FromState)?.from;
-  const target = postLoginTarget({ from, next: null });
+  const target = postLoginTarget({ from, next: new URLSearchParams(location.search).get('next') });
 
   // Progress survives a reload or a trip to Mail for the code (see authDrafts).
   const [draft] = useState(() => readRegisterDraft(sessionStorage));
@@ -156,8 +159,8 @@ export default function Register() {
   const [preToken, setPreToken] = useState(draft?.preToken ?? '');
   const [sentAt, setSentAt] = useState<number | undefined>(draft?.sentAt);
 
-  const [username, setUsername] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState(draft?.username ?? '');
+  const [fullName, setFullName] = useState(draft?.fullName ?? '');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -185,8 +188,14 @@ export default function Register() {
   }, []);
 
   useEffect(() => {
-    writeRegisterDraft(sessionStorage, { step, email: trimmedEmail, sentAt, preToken: preToken || undefined });
-  }, [step, trimmedEmail, sentAt, preToken]);
+    writeRegisterDraft(sessionStorage, {
+      step,
+      email: trimmedEmail,
+      sentAt,
+      preToken: preToken || undefined,
+      ...(step === 3 ? { fullName: fullName.trim() || undefined, username: trimmedUsername || undefined } : {}),
+    });
+  }, [step, trimmedEmail, sentAt, preToken, fullName, trimmedUsername]);
 
   function setErrors(next: FieldErrors, order: FieldKey[]): boolean {
     setFieldError(next);
@@ -489,7 +498,7 @@ export default function Register() {
                 leading={<span className="text-sm font-semibold">@</span>}
                 hint={usernameErrorText || availability.state !== 'idle' ? undefined : USERNAME_HINT}
                 error={usernameErrorText}
-                aria-describedby={usernameErrorText ? undefined : 'reg-username-status'}
+                aria-describedby={!usernameErrorText && availability.state !== 'idle' ? 'reg-username-status' : undefined}
                 value={username}
                 onChange={(e) => {
                   setUsername(e.target.value.replace(/\s/g, ''));

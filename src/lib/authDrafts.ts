@@ -34,6 +34,17 @@ export type RegisterDraft = {
   sentAt?: number;
   /** The 10-minute registration proof (step 3). */
   preToken?: string;
+  /** What was typed on step 3 so a reload does not empty the form (never the password). */
+  fullName?: string;
+  username?: string;
+};
+
+const MAX_FULL_NAME = 100;
+const MAX_USERNAME = 30;
+const typedText = (value: unknown, max: number): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().slice(0, max);
+  return trimmed || undefined;
 };
 
 /** Expiry of a JWT in ms since the epoch, read without verifying (display only). */
@@ -79,7 +90,16 @@ export function readRegisterDraft(storage: StorageLike | null | undefined, now =
     const expiry = jwtExpiryMs(parsed.preToken);
     // Five seconds of slack so a proof that dies mid-submit is not restored.
     if (typeof parsed.preToken === 'string' && expiry !== null && expiry > now + 5_000) {
-      return { step: 3, email, preToken: parsed.preToken, sentAt: typeof parsed.sentAt === 'number' ? parsed.sentAt : undefined };
+      const fullName = typedText(parsed.fullName, MAX_FULL_NAME);
+      const username = typedText(parsed.username, MAX_USERNAME)?.replace(/\s/g, '');
+      return {
+        step: 3,
+        email,
+        preToken: parsed.preToken,
+        sentAt: typeof parsed.sentAt === 'number' ? parsed.sentAt : undefined,
+        ...(fullName ? { fullName } : {}),
+        ...(username ? { username } : {}),
+      };
     }
     return { step: 1, email };
   }
