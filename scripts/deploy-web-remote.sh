@@ -109,4 +109,8 @@ fi
 # The archive has done its job; the immutable release directory is the record.
 rm -f -- "$archive"
 
+# Each release builds in BuildKit and leaves cache behind; keep a week of it
+# for fast rebuilds and drop the rest. Release directories are untouched.
+docker builder prune -f --filter until=168h >/dev/null 2>&1 || true
+
 echo "published Vybe web commit $commit_sha"
