@@ -307,6 +307,13 @@ input[type='range'] { accent-color: var(--brand); }
 .motion-pulse { animation: pulse-spring var(--duration-3) var(--ease-spring); }
 .motion-count { animation: count-roll var(--duration-2) var(--ease-out) both; }
 
+/* Chat typing indicator: three dots breathing in turn (delays set inline). */
+@keyframes typing-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-3px); opacity: 1; } }
+.typing-dot { animation: typing-dot 1.2s var(--ease-out) infinite both; }
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot { animation: none; opacity: 0.7; }
+}
+
 /* Route transitions (document.startViewTransition). The shell keeps its own
    snapshot names so only the page content fades and slides. */
 ::view-transition-old(root) { animation: vt-out var(--duration-2) var(--ease-in) both; }

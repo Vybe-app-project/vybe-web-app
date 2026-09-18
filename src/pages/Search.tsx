@@ -21,6 +21,7 @@ import {
 import { Clock, Hash, Search as SearchIcon, X } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
+import { usePeopleSearch } from './PeopleSearch';
 
 type SearchType = 'all' | 'users' | 'posts' | 'hashtags';
 
@@ -187,7 +188,11 @@ export default function Search() {
   const posts = results.data?.results?.posts || [];
   const hashtags = results.data?.results?.hashtags || [];
   const nothingFound = results.isSuccess && !users.length && !posts.length && !hashtags.length;
-  const showSuggestions = focused && debounced.length >= 2 && !!suggestions.data?.length;
+  // People tab: results as you type (the same typeahead as New message), no
+  // submit needed. Other tabs keep the suggestion dropdown.
+  const liveTyping = type === 'users' && term.trim().length >= 1 && term.trim() !== activeQuery;
+  const livePeople = usePeopleSearch(term, { enabled: liveTyping });
+  const showSuggestions = focused && debounced.length >= 2 && !!suggestions.data?.length && !liveTyping;
 
   return (
     <>
@@ -268,8 +273,27 @@ export default function Search() {
           />
         ) : null}
 
+        {/* ---------- People tab: live typeahead ---------- */}
+        {liveTyping ? (
+          <section aria-label={`People matching ${term.trim()}`} aria-live="polite" aria-busy={livePeople.isFetching || undefined} className="space-y-2">
+            <SubHeading>People</SubHeading>
+            {livePeople.isPending && !livePeople.data ? (
+              <>
+                <UserRowSkeleton />
+                <UserRowSkeleton />
+              </>
+            ) : livePeople.isError ? (
+              <ErrorState title="Search failed" error={livePeople.error} retry={() => void livePeople.refetch()} />
+            ) : livePeople.data?.length ? (
+              livePeople.data.map((u) => <UserRow key={u._id} user={u as PublicUser} />)
+            ) : livePeople.settled ? (
+              <EmptyState variant="no-results" size="sm" title={`No one matches “${term.trim()}”`} message="Check the spelling, or try their @username." />
+            ) : null}
+          </section>
+        ) : null}
+
         {/* ---------- landing state: recent + trending ---------- */}
-        {!activeQuery ? (
+        {!activeQuery && !liveTyping ? (
           <div className="space-y-8">
             <section aria-labelledby="recent-heading">
               <SubHeading

@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { PublicUser } from '../lib/hooks';
+import { getSocket } from '../lib/socket';
 import {
   Avatar,
   Brand,
@@ -24,6 +25,7 @@ import {
   formatStat,
   useOnline,
   usePageChromeStore,
+  useToast,
 } from './ui';
 import type { MenuItem } from './ui';
 import {
@@ -273,6 +275,87 @@ export function useUnreadNotifications(enabled = true) {
 
 const badgeText = (n?: number, more?: boolean): string | number | null => (!n ? null : more ? `${n}+` : n);
 
+type RealtimeMessage = {
+  _id?: string;
+  text?: string;
+  sender?: { _id?: string; fullName?: string; username?: string } | string;
+  chatRoom?: string | { _id?: string; isGroup?: boolean; roomName?: string };
+  targetId?: string;
+  isGroup?: boolean;
+  media?: unknown[];
+};
+
+const senderIdOf = (m: RealtimeMessage): string => (typeof m.sender === 'string' ? m.sender : m.sender?._id ? String(m.sender._id) : '');
+const roomIdOf = (m: RealtimeMessage): string => (typeof m.chatRoom === 'string' ? m.chatRoom : m.chatRoom?._id ? String(m.chatRoom._id) : m.targetId || '');
+
+/**
+ * App-wide realtime bookkeeping. The chat socket is connected on every page,
+ * but until now only the Messages page listened to it, so the Inbox badge in
+ * the nav waited for its 60 s poll when a message arrived while you were on
+ * the feed. This keeps the unread count and room list fresh everywhere and
+ * offers an "Open" toast for messages that land while you are elsewhere.
+ * The Messages page keeps its own listeners for the thread itself.
+ */
+function useRealtimeSync(enabled: boolean, meId?: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
+  const meRef = useRef(meId);
+  meRef.current = meId;
+
+  useEffect(() => {
+    if (!enabled) return;
+    const socket = getSocket();
+    if (!socket) return;
+    const refreshCounts = () => {
+      qc.invalidateQueries({ queryKey: ['unreadChats'] });
+      qc.invalidateQueries({ queryKey: ['chatRooms'] });
+    };
+    const onMessage = (m: RealtimeMessage) => {
+      refreshCounts();
+      const from = senderIdOf(m);
+      if (!from || from === meRef.current) return;
+      const roomId = roomIdOf(m);
+      // On the messaging pages the list row and thread update by themselves.
+      if (pathRef.current.startsWith('/messages')) return;
+      const sender = typeof m.sender === 'object' && m.sender ? m.sender : undefined;
+      const name = sender?.fullName?.trim() || sender?.username || 'Someone';
+      const room = typeof m.chatRoom === 'object' && m.chatRoom ? m.chatRoom : undefined;
+      const where = (m.isGroup || room?.isGroup) && room?.roomName ? ` in ${room.roomName}` : '';
+      const preview = m.text ? `: ${m.text.length > 60 ? `${m.text.slice(0, 57)}…` : m.text}` : Array.isArray(m.media) && m.media.length ? ': sent a photo' : '';
+      toast.info(`${name}${where}${preview}`, {
+        duration: 6000,
+        action: roomId ? { label: 'Open', onClick: () => navigate(`/messages/${roomId}`, { viewTransition: true }) } : undefined,
+      });
+    };
+    const onRooms = () => qc.invalidateQueries({ queryKey: ['chatRooms'] });
+    let everConnected = socket.connected;
+    const onConnect = () => {
+      if (everConnected) refreshCounts();
+      everConnected = true;
+    };
+    socket.on('connect', onConnect);
+    socket.on('message', onMessage);
+    socket.on('newMessage', onMessage);
+    socket.on('newGroupChat', refreshCounts);
+    socket.on('chatRoomUpdate', onRooms);
+    socket.on('messageDeleted', refreshCounts);
+    socket.on('messageRead', onRooms);
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('message', onMessage);
+      socket.off('newMessage', onMessage);
+      socket.off('newGroupChat', refreshCounts);
+      socket.off('chatRoomUpdate', onRooms);
+      socket.off('messageDeleted', refreshCounts);
+      socket.off('messageRead', onRooms);
+    };
+  }, [enabled, qc, toast, navigate]);
+}
+
 /* ================================================================== pieces */
 
 function SkipLink() {
@@ -498,6 +581,7 @@ function DesktopTopBar({ notifications }: { notifications: string | number | nul
 function MobileTopBar({
   meta,
   title,
+  titleNode,
   back,
   actions,
   chats,
@@ -505,6 +589,7 @@ function MobileTopBar({
 }: {
   meta: RouteMeta;
   title: string;
+  titleNode?: ReactNode;
   back: boolean | string | undefined;
   actions: ReactNode;
   chats: string | number | null;
@@ -548,7 +633,7 @@ function MobileTopBar({
                 <ArrowLeft size={22} />
               </IconButton>
             ) : null}
-            <h1 className={cx('type-heading min-w-0 flex-1 truncate text-text-1', showBack ? 'text-md' : 'pl-2 text-xl')}>{title}</h1>
+            <h1 className={cx('type-heading flex min-w-0 flex-1 items-center text-text-1', showBack ? 'text-md' : 'pl-2 text-xl', !titleNode && 'truncate')}>{titleNode ?? title}</h1>
           </>
         )}
         <div className="ml-auto flex shrink-0 items-center">
@@ -772,6 +857,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
 
   const unreadChats = useUnreadChats(!!user);
   const unreadNotifs = useUnreadNotifications(!!user);
+  useRealtimeSync(!!user, user?._id);
   const chats = badgeText(unreadChats.data);
   const notifications = badgeText(unreadNotifs.data?.count, unreadNotifs.data?.more);
   const homeTotal = (unreadChats.data ?? 0) + (unreadNotifs.data?.count ?? 0);
@@ -794,7 +880,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
       <div className="min-w-0 flex-1 overflow-x-clip">
         {!chrome?.hideTopBar ? (
           <>
-            <MobileTopBar meta={meta} title={title} back={chrome?.back} actions={chrome?.actions} chats={chats} notifications={notifications} />
+            <MobileTopBar meta={meta} title={title} titleNode={chrome?.titleNode} back={chrome?.back} actions={chrome?.actions} chats={chats} notifications={notifications} />
             <DesktopTopBar notifications={notifications} />
           </>
         ) : null}

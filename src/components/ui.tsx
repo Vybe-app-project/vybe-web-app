@@ -17,6 +17,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
+  Ref,
   RefObject,
   TextareaHTMLAttributes,
 } from 'react';
@@ -290,6 +291,8 @@ export function ThemeControl({ className, label = 'Appearance' }: { className?: 
 export type PageChrome = {
   path: string;
   title?: string;
+  /** Rendered in place of `title` in the phone top bar; `title` still names the document. */
+  titleNode?: ReactNode;
   subtitle?: string;
   /** `true` = history back with a sensible fallback; a string = explicit target. */
   back?: boolean | string;
@@ -722,6 +725,8 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   /** Small count pill in the top-right corner. */
   badge?: number | string | null;
   to?: string;
+  /** Router state for `to` links. */
+  state?: unknown;
 };
 
 const ICON_BUTTON_VARIANT = {
@@ -738,6 +743,7 @@ export function IconButton({
   active = false,
   badge,
   to,
+  state,
   className,
   children,
   type = 'button',
@@ -758,7 +764,7 @@ export function IconButton({
   );
   if (to) {
     return (
-      <Link to={to} viewTransition aria-label={label} title={label} className={cls}>
+      <Link to={to} state={state} viewTransition aria-label={label} title={label} className={cls}>
         {inner}
       </Link>
     );
@@ -845,8 +851,9 @@ export function Input({
   id,
   leading,
   trailing,
+  ref,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & FieldProps & { leading?: ReactNode; trailing?: ReactNode }) {
+}: InputHTMLAttributes<HTMLInputElement> & FieldProps & { leading?: ReactNode; trailing?: ReactNode; ref?: Ref<HTMLInputElement> }) {
   const auto = useId();
   const inputId = id || auto;
   return (
@@ -856,6 +863,7 @@ export function Input({
           <span className="pointer-events-none absolute inset-y-0 left-3 inline-flex items-center text-text-3">{leading}</span>
         ) : null}
         <input
+          ref={ref}
           id={inputId}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined}
