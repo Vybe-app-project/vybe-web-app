@@ -33,10 +33,16 @@ export function useLiveNotifications(enabled: boolean): void {
     };
 
     // Anything that happened while the socket was down arrives on the next poll
-    // at the latest; a reconnect asks straight away.
+    // at the latest; a reconnect asks straight away. The very first connect of
+    // a page load skips the refetch (the queries have just run) unless they
+    // failed, which is the case when the page was opened while the API was
+    // unreachable and the socket only connects once it is back.
     let everConnected = socket.connected;
     const onConnect = () => {
-      if (everConnected) void qc.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
+      void qc.invalidateQueries({
+        queryKey: NOTIFICATIONS_KEY,
+        ...(everConnected ? {} : { predicate: (query) => query.state.status === 'error' }),
+      });
       everConnected = true;
     };
 

@@ -160,6 +160,9 @@ test('the shell subscribes to the socket for the whole session and reads the exa
   assert.match(live, /socket\.on\('notification', onNotification\)/);
   assert.match(live, /socket\.off\('notification', onNotification\)/, 'listeners are removed on unmount');
   assert.match(live, /prependNotification\(old, incoming\)/);
+  // A page opened while the API was down must refill once the socket connects.
+  assert.match(live, /predicate: \(query\) => query\.state\.status === 'error'/);
+  assert.match(layout, /if \(sessionStale\) return;\s*void qc\.invalidateQueries\(\{ predicate: \(query\) => query\.state\.status === 'error' \}\);/s);
   assert.match(live, /bumpUnreadCount\(old, incoming\)/);
   // The 60 s poll stays as the fallback for a socket that never connects.
   assert.match(layout, /refetchInterval: 60_000/);

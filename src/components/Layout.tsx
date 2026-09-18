@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -771,12 +771,21 @@ export default function Layout({ children }: { children?: ReactNode }) {
   const storedChrome = usePageChromeStore((s) => s.chrome);
   const chrome = storedChrome && storedChrome.path === pathname ? storedChrome : null;
   const { user } = useAuth();
+  const sessionStale = useAuth((s) => s.sessionStale);
+  const qc = useQueryClient();
 
   const unreadChats = useUnreadChats(!!user);
   const unreadNotifs = useUnreadNotifications(!!user);
   // Open the shared socket for the whole session so likes, comments and
   // follows land in the inbox and on the bell as they happen.
   useLiveNotifications(!!user);
+  // When a session restored from the offline snapshot is verified again, every
+  // query that failed while the API was unreachable is retried at once rather
+  // than on its next poll, so the shell fills back in without a "Try again".
+  useEffect(() => {
+    if (sessionStale) return;
+    void qc.invalidateQueries({ predicate: (query) => query.state.status === 'error' });
+  }, [sessionStale, qc]);
   const chats = badgeText(unreadChats.data);
   const notifications = badgeText(unreadNotifs.data?.count, unreadNotifs.data?.more);
   const homeTotal = (unreadChats.data ?? 0) + (unreadNotifs.data?.count ?? 0);
