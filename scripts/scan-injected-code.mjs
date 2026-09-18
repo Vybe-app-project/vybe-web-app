@@ -103,7 +103,10 @@ const AUTORUN = [
  * smuggling trick generically, independent of any campaign indicator.
  */
 const INTERPRETER_ON_ASSET =
-  /\b(?:node|nodejs|python3?|ruby|perl|sh|bash|zsh|deno|bun|osascript)\b[^"'\n;|&]{0,120}?\.(?:woff2?|ttf|otf|eot|png|jpe?g|gif|ico|svg|mp4|webp|bmp|tiff?)\b/i;
+  // The interpreter must be followed by whitespace, i.e. actually invoked with
+  // an argument. Without that, an asset merely NAMED after an interpreter --
+  // "ruby.png" in a README -- matched as though `ruby` were running it.
+  /\b(?:node|nodejs|python3?|ruby|perl|sh|bash|zsh|deno|bun|osascript)\s+[^"'\n;|&]{0,120}?\.(?:woff2?|ttf|otf|eot|png|jpe?g|gif|ico|svg|mp4|webp|bmp|tiff?)\b/i;
 
 const CONFIG_RE =
   /^(babel|metro|vite|tailwind|postcss|jest|next|rollup|webpack|svelte|nuxt|vue|astro|craco|karma|cypress|playwright)\.config\.(js|cjs|mjs|ts|mts|cts)$/;
@@ -159,6 +162,16 @@ const SKIP_DIRS = new Set([
   '__pycache__',
   '.gradle',
 ]);
+
+/**
+ * Third-party dependency trees identified by PATH rather than basename, so
+ * that `vendor/` itself stays scanned (this repository carries a hand-written
+ * package override there) while Bundler's gem install location under it does
+ * not. Those gems come from rubygems.org, are pinned by Gemfile.lock, and
+ * contain legitimate deeply-indented Ruby heredocs that trip the padding
+ * rule. Matched against the path relative to the scan root.
+ */
+const SKIP_PATH_PREFIXES = ['vendor/bundle/', '.bundle/'];
 
 const TEXT_EXT = new Set([
   '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts',
@@ -269,6 +282,11 @@ function walk(dir, acc = []) {
     const p = join(dir, e.name);
     if (e.isDirectory()) {
       if (SKIP_DIRS.has(e.name)) continue;
+      // Matched as a path-segment sequence anywhere in the path, not only at
+      // the scan root, so a nested package (apps/mobile/vendor/bundle/) or an
+      // explicit sub-path argument is handled the same way.
+      const rel = '/' + relative(ROOT, p).split(sep).join('/') + '/';
+      if (SKIP_PATH_PREFIXES.some((prefix) => rel.includes('/' + prefix))) continue;
       walk(p, acc);
     } else if (e.isFile()) {
       acc.push(p);
