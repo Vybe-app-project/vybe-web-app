@@ -38,10 +38,9 @@ fields are not posted back as set evidence.
 
 A conflict refreshes the history query **without replacing the open draft**.
 Copy any desired edits before deliberately closing/reopening the refreshed
-record. No automatic overwrite or conflict merging. A network error permits
-retry using the existing Save/Log button. As before, POST is not idempotent:
-if a response is lost after a successful save, inspect history before retrying
-to avoid duplicate sessions. This is not an offline/durable mutation queue.
+record. No automatic overwrite or conflict merging. The subsequent bounded
+draft package adds account-scoped IndexedDB and create request IDs; see
+`workout-drafts.md` for durable recovery, immutable retries and local discard.
 
 Existing `/workouts/logs`, `?log=1`, `?from=<workoutId>`, log-again and confirmed
 delete workflows remain. Older aggregate rows still save without a set version.
@@ -109,7 +108,7 @@ long content and small/large-text layouts, keyboard/screen-reader operation,
 and old-client 409 messaging. The current history fetch limit (100) and
 session-level analytics remain unchanged.
 
-**Rest timer and persistence are deferred.** A reliable timer needs an
-account-scoped durable active-session draft, elapsed-time recovery, navigation/
-refresh semantics and interruption tests. This package has no resumable active
-runner, timer, offline outbox, PRs, set types, supersets/RPE or device sync.
+The subsequent bounded draft package supplies explicit local recovery and a
+deadline-based optional rest timer; see `workout-drafts.md`. Generic offline
+outbox, PRs, set types, supersets/RPE, device sync and native notifications remain
+deferred. Neither package completes W5.
