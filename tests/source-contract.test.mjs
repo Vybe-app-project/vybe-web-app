@@ -152,6 +152,21 @@ test('the admin catalog manager is routed, in the console nav, and talks to the 
     assert.ok(api.includes(`'${route}'`), `missing literal ${route}`);
   }
   assert.match(api, /purpose: 'media'/);
+
+  // The editors seed their form only from a fetch that settled during this
+  // mount (never the cached copy TanStack serves while it refetches) and diff
+  // against the record that seeded it; tests/admin-catalog-editor-seed.test.mjs
+  // shows why. Back/Cancel/save return to the list view the admin came from.
+  for (const [file, kind] of [['src/pages/admin/AdminCatalogWorkout.tsx', 'workout'], ['src/pages/admin/AdminCatalogPlan.tsx', 'plan']]) {
+    const editor = read(file);
+    assert.match(editor, /staleTime: 0/, `${file}: the detail query must refetch on every mount`);
+    assert.match(editor, /seedableRecord\(detail\)/, `${file}: the draft must wait for a settled fetch`);
+    assert.match(editor, new RegExp(`${kind}SessionBody\\(current\\)`), `${file}: the body must be diffed against the seeded baseline`);
+    assert.doesNotMatch(editor, /build(?:Workout|Plan)Body\(/, `${file}: never diff against the live query result`);
+    assert.match(editor, /catalogReturnPath\(location\.state/, `${file}: return to the list view the admin came from`);
+  }
+  assert.match(read('src/pages/admin/AdminCatalog.tsx'), /catalogReturnState\(location\)/);
+
   const snapshot = JSON.parse(read('contracts/backend-routes.json'));
   const pinned = new Set(snapshot.routes.map((route) => `${route.method} ${route.path}`));
   for (const route of [

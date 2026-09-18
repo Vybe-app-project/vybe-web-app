@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Badge,
@@ -33,6 +33,7 @@ import { CatalogThumb, CategoryBadge, LevelBadge, fmtDate, fmtKcal, fmtMinutes }
 import {
   LIMITS,
   PAGE_SIZES,
+  catalogReturnState,
   listStateParams,
   pageCount,
   parseListState,
@@ -60,10 +61,22 @@ const TABS = [
 const LIMIT_OPTIONS = PAGE_SIZES.map((n) => ({ value: String(n), label: `${n} rows` }));
 
 type DeleteTarget = { kind: 'workout'; item: CatalogWorkout } | { kind: 'plan'; item: CatalogPlan };
+/** Attached to every editor link so the editor's Back/Cancel/save return to this exact list view. */
+type ReturnState = ReturnType<typeof catalogReturnState>;
 
 /* --------------------------------------------------------------- tables */
 
-function WorkoutsTable({ rows, busy, onDelete }: { rows: CatalogWorkout[]; busy: boolean; onDelete: (w: CatalogWorkout) => void }) {
+function WorkoutsTable({
+  rows,
+  busy,
+  returnState,
+  onDelete,
+}: {
+  rows: CatalogWorkout[];
+  busy: boolean;
+  returnState: ReturnState;
+  onDelete: (w: CatalogWorkout) => void;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="admin-table min-w-[880px]">
@@ -89,6 +102,7 @@ function WorkoutsTable({ rows, busy, onDelete }: { rows: CatalogWorkout[]; busy:
                   <div className="min-w-0">
                     <Link
                       to={workoutEditorPath(w._id)}
+                      state={returnState}
                       className="block max-w-[26rem] truncate font-semibold text-text-1 hover:underline hover:underline-offset-3"
                     >
                       {w.title}
@@ -107,7 +121,7 @@ function WorkoutsTable({ rows, busy, onDelete }: { rows: CatalogWorkout[]; busy:
               <td className="tabular whitespace-nowrap text-text-2">{fmtDate(w.createdAt)}</td>
               <td className="text-right">
                 <div className="inline-flex items-center gap-1">
-                  <ButtonLink to={workoutEditorPath(w._id)} size="sm" variant="ghost" icon={<Edit size={16} />} aria-label={`Edit ${w.title}`}>
+                  <ButtonLink to={workoutEditorPath(w._id)} state={returnState} size="sm" variant="ghost" icon={<Edit size={16} />} aria-label={`Edit ${w.title}`}>
                     Edit
                   </ButtonLink>
                   <Button size="sm" variant="danger" icon={<Trash size={16} />} aria-label={`Delete ${w.title}`} onClick={() => onDelete(w)}>
@@ -123,7 +137,17 @@ function WorkoutsTable({ rows, busy, onDelete }: { rows: CatalogWorkout[]; busy:
   );
 }
 
-function PlansTable({ rows, busy, onDelete }: { rows: CatalogPlan[]; busy: boolean; onDelete: (p: CatalogPlan) => void }) {
+function PlansTable({
+  rows,
+  busy,
+  returnState,
+  onDelete,
+}: {
+  rows: CatalogPlan[];
+  busy: boolean;
+  returnState: ReturnState;
+  onDelete: (p: CatalogPlan) => void;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="admin-table min-w-[820px]">
@@ -148,6 +172,7 @@ function PlansTable({ rows, busy, onDelete }: { rows: CatalogPlan[]; busy: boole
                   <div className="min-w-0">
                     <Link
                       to={planEditorPath(p._id)}
+                      state={returnState}
                       className="block max-w-[26rem] truncate font-semibold text-text-1 hover:underline hover:underline-offset-3"
                     >
                       {p.title}
@@ -163,7 +188,7 @@ function PlansTable({ rows, busy, onDelete }: { rows: CatalogPlan[]; busy: boole
               <td className="tabular whitespace-nowrap text-text-2">{fmtDate(p.createdAt)}</td>
               <td className="text-right">
                 <div className="inline-flex items-center gap-1">
-                  <ButtonLink to={planEditorPath(p._id)} size="sm" variant="ghost" icon={<Edit size={16} />} aria-label={`Edit ${p.title}`}>
+                  <ButtonLink to={planEditorPath(p._id)} state={returnState} size="sm" variant="ghost" icon={<Edit size={16} />} aria-label={`Edit ${p.title}`}>
                     Edit
                   </ButtonLink>
                   <Button size="sm" variant="danger" icon={<Trash size={16} />} aria-label={`Delete ${p.title}`} onClick={() => onDelete(p)}>
@@ -262,8 +287,10 @@ function DeleteCatalogDialog({ target, onClose, onDeleted }: { target: DeleteTar
 
 export default function AdminCatalog() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const state = parseListState(searchParams);
   const { tab, search, page, limit } = state;
+  const returnState = catalogReturnState(location);
   const [searchInput, setSearchInput] = useState(search);
   const [target, setTarget] = useState<DeleteTarget | null>(null);
 
@@ -322,7 +349,7 @@ export default function AdminCatalog() {
           ) : null
         }
         actions={
-          <ButtonLink to={newPath} variant="primary" icon={<Plus size={18} />}>
+          <ButtonLink to={newPath} state={returnState} variant="primary" icon={<Plus size={18} />}>
             {tab === 'workouts' ? 'New workout' : 'New plan'}
           </ButtonLink>
         }
@@ -397,21 +424,21 @@ export default function AdminCatalog() {
               icon={<Dumbbell size={26} />}
               title="No premade workouts yet"
               message="Premade workouts are the official sessions in the app’s workout library, authored by staff rather than members. The first one you save appears there right away."
-              action={{ label: 'New workout', to: workoutEditorPath('new'), icon: <Plus size={18} /> }}
+              action={{ label: 'New workout', to: workoutEditorPath('new'), state: returnState, icon: <Plus size={18} /> }}
             />
           ) : (
             <EmptyState
               icon={<Layers size={26} />}
               title="No premade plans yet"
               message="Premade plans string premade workouts into a week-by-week schedule members can follow. Build the workouts first, then arrange them into a plan."
-              action={{ label: 'New plan', to: planEditorPath('new'), icon: <Plus size={18} /> }}
+              action={{ label: 'New plan', to: planEditorPath('new'), state: returnState, icon: <Plus size={18} /> }}
               secondaryAction={{ label: 'Go to workouts', onClick: () => update({ tab: 'workouts', page: 1 }), variant: 'ghost' }}
             />
           )
         ) : tab === 'workouts' ? (
-          <WorkoutsTable rows={workouts.data?.items ?? []} busy={workouts.isFetching} onDelete={(item) => setTarget({ kind: 'workout', item })} />
+          <WorkoutsTable rows={workouts.data?.items ?? []} busy={workouts.isFetching} returnState={returnState} onDelete={(item) => setTarget({ kind: 'workout', item })} />
         ) : (
-          <PlansTable rows={plans.data?.items ?? []} busy={plans.isFetching} onDelete={(item) => setTarget({ kind: 'plan', item })} />
+          <PlansTable rows={plans.data?.items ?? []} busy={plans.isFetching} returnState={returnState} onDelete={(item) => setTarget({ kind: 'plan', item })} />
         )}
 
         {rowCount > 0 ? (

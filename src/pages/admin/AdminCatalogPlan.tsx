@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Badge,
@@ -53,22 +53,27 @@ import {
 } from './catalogFields';
 import {
   LIMITS,
-  buildPlanBody,
   catalogErrorDetails,
-  catalogListPath,
+  catalogReturnPath,
   entryMoveability,
   estimatedPlanCalories,
+  isMissingRecordError,
+  isObjectId,
   moveEntryWithinDay,
   nextDraftKey,
   orderedEntries,
   pageCount,
-  planDraftFrom,
+  parsePlanWeeks,
+  planSession,
+  planSessionBody,
   planWeeks,
   plural,
   rangeLabel,
   reslotEntry,
+  seedableRecord,
   validatePlanDraft,
   type CatalogErrorDetails,
+  type EditorSession,
   type PlanDraft,
   type PlanEntryDraft,
 } from './catalogRules';
@@ -77,8 +82,10 @@ const LEVEL_OPTIONS = CATALOG_LEVELS.map((l) => ({ value: l, label: humanize(l) 
 const DAY_OPTIONS = Array.from({ length: LIMITS.day.max }, (_, i) => ({ value: String(i + 1), label: `Day ${i + 1}` }));
 const weekOptions = (weeks: number) => Array.from({ length: weeks }, (_, i) => ({ value: String(i + 1), label: `Week ${i + 1}` }));
 const FORM_ID = 'catalog-plan-form';
-const BACK_TO = catalogListPath('plans');
+const ADD_WORKOUTS_ID = 'catalog-add-workouts';
 const PICKER_LIMIT = 20;
+
+type Session = EditorSession<CatalogPlan, PlanDraft>;
 
 const toRef = (workout: CatalogWorkout): PlanWorkoutRef => ({
   _id: workout._id,
@@ -370,19 +377,29 @@ export default function AdminCatalogPlan() {
   const { planId } = useParams();
   const isNew = !planId || planId === 'new';
   const id = isNew ? '' : (planId as string);
+  const validId = isNew || isObjectId(id);
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const toast = useToast();
   const online = useOnline();
+  const backTo = catalogReturnPath(location.state, 'plans');
 
+  // staleTime 0: every mount refetches, and the draft below is seeded only
+  // once that fetch settles (see seedableRecord), never from the cached copy.
   const detail = useQuery({
     queryKey: catalogKeys.plan(id),
     queryFn: () => getCatalogPlan(id),
-    enabled: !isNew,
+    enabled: !isNew && validId,
+    staleTime: 0,
   });
-  const original: CatalogPlan | null = isNew ? null : detail.data ?? null;
 
-  const [draft, setDraft] = useState<PlanDraft | null>(() => (isNew ? planDraftFrom(null) : null));
+  const [session, setSession] = useState<Session | null>(() => (isNew ? planSession('', null) : null));
+  const current = session && session.id === id ? session : null;
+  const draft = current?.draft ?? null;
+  const baseline = current?.baseline ?? null;
+  // The schedule is drawn with the last valid plan length, so a half-typed number does not collapse it.
+  const [lastValidWeeks, setLastValidWeeks] = useState<number>(() => (session ? planWeeks(session.draft) : null) ?? LIMITS.durationWeeks.min);
   const [touched, setTouched] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [serverError, setServerError] = useState<CatalogErrorDetails | null>(null);
@@ -391,21 +408,35 @@ export default function AdminCatalogPlan() {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [picker, setPicker] = useState<{ open: boolean; week: number }>({ open: false, week: 1 });
 
+  // Seed from the record fetched for this mount. Until the admin types, a
+  // fresher copy (an explicit reload, a refetch) may still replace the draft;
+  // after that the draft is theirs and only Reload swaps it.
+  const record = seedableRecord(detail);
   useEffect(() => {
-    if (!isNew && detail.data && draft === null) setDraft(planDraftFrom(detail.data));
-  }, [isNew, detail.data, draft]);
+    if (isNew || !record) return;
+    if (current && (touched || current.baseline === record)) return;
+    const next = planSession(id, record);
+    setSession(next);
+    setLastValidWeeks(planWeeks(next.draft) ?? LIMITS.durationWeeks.min);
+    if (!current) {
+      // A session for another id (or the first one) starts clean.
+      setTouched(false);
+      setAttempted(false);
+      setServerError(null);
+    }
+  }, [isNew, id, record, current, touched]);
 
   useEffect(() => {
     if (!focusKey) return;
-    document.getElementById(focusKey)?.focus();
+    // A focus target can vanish with the row it belonged to; the header button always exists.
+    (document.getElementById(focusKey) ?? document.getElementById(ADD_WORKOUTS_ID))?.focus();
     setFocusKey(null);
   }, [focusKey, draft]);
 
   const validation = useMemo(() => (draft ? validatePlanDraft(draft) : null), [draft]);
-  const body = useMemo<PlanBody>(() => (draft ? buildPlanBody(draft, original) : {}), [draft, original]);
+  const body = useMemo<PlanBody>(() => (current ? planSessionBody(current) : {}), [current]);
   const dirty = isNew ? touched : Object.keys(body).length > 0;
-  // The schedule renders against the last valid length so a half-typed number does not collapse it.
-  const weeks = draft ? planWeeks(draft) ?? Math.min(LIMITS.durationWeeks.max, Math.max(1, original?.durationWeeks ?? 1)) : 1;
+  const weeks = (draft ? planWeeks(draft) : null) ?? lastValidWeeks;
   const ordered = useMemo(() => (draft ? orderedEntries(draft.entries) : []), [draft]);
 
   const save = useMutation({
@@ -417,7 +448,7 @@ export default function AdminCatalogPlan() {
       // Every workout's "scheduled in N plans" count moves with the schedule.
       void qc.invalidateQueries({ queryKey: catalogKeys.workouts });
       setTouched(false);
-      navigate(BACK_TO);
+      navigate(backTo);
     },
     onError: (e) => {
       const details = catalogErrorDetails(e, isNew ? 'Could not create this plan.' : 'Could not save this plan.');
@@ -429,9 +460,15 @@ export default function AdminCatalogPlan() {
   useUnsavedChangesWarning(dirty && !save.isPending);
 
   const change = (patch: Partial<PlanDraft>) => {
-    setDraft((current) => (current ? { ...current, ...patch } : current));
+    setSession((s) => (s && s.id === id ? { ...s, draft: { ...s.draft, ...patch } } : s));
+    if (patch.durationWeeks !== undefined) {
+      const parsed = parsePlanWeeks(patch.durationWeeks);
+      if (parsed !== null) setLastValidWeeks(parsed);
+    }
     setTouched(true);
-    setServerError((current) => (current && (current.stale || current.status === 404) ? current : null));
+    // Field-level complaints from the last attempt are about values that are
+    // now changing; a stale-record notice must stay until the admin reloads.
+    setServerError((error) => (error && error.stale ? error : null));
   };
 
   const addEntry = (workout: PlanWorkoutRef, week: number, day: number) => {
@@ -449,7 +486,8 @@ export default function AdminCatalogPlan() {
     const rest = draft.entries.filter((candidate) => candidate.key !== key);
     change({ entries: rest });
     if (entry) setAnnouncement(`Removed ${entry.workout.title} from week ${entry.week}, day ${entry.day}`);
-    setFocusKey(`catalog-add-week-${entry?.week ?? 1}`);
+    // Entries past the plan's end have no week section to hand focus back to.
+    setFocusKey(entry && entry.week <= weeks ? `catalog-add-week-${entry.week}` : ADD_WORKOUTS_ID);
   };
 
   const moveEntry = (key: string, direction: -1 | 1) => {
@@ -467,7 +505,10 @@ export default function AdminCatalogPlan() {
   const reload = async () => {
     const result = await detail.refetch();
     if (result.data) {
-      setDraft(planDraftFrom(result.data));
+      const next = planSession(id, result.data);
+      setSession(next);
+      setLastValidWeeks(planWeeks(next.draft) ?? LIMITS.durationWeeks.min);
+      setTouched(false);
       setServerError(null);
       setAttempted(false);
       setAnnouncement('Reloaded the saved version');
@@ -502,7 +543,7 @@ export default function AdminCatalogPlan() {
 
   const leave = () => {
     if (dirty && !save.isPending) setConfirmLeave(true);
-    else navigate(BACK_TO);
+    else navigate(backTo);
   };
 
   const fieldError = (field: keyof NonNullable<typeof validation>['fields']): string | undefined => (
@@ -517,7 +558,7 @@ export default function AdminCatalogPlan() {
     return attempted ? validation?.entries[entry.key] : undefined;
   };
 
-  const title = isNew ? 'New plan' : original ? `Edit “${original.title}”` : 'Edit plan';
+  const title = isNew ? 'New plan' : baseline ? `Edit “${baseline.title}”` : 'Edit plan';
   const saving = save.isPending;
   const canSave = online && !saving && (isNew || dirty);
   const overrun = ordered.filter((entry) => entry.week > weeks);
@@ -534,18 +575,17 @@ export default function AdminCatalogPlan() {
     </>
   );
 
-  if (!isNew && detail.isError) {
-    const status = (detail.error as { response?: { status?: number } } | undefined)?.response?.status;
+  if (!isNew && (!validId || detail.isError)) {
     return (
       <div className="space-y-5">
         <AdminPageHeader title="Edit plan" />
         <Card>
-          {status === 404 ? (
+          {!validId || isMissingRecordError(detail.error) ? (
             <EmptyState
               variant="error"
               title="Plan not found"
               message="It may have been deleted by another administrator, or the link is wrong."
-              action={{ label: 'Back to catalog', to: BACK_TO, icon: <ArrowLeft size={18} />, variant: 'secondary' }}
+              action={{ label: 'Back to catalog', to: backTo, icon: <ArrowLeft size={18} />, variant: 'secondary' }}
             />
           ) : (
             <ErrorState error={detail.error} title="Could not load this plan" retry={() => void detail.refetch()} />
@@ -568,18 +608,32 @@ export default function AdminCatalogPlan() {
       />
 
       <div className="-mt-2">
-        <ButtonLink to={BACK_TO} variant="link" size="sm" icon={<ArrowLeft size={16} />}>
+        <ButtonLink
+          to={backTo}
+          variant="link"
+          size="sm"
+          icon={<ArrowLeft size={16} />}
+          onClick={(e) => {
+            // Same guard as Cancel: a plain click asks before discarding edits.
+            if (dirty && !saving) {
+              e.preventDefault();
+              setConfirmLeave(true);
+            }
+          }}
+        >
           Back to catalog
         </ButtonLink>
       </div>
 
       {!online ? (
         <Callout tone="warning" title="You’re offline">
-          Keep editing; saving becomes available again once the connection is back.
+          {draft
+            ? 'Keep editing; saving becomes available again once the connection is back.'
+            : 'The latest saved version loads once the connection is back.'}
         </Callout>
       ) : null}
 
-      <SaveErrorCallout details={serverError} onReload={isNew ? undefined : () => void reload()} backTo={BACK_TO} />
+      <SaveErrorCallout details={serverError} onReload={isNew ? undefined : () => void reload()} backTo={backTo} />
 
       {!draft || !validation ? (
         <EditorSkeleton />
@@ -656,6 +710,7 @@ export default function AdminCatalogPlan() {
                 subtitle={`Up to ${LIMITS.planWorkouts.max} premade workouts across ${plural(weeks, 'week')}, seven days each.`}
                 action={
                   <Button
+                    id={ADD_WORKOUTS_ID}
                     size="sm"
                     variant="secondary"
                     icon={<Plus size={16} />}
@@ -768,15 +823,15 @@ export default function AdminCatalogPlan() {
             <Card>
               <HashtagsField tags={draft.hashtags} onChange={(hashtags) => change({ hashtags })} disabled={saving} error={fieldError('hashtags')} />
             </Card>
-            {original ? (
+            {baseline ? (
               <Card>
                 <CardHeader title="Details" />
                 <FactList
                   facts={[
-                    { label: 'Engagement', value: `${plural(original.likesCount, 'like')}, ${plural(original.commentsCount, 'comment')}` },
-                    { label: 'Created', value: fmtDateTime(original.createdAt) },
-                    { label: 'Last updated', value: fmtDateTime(original.updatedAt) },
-                    { label: 'Plan ID', value: original._id, mono: true },
+                    { label: 'Engagement', value: `${plural(baseline.likesCount, 'like')}, ${plural(baseline.commentsCount, 'comment')}` },
+                    { label: 'Created', value: fmtDateTime(baseline.createdAt) },
+                    { label: 'Last updated', value: fmtDateTime(baseline.updatedAt) },
+                    { label: 'Plan ID', value: baseline._id, mono: true },
                   ]}
                 />
               </Card>
@@ -806,7 +861,7 @@ export default function AdminCatalogPlan() {
         onConfirm={() => {
           setConfirmLeave(false);
           setTouched(false);
-          navigate(BACK_TO);
+          navigate(backTo);
         }}
       />
 

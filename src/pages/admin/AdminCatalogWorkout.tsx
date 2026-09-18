@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
@@ -45,14 +45,18 @@ import {
 } from './catalogFields';
 import {
   LIMITS,
-  buildWorkoutBody,
   catalogErrorDetails,
-  catalogListPath,
+  catalogReturnPath,
+  isMissingRecordError,
+  isObjectId,
   newExerciseDraft,
   plural,
+  seedableRecord,
   validateWorkoutDraft,
-  workoutDraftFrom,
+  workoutSession,
+  workoutSessionBody,
   type CatalogErrorDetails,
+  type EditorSession,
   type ExerciseDraft,
   type ExerciseErrors,
   type ExerciseField,
@@ -62,7 +66,8 @@ import {
 const CATEGORY_OPTIONS = CATALOG_CATEGORIES.map((c) => ({ value: c, label: humanize(c) }));
 const LEVEL_OPTIONS = CATALOG_LEVELS.map((l) => ({ value: l, label: humanize(l) }));
 const FORM_ID = 'catalog-workout-form';
-const BACK_TO = catalogListPath('workouts');
+
+type Session = EditorSession<CatalogWorkout, WorkoutDraft>;
 
 const exerciseFieldId = (key: string, field: ExerciseField) => `exercise-${key}-${field}`;
 
@@ -202,19 +207,27 @@ export default function AdminCatalogWorkout() {
   const { workoutId } = useParams();
   const isNew = !workoutId || workoutId === 'new';
   const id = isNew ? '' : (workoutId as string);
+  const validId = isNew || isObjectId(id);
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const toast = useToast();
   const online = useOnline();
+  const backTo = catalogReturnPath(location.state, 'workouts');
 
+  // staleTime 0: every mount refetches, and the draft below is seeded only
+  // once that fetch settles (see seedableRecord), never from the cached copy.
   const detail = useQuery({
     queryKey: catalogKeys.workout(id),
     queryFn: () => getCatalogWorkout(id),
-    enabled: !isNew,
+    enabled: !isNew && validId,
+    staleTime: 0,
   });
-  const original: CatalogWorkout | null = isNew ? null : detail.data?.workout ?? null;
 
-  const [draft, setDraft] = useState<WorkoutDraft | null>(() => (isNew ? workoutDraftFrom(null) : null));
+  const [session, setSession] = useState<Session | null>(() => (isNew ? workoutSession('', null) : null));
+  const current = session && session.id === id ? session : null;
+  const draft = current?.draft ?? null;
+  const baseline = current?.baseline ?? null;
   const [touched, setTouched] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [serverError, setServerError] = useState<CatalogErrorDetails | null>(null);
@@ -222,11 +235,21 @@ export default function AdminCatalogWorkout() {
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
-  // The draft is seeded once from the loaded record; later refetches must not
-  // wipe what the admin is typing. Reload is explicit (see SaveErrorCallout).
+  // Seed from the record fetched for this mount. Until the admin types, a
+  // fresher copy (an explicit reload, a refetch) may still replace the draft;
+  // after that the draft is theirs and only Reload swaps it.
+  const record = seedableRecord(detail)?.workout ?? null;
   useEffect(() => {
-    if (!isNew && detail.data && draft === null) setDraft(workoutDraftFrom(detail.data.workout));
-  }, [isNew, detail.data, draft]);
+    if (isNew || !record) return;
+    if (current && (touched || current.baseline === record)) return;
+    setSession(workoutSession(id, record));
+    if (!current) {
+      // A session for another id (or the first one) starts clean.
+      setTouched(false);
+      setAttempted(false);
+      setServerError(null);
+    }
+  }, [isNew, id, record, current, touched]);
 
   useEffect(() => {
     if (!focusKey) return;
@@ -236,7 +259,7 @@ export default function AdminCatalogWorkout() {
   }, [focusKey, draft]);
 
   const validation = useMemo(() => (draft ? validateWorkoutDraft(draft) : null), [draft]);
-  const body = useMemo<WorkoutBody>(() => (draft ? buildWorkoutBody(draft, original) : {}), [draft, original]);
+  const body = useMemo<WorkoutBody>(() => (current ? workoutSessionBody(current) : {}), [current]);
   const dirty = isNew ? touched : Object.keys(body).length > 0;
 
   const save = useMutation({
@@ -248,7 +271,7 @@ export default function AdminCatalogWorkout() {
       // Plans embed a summary of each scheduled workout (title, calories…).
       if (!isNew) void qc.invalidateQueries({ queryKey: catalogKeys.plans });
       setTouched(false);
-      navigate(BACK_TO);
+      navigate(backTo);
     },
     onError: (e) => {
       const details = catalogErrorDetails(e, isNew ? 'Could not create this workout.' : 'Could not save this workout.');
@@ -260,11 +283,11 @@ export default function AdminCatalogWorkout() {
   useUnsavedChangesWarning(dirty && !save.isPending);
 
   const change = (patch: Partial<WorkoutDraft>) => {
-    setDraft((current) => (current ? { ...current, ...patch } : current));
+    setSession((s) => (s && s.id === id ? { ...s, draft: { ...s.draft, ...patch } } : s));
     setTouched(true);
     // Field-level complaints from the last attempt are about values that are
     // now changing; a stale-record notice must stay until the admin reloads.
-    setServerError((current) => (current && (current.stale || current.status === 404) ? current : null));
+    setServerError((error) => (error && error.stale ? error : null));
   };
 
   const changeExercise = (key: string, patch: Partial<ExerciseDraft>) => {
@@ -309,7 +332,8 @@ export default function AdminCatalogWorkout() {
   const reload = async () => {
     const result = await detail.refetch();
     if (result.data) {
-      setDraft(workoutDraftFrom(result.data.workout));
+      setSession(workoutSession(id, result.data.workout));
+      setTouched(false);
       setServerError(null);
       setAttempted(false);
       setAnnouncement('Reloaded the saved version');
@@ -344,7 +368,7 @@ export default function AdminCatalogWorkout() {
 
   const leave = () => {
     if (dirty && !save.isPending) setConfirmLeave(true);
-    else navigate(BACK_TO);
+    else navigate(backTo);
   };
 
   // Server-side complaints are merged over the client's own, field by field.
@@ -361,7 +385,7 @@ export default function AdminCatalogWorkout() {
       : { ...own, row: server.message };
   };
 
-  const title = isNew ? 'New workout' : original ? `Edit “${original.title}”` : 'Edit workout';
+  const title = isNew ? 'New workout' : baseline ? `Edit “${baseline.title}”` : 'Edit workout';
   const saving = save.isPending;
   const canSave = online && !saving && (isNew || dirty);
 
@@ -376,18 +400,17 @@ export default function AdminCatalogWorkout() {
     </>
   );
 
-  if (!isNew && detail.isError) {
-    const status = (detail.error as { response?: { status?: number } } | undefined)?.response?.status;
+  if (!isNew && (!validId || detail.isError)) {
     return (
       <div className="space-y-5">
         <AdminPageHeader title="Edit workout" />
         <Card>
-          {status === 404 ? (
+          {!validId || isMissingRecordError(detail.error) ? (
             <EmptyState
               variant="error"
               title="Workout not found"
               message="It may have been deleted by another administrator, or the link is wrong."
-              action={{ label: 'Back to catalog', to: BACK_TO, icon: <ArrowLeft size={18} />, variant: 'secondary' }}
+              action={{ label: 'Back to catalog', to: backTo, icon: <ArrowLeft size={18} />, variant: 'secondary' }}
             />
           ) : (
             <ErrorState error={detail.error} title="Could not load this workout" retry={() => void detail.refetch()} />
@@ -410,18 +433,32 @@ export default function AdminCatalogWorkout() {
       />
 
       <div className="-mt-2">
-        <ButtonLink to={BACK_TO} variant="link" size="sm" icon={<ArrowLeft size={16} />}>
+        <ButtonLink
+          to={backTo}
+          variant="link"
+          size="sm"
+          icon={<ArrowLeft size={16} />}
+          onClick={(e) => {
+            // Same guard as Cancel: a plain click asks before discarding edits.
+            if (dirty && !saving) {
+              e.preventDefault();
+              setConfirmLeave(true);
+            }
+          }}
+        >
           Back to catalog
         </ButtonLink>
       </div>
 
       {!online ? (
         <Callout tone="warning" title="You’re offline">
-          Keep editing; saving becomes available again once the connection is back.
+          {draft
+            ? 'Keep editing; saving becomes available again once the connection is back.'
+            : 'The latest saved version loads once the connection is back.'}
         </Callout>
       ) : null}
 
-      <SaveErrorCallout details={serverError} onReload={isNew ? undefined : () => void reload()} backTo={BACK_TO} />
+      <SaveErrorCallout details={serverError} onReload={isNew ? undefined : () => void reload()} backTo={backTo} />
 
       {!draft || !validation ? (
         <EditorSkeleton />
@@ -556,16 +593,16 @@ export default function AdminCatalogWorkout() {
             <Card>
               <HashtagsField tags={draft.hashtags} onChange={(hashtags) => change({ hashtags })} disabled={saving} error={fieldError('hashtags')} />
             </Card>
-            {original ? (
+            {baseline ? (
               <Card>
                 <CardHeader title="Details" />
                 <FactList
                   facts={[
                     { label: 'Scheduled in', value: plural(detail.data?.usedByPlans ?? 0, 'plan') },
-                    { label: 'Engagement', value: `${plural(original.likesCount, 'like')}, ${plural(original.commentsCount, 'comment')}` },
-                    { label: 'Created', value: fmtDateTime(original.createdAt) },
-                    { label: 'Last updated', value: fmtDateTime(original.updatedAt) },
-                    { label: 'Workout ID', value: original._id, mono: true },
+                    { label: 'Engagement', value: `${plural(baseline.likesCount, 'like')}, ${plural(baseline.commentsCount, 'comment')}` },
+                    { label: 'Created', value: fmtDateTime(baseline.createdAt) },
+                    { label: 'Last updated', value: fmtDateTime(baseline.updatedAt) },
+                    { label: 'Workout ID', value: baseline._id, mono: true },
                   ]}
                 />
               </Card>
@@ -584,7 +621,7 @@ export default function AdminCatalogWorkout() {
         onConfirm={() => {
           setConfirmLeave(false);
           setTouched(false);
-          navigate(BACK_TO);
+          navigate(backTo);
         }}
       />
 

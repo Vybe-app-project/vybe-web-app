@@ -11,7 +11,7 @@ import {
   type CatalogImage,
   type CatalogLevel,
 } from './catalogApi';
-import { LIMITS, addHashtags, type CatalogErrorDetails, type ImageDraft } from './catalogRules';
+import { LIMITS, addHashtags, saveErrorText, type CatalogErrorDetails, type ImageDraft } from './catalogRules';
 
 /* ------------------------------------------------------------------ *
  * Form pieces shared by the workout and plan editors.
@@ -268,10 +268,9 @@ export function CoverImageField({
       <span id={labelId} className="type-label mb-1.5 block text-text-2">{label}</span>
       <div
         className={cx(
-          'relative overflow-hidden rounded-md border bg-surface-2',
+          'relative aspect-video overflow-hidden rounded-md border bg-surface-2',
           preview && !broken ? 'border-line' : 'border-dashed border-line-strong',
         )}
-        style={{ aspectRatio: '16 / 9' }}
       >
         {preview && !broken ? (
           <img src={preview} alt="Cover preview" onError={() => setBroken(true)} className="h-full w-full object-cover" />
@@ -332,7 +331,11 @@ export function CoverImageField({
 
 /* ------------------------------------------------------------- editor UX */
 
-/** Warns before the tab closes with unsaved edits. Route changes inside the SPA are handled by the Cancel button's confirm. */
+/**
+ * Warns before the tab closes or reloads with unsaved edits. In-app navigation
+ * is guarded only where the editors own the control (Cancel, Back to catalog);
+ * the console sidebar is not intercepted.
+ */
 export function useUnsavedChangesWarning(dirty: boolean) {
   useEffect(() => {
     if (!dirty) return;
@@ -357,7 +360,7 @@ export function SaveErrorCallout({
   backTo: string;
 }) {
   if (!details) return null;
-  if (details.status === 404) {
+  if (details.gone) {
     return (
       <Callout
         tone="danger"
@@ -394,12 +397,9 @@ export function SaveErrorCallout({
       </Callout>
     );
   }
-  const fieldCount = Object.keys(details.fields).length + Object.keys(details.rows).length;
-  const sentence = /[.!?]$/.test(details.message) ? details.message : `${details.message}.`;
   return (
     <Callout tone="danger" title={details.offline ? 'You’re offline' : 'Could not save'}>
-      {sentence}
-      {fieldCount ? ' The highlighted fields explain what to fix.' : ''}
+      {saveErrorText(details)}
     </Callout>
   );
 }

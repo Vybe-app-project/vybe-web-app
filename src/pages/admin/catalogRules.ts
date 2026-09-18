@@ -53,6 +53,9 @@ export const DEFAULT_PAGE_SIZE = 20;
 const HASHTAG_RE = /^[A-Za-z0-9_]{1,30}$/;
 const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 
+/** Whether a route param can be a catalog id at all; anything else is a bad link, not a request worth making. */
+export const isObjectId = (value: string | null | undefined): boolean => OBJECT_ID_RE.test(value ?? '');
+
 let keySequence = 0;
 /** Stable React keys for draft rows; the API ids are not usable for new rows. */
 export const nextDraftKey = (): string => {
@@ -508,13 +511,15 @@ export type PlanValidation = {
   entries: Record<string, string>;
 };
 
-/** Plan length as a number when the field holds a valid one, else null. */
-export function planWeeks(draft: PlanDraft): number | null {
-  const parsed = parseWholeNumber(draft.durationWeeks);
+/** Plan length as a number when the text holds a valid one, else null. */
+export function parsePlanWeeks(text: string): number | null {
+  const parsed = parseWholeNumber(text);
   if (parsed.kind !== 'value') return null;
   if (parsed.value < LIMITS.durationWeeks.min || parsed.value > LIMITS.durationWeeks.max) return null;
   return parsed.value;
 }
+
+export const planWeeks = (draft: PlanDraft): number | null => parsePlanWeeks(draft.durationWeeks);
 
 export function validatePlanDraft(draft: PlanDraft): PlanValidation {
   const fields: PlanValidation['fields'] = {};
@@ -588,6 +593,52 @@ export function buildPlanBody(draft: PlanDraft, original: CatalogPlan | null): P
   return body;
 }
 
+/* --------------------------------------------------------- editor seeding */
+
+/** The slice of a TanStack query result the seeding rule looks at. */
+export type DetailQueryState<T> = {
+  data: T | undefined;
+  status: 'pending' | 'error' | 'success';
+  fetchStatus: 'fetching' | 'paused' | 'idle';
+};
+
+/**
+ * The record an editor may seed its draft from, or null while it has to keep
+ * waiting. TanStack hands back the cached copy of a stale or invalidated entry
+ * at once and refreshes it in the background, so "data is defined" is not
+ * "data is current": a draft seeded from that copy and diffed against the
+ * refreshed record would send another admin's change back as a revert. Only a
+ * settled fetch counts. The detail queries pair this with staleTime 0 so every
+ * mount does refetch; a cache the app still considers fresh is served idle,
+ * and the gate alone could not tell it from the server.
+ */
+export function seedableRecord<T>(query: DetailQueryState<T>): T | null {
+  if (query.status !== 'success' || query.fetchStatus !== 'idle' || query.data === undefined) return null;
+  return query.data;
+}
+
+/**
+ * A draft and the record it was seeded from travel together, so the PATCH
+ * diff is always taken against what the admin actually saw and edited, never
+ * against a copy that arrived later. `id` is the route param the session was
+ * built for; a session for another id is never reused.
+ */
+export type EditorSession<TRecord, TDraft> = { id: string; baseline: TRecord | null; draft: TDraft };
+
+export function workoutSession(id: string, workout: CatalogWorkout | null): EditorSession<CatalogWorkout, WorkoutDraft> {
+  return { id, baseline: workout, draft: workoutDraftFrom(workout) };
+}
+
+export function planSession(id: string, plan: CatalogPlan | null): EditorSession<CatalogPlan, PlanDraft> {
+  return { id, baseline: plan, draft: planDraftFrom(plan) };
+}
+
+export const workoutSessionBody = (session: EditorSession<CatalogWorkout, WorkoutDraft>): WorkoutBody =>
+  buildWorkoutBody(session.draft, session.baseline);
+
+export const planSessionBody = (session: EditorSession<CatalogPlan, PlanDraft>): PlanBody =>
+  buildPlanBody(session.draft, session.baseline);
+
 /* ----------------------------------------------------------- API errors */
 
 export type CatalogErrorDetails = {
@@ -598,6 +649,8 @@ export type CatalogErrorDetails = {
   /** 1-based exercise / plan-workout row -> message, parsed from the API's "Exercise N: ..." wording. */
   rows: Record<number, { field?: string; message: string }>;
   invalidWorkoutIds: string[];
+  /** The record itself is gone: a 404 about the workout or plan, not about a field such as the image. */
+  gone: boolean;
   /** The record changed under us or was deleted; the draft must be reloaded. */
   stale: boolean;
   offline: boolean;
@@ -639,15 +692,46 @@ export function catalogErrorDetails(error: unknown, fallback = 'Something went w
     : offline
       ? 'You appear to be offline. Check your connection and try again.'
       : (typeof ax.message === 'string' && ax.message) || fallback;
+  // The media verifier also answers 404 ("Completed media upload was not
+  // found"), but with errors[].field === 'image'; only a bare 404 means the
+  // workout or plan itself is gone.
+  const gone = status === 404 && Object.keys(fields).length === 0;
   return {
     status,
     message,
     fields,
     rows,
     invalidWorkoutIds: Array.isArray(data.invalidWorkoutIds) ? data.invalidWorkoutIds.map(String) : [],
-    stale: status === 404 || (status === 409 && !fields.title),
+    gone,
+    stale: gone || (status === 409 && !fields.title),
     offline,
   };
+}
+
+/**
+ * Whether a failed detail load means "no such record": the API's 404, or its
+ * 400 for an id that cannot be one (errors[].field === 'id').
+ */
+export function isMissingRecordError(error: unknown): boolean {
+  const ax = (error ?? {}) as { response?: { status?: number; data?: { errors?: unknown } } };
+  const status = ax.response?.status;
+  if (status === 404) return true;
+  if (status !== 400) return false;
+  const errors = ax.response?.data?.errors;
+  return Array.isArray(errors) && errors.some((entry) => (entry as { field?: unknown } | null)?.field === 'id');
+}
+
+/**
+ * Body text for the generic save-failure banner. Whole-body complaints arrive
+ * under the pseudo-field 'body' and nothing on the form can highlight them, so
+ * they are spelled out instead of counted.
+ */
+export function saveErrorText(details: CatalogErrorDetails): string {
+  const sentences = [details.message];
+  if (details.fields.body && details.fields.body !== details.message) sentences.push(details.fields.body);
+  const highlighted = Object.keys(details.fields).filter((field) => field !== 'body').length + Object.keys(details.rows).length;
+  if (highlighted) sentences.push('The highlighted fields explain what to fix');
+  return sentences.map((sentence) => (/[.!?]$/.test(sentence) ? sentence : `${sentence}.`)).join(' ');
 }
 
 /* ---------------------------------------------------------- list state */
@@ -657,6 +741,24 @@ export type CatalogTab = 'workouts' | 'plans';
 export const catalogListPath = (tab: CatalogTab) => (tab === 'plans' ? '/admin/catalog?tab=plans' : '/admin/catalog');
 export const workoutEditorPath = (id: string | 'new') => `/admin/catalog/workouts/${id}`;
 export const planEditorPath = (id: string | 'new') => `/admin/catalog/plans/${id}`;
+
+const LIST_PATH_RE = /^\/admin\/catalog(?:\?[^#\s]*)?$/;
+
+/** The state the list page attaches to its editor links; catalogReturnPath reads it back. */
+export const catalogReturnState = (location: { pathname: string; search: string }): { from: string } => ({
+  from: `${location.pathname}${location.search}`,
+});
+
+/**
+ * Where an editor goes back to. The list page passes its own location
+ * (`/admin/catalog?tab=plans&q=core&page=2`) through navigation state so the
+ * admin lands on the same tab, filter and page; anything else in that state,
+ * or none at all (a bookmarked editor), falls back to the plain tab.
+ */
+export function catalogReturnPath(state: unknown, tab: CatalogTab): string {
+  const from = (state as { from?: unknown } | null)?.from;
+  return typeof from === 'string' && LIST_PATH_RE.test(from) ? from : catalogListPath(tab);
+}
 
 export type CatalogListState = { tab: CatalogTab; search: string; page: number; limit: number };
 

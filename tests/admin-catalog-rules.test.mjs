@@ -349,6 +349,85 @@ test('API failures map to fields, rows and stale states', () => {
   assert.deepEqual(unknown.fields, {});
 });
 
+test('a 404 about the image is a field problem; only a bare 404 means the record is gone', () => {
+  const axiosLike = (status, data) => ({ response: { status, data } });
+  const imageMissing = rules.catalogErrorDetails(axiosLike(404, {
+    message: 'Completed media upload was not found',
+    errors: [{ field: 'image', message: 'Completed media upload was not found' }],
+  }));
+  assert.equal(imageMissing.fields.image, 'Completed media upload was not found');
+  assert.equal(imageMissing.gone, false);
+  assert.equal(imageMissing.stale, false, 'a new upload fixes it in place');
+
+  const planGone = rules.catalogErrorDetails(axiosLike(404, { message: 'Premade workout plan not found' }));
+  assert.equal(planGone.gone, true);
+  assert.equal(planGone.stale, true);
+
+  const concurrent = rules.catalogErrorDetails(axiosLike(409, { message: 'This item changed while you were editing it. Reload it and try again.' }));
+  assert.equal(concurrent.gone, false);
+  assert.equal(concurrent.stale, true);
+
+  assert.equal(rules.isMissingRecordError(axiosLike(404, { message: 'Premade workout not found' })), true);
+  assert.equal(rules.isMissingRecordError(axiosLike(400, { message: 'Validation failed', errors: [{ field: 'id', message: 'A valid id is required' }] })), true);
+  assert.equal(rules.isMissingRecordError(axiosLike(400, { message: 'Validation failed', errors: [{ field: 'title', message: 'Title is required' }] })), false);
+  assert.equal(rules.isMissingRecordError(axiosLike(500, { message: 'Could not load' })), false);
+  assert.equal(rules.isMissingRecordError(new Error('Network Error')), false);
+});
+
+test('the save banner spells out whole-body complaints instead of pointing at highlighted fields', () => {
+  const axiosLike = (status, data) => ({ response: { status, data } });
+  const unsupported = rules.catalogErrorDetails(axiosLike(400, {
+    message: 'Validation failed',
+    errors: [{ field: 'body', message: 'Request has an unsupported field: isPremade' }],
+  }));
+  assert.equal(rules.saveErrorText(unsupported), 'Validation failed. Request has an unsupported field: isPremade.');
+
+  const nothing = rules.catalogErrorDetails(axiosLike(400, {
+    message: 'At least one field to update is required',
+    errors: [{ message: 'At least one field to update is required' }],
+  }));
+  assert.equal(rules.saveErrorText(nothing), 'At least one field to update is required.', 'the same sentence is not repeated');
+
+  const fields = rules.catalogErrorDetails(axiosLike(400, {
+    message: 'Validation failed',
+    errors: [
+      { field: 'title', message: 'Title must be 3 to 120 characters' },
+      { field: 'exercises', message: 'Exercise 2: sets must be a whole number from 1 to 100' },
+    ],
+  }));
+  assert.equal(rules.saveErrorText(fields), 'Validation failed. The highlighted fields explain what to fix.');
+
+  const plain = rules.catalogErrorDetails(axiosLike(500, { message: 'Could not save the workout.' }));
+  assert.equal(rules.saveErrorText(plain), 'Could not save the workout.');
+});
+
+test('editors return to the list view they were opened from, and only to the list', () => {
+  const state = rules.catalogReturnState({ pathname: '/admin/catalog', search: '?tab=plans&q=core&page=2&limit=50' });
+  assert.deepEqual(state, { from: '/admin/catalog?tab=plans&q=core&page=2&limit=50' });
+  assert.equal(rules.catalogReturnPath(state, 'plans'), '/admin/catalog?tab=plans&q=core&page=2&limit=50');
+  assert.equal(rules.catalogReturnPath(rules.catalogReturnState({ pathname: '/admin/catalog', search: '' }), 'workouts'), '/admin/catalog');
+  // A bookmarked editor has no state; a foreign or malformed one is ignored.
+  assert.equal(rules.catalogReturnPath(null, 'plans'), '/admin/catalog?tab=plans');
+  assert.equal(rules.catalogReturnPath(undefined, 'workouts'), '/admin/catalog');
+  assert.equal(rules.catalogReturnPath({ from: '/admin/users' }, 'workouts'), '/admin/catalog');
+  assert.equal(rules.catalogReturnPath({ from: 'https://evil.test/admin/catalog' }, 'workouts'), '/admin/catalog');
+  assert.equal(rules.catalogReturnPath({ from: '/admin/catalog/workouts/abc' }, 'workouts'), '/admin/catalog');
+  assert.equal(rules.catalogReturnPath({ from: 42 }, 'plans'), '/admin/catalog?tab=plans');
+});
+
+test('editor ids and plan lengths are checked before they reach the API or the schedule', () => {
+  assert.equal(rules.isObjectId('64b000000000000000000001'), true);
+  assert.equal(rules.isObjectId('64B000000000000000000001'), true);
+  assert.equal(rules.isObjectId('foo'), false);
+  assert.equal(rules.isObjectId(''), false);
+  assert.equal(rules.isObjectId(undefined), false);
+  assert.equal(rules.parsePlanWeeks('4'), 4);
+  assert.equal(rules.parsePlanWeeks(''), null, 'a cleared field keeps the schedule on its last valid length');
+  assert.equal(rules.parsePlanWeeks('0'), null);
+  assert.equal(rules.parsePlanWeeks('53'), null);
+  assert.equal(rules.parsePlanWeeks('2.5'), null);
+});
+
 test('list state round-trips through the URL and rejects junk', () => {
   const params = (entries) => ({ get: (name) => (name in entries ? entries[name] : null) });
   assert.deepEqual(rules.parseListState(params({})), { tab: 'workouts', search: '', page: 1, limit: 20 });
