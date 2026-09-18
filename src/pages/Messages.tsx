@@ -2525,8 +2525,15 @@ export default function Messages() {
   );
 
   const onSent = useCallback(
-    (message: ChatMessage) => {
+    (message: ChatMessage, room?: ChatRoom) => {
       setLive((prev) => (prev.some((x) => x._id === message._id) ? prev : [...prev, message]));
+      // The first message from a draft creates the room. GET /messages/rooms/:id
+      // only resolves groups, so the new DM is put into the list from the send
+      // response (participants come populated) before the route moves there;
+      // the refetch below then replaces it with the server's copy.
+      if (room?._id) {
+        qc.setQueryData<ChatRoom[]>(['chatRooms'], (rooms) => (rooms?.some((r) => r._id === room._id) ? rooms : [room, ...(rooms || [])]));
+      }
       qc.invalidateQueries({ queryKey: ['chatRooms'] });
     },
     [qc],
