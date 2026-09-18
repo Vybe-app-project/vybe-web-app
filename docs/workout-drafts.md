@@ -174,13 +174,28 @@ the actual storage module into Chromium; it uses real IndexedDB transactions,
 not text matching or a mocked database. Existing set editor tests
 retain light/dark, aggregate, template, repeat and revision conflict coverage.
 
-The opt-in local end-to-end test uses the exact isolated backend and hard-pins
-`mongodb://127.0.0.1:27018/vybe_aaa_a656_drafts_browser?replicaSet=rs0`.
+The opt-in local end-to-end test uses the clean backend checkout selected by
+`VYBE_TEST_BACKEND`; set `VYBE_TEST_BACKEND_COMMIT` to its qualified full commit.
+It verifies the repository/package identity and checks the same clean commit
+again after cleanup. Installed dependencies may be linked, but uncommitted
+application source is not accepted.
+
+Mongo is always literal loopback `127.0.0.1`, with a generated, unique
+`vybe_workout_e2e_*` database per run. It never inherits an operator's
+`MONGODB_URI` or `VYBE_TEST_DB`. `VYBE_E2E_MONGO_PORT` selects an unprivileged
+task-owned port (default 27018), and `VYBE_E2E_REPLICA_SET` selects its plain
+replica-set name (default `rs0`). Invalid values fail before connecting.
 It seeds a local-only account, commits a real POST, drops its acknowledgement,
-closes Chromium, restarts it with the same worktree-local profile, explicitly
+closes Chromium, restarts it with the same unique worktree-local profile, explicitly
 resumes/retries and verifies one database log plus cleared IndexedDB. That
 test database and profile are removed afterward. It never inherits a
 production connection string or uses production credentials.
+
+User/workout indexes finish initializing before the transaction test starts.
+Cleanup attempts browser, HTTP server, database, profile and source-pinning
+checks even if an earlier cleanup step fails, then reports any failures.
+`tests/workout-e2e-fixture.test.mjs` pins the loopback/database isolation,
+source identity and cleanup behavior without requiring Mongo.
 
 **That real-backend E2E was not run for the concurrency package.** Its browser
 inspection was updated to database version 2, but Mongo/API/process-restart

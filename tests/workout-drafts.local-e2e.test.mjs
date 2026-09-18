@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertBackendUnchanged, cleanupWorkoutFixture, localWorkoutDatabase, pinBackendSource } from './workout-e2e-fixture.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const backend = process.env.VYBE_TEST_BACKEND;
@@ -15,21 +16,23 @@ if (!backend || !playwright) {
     skip: 'Set VYBE_TEST_BACKEND to the isolated backend and VYBE_PLAYWRIGHT to installed Chromium tooling.',
   }, () => {});
 } else {
-  test('local rs0 API + actual browser process restart recover one committed workout after a lost acknowledgement', { timeout: 180000 }, async () => {
-    const expectedBackend = path.resolve(root, '../aaa-a656-workout-drafts-backend');
-    assert.equal(path.resolve(backend), expectedBackend, 'Only the isolated package backend may be used');
-    // The existing backend helper drops this one local database; never inherit
-    // an operator or production connection string into this test.
+  test('local replica-set API + browser restart recover one committed workout after a lost acknowledgement', { timeout: 180000 }, async () => {
+    const pinned = pinBackendSource(backend, process.env.VYBE_TEST_BACKEND_COMMIT);
+    const expectedBackend = pinned.directory;
+    const fixture = localWorkoutDatabase();
+    // Never inherit an operator connection string, and never share a test DB.
     process.env.NODE_ENV = 'test';
-    process.env.MONGODB_URI = 'mongodb://127.0.0.1:27018/vybe_aaa_a656_drafts_browser?replicaSet=rs0';
-    process.env.VYBE_TEST_DB = 'vybe_aaa_a656_drafts_browser';
+    process.env.MONGODB_URI = fixture.uri;
+    process.env.VYBE_TEST_DB = fixture.database;
     process.env.JWT_SECRET = 'local-browser-test-only';
     const require = createRequire(path.join(expectedBackend, 'package.json'));
     const setup = require(path.join(expectedBackend, 'tests/setup.js'));
+    const mongoose = require('mongoose');
     const { chromium } = await import(pathToFileURL(playwright).href);
-    const profile = path.join(root, '.draft-validation', 'local-e2e-profile');
-    await mkdir(profile, { recursive: true });
+    await mkdir(path.join(root, '.draft-validation'), { recursive: true });
+    const profile = await mkdtemp(path.join(root, '.draft-validation', 'local-e2e-'));
     let context, server, app;
+    let connected = false;
     const types = { '.js': 'text/javascript', '.html': 'text/html', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
     try {
       const dist = path.join(root, 'dist');
@@ -46,9 +49,12 @@ if (!backend || !playwright) {
       process.env.CORS_ORIGINS = origin;
       app = require(path.join(expectedBackend, 'app.js'));
       await setup.connect();
+      connected = true;
+      const User = require(path.join(expectedBackend, 'models/User.js'));
+      const WorkoutLog = require(path.join(expectedBackend, 'models/WorkoutLog.js'));
+      await Promise.all([User.init(), WorkoutLog.init()]);
       const { authedToken } = require(path.join(expectedBackend, 'tests/helpers.js'));
       const token = await authedToken({ email: 'draft-local-e2e@test.dev', username: 'draft-local-e2e' });
-      const WorkoutLog = require(path.join(expectedBackend, 'models/WorkoutLog.js'));
       const launch = () => chromium.launchPersistentContext(profile, {
         headless: true, serviceWorkers: 'block', viewport: { width: 390, height: 844 },
         executablePath: process.env.VYBE_CHROMIUM_EXECUTABLE,
@@ -107,10 +113,18 @@ if (!backend || !playwright) {
       }));
       assert.equal(count, 0);
     } finally {
-      await context?.close();
-      if (server) await new Promise(resolve => server.close(resolve));
-      await setup.disconnect();
-      await rm(profile, { recursive: true, force: true });
+      await cleanupWorkoutFixture([
+        async () => context?.close(),
+        async () => {
+          if (server) {
+            server.closeAllConnections();
+            await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+          }
+        },
+        async () => connected ? setup.disconnect() : mongoose.disconnect(),
+        async () => rm(profile, { recursive: true, force: true }),
+        async () => assertBackendUnchanged(pinned),
+      ]);
     }
   });
 }
