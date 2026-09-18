@@ -13,7 +13,7 @@ import {
 } from '../lib/authRedirect';
 import { clearDraftEmail, readDraftEmail, writeDraftEmail } from '../lib/authDrafts';
 import { isEmail } from '../lib/hooks';
-import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, cx } from './ui';
+import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, cx, useDocumentTitle } from './ui';
 import { Eye, EyeOff } from './icons';
 
 /* ------------------------------------------------------------------ *
@@ -45,10 +45,7 @@ export function AuthShell({
 }) {
   // The app shell titles every in-app page ("Home · Vybe"); the signed-out
   // pages sit outside it and used to leave the tab reading just "Vybe".
-  const tabTitle = documentTitle ?? title;
-  useEffect(() => {
-    document.title = `${tabTitle} · Vybe`;
-  }, [tabTitle]);
+  useDocumentTitle(documentTitle ?? title);
 
   return (
     <div className="min-h-dvh bg-bg text-text-1 lg:grid lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">

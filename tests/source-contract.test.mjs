@@ -253,13 +253,13 @@ test('search, profiles and friends: the fix8 regressions stay fixed', () => {
   assert.match(profile, /to=\{`\/messages\/new\?to=\$\{user\._id\}`\} state=\{\{ peer: user \}\}/);
   assert.doesNotMatch(profile, /\/messages\?to=/);
   // Followers / Following tiles open the lists (only when the content is visible).
-  assert.match(profile, /to=\{canViewContent \? `\/u\/\$\{user\._id\}\/followers` : undefined\}/);
-  assert.match(profile, /to=\{canViewContent \? `\/u\/\$\{user\._id\}\/following` : undefined\}/);
+  assert.match(profile, /to: canViewContent \? `\/u\/\$\{user\._id\}\/followers` : undefined/);
+  assert.match(profile, /to: canViewContent \? `\/u\/\$\{user\._id\}\/following` : undefined/);
   assert.match(profile, /Settings › Blocked accounts/);
 
   const own = read('src/pages/Profile.tsx');
-  assert.match(own, /to="\/profile\/followers"/);
-  assert.match(own, /to="\/profile\/following"/);
+  assert.match(own, /to: '\/profile\/followers'/);
+  assert.match(own, /to: '\/profile\/following'/);
   assert.doesNotMatch(own, /label="Followers"[^\n]*to="\/friends"/);
   // Username-taken is an inline field error with focus, not only a toast.
   assert.match(own, /setErrors\(\(er\) => \(\{ \.\.\.er, username: field\.username \|\| message \}\)\);\s*document\.getElementById\('pf-username'\)\?\.focus\(\)/);
@@ -357,7 +357,7 @@ test('badges, report labels, handoff and session-freshness contracts', () => {
 
   // The phone Home header's Search shortcut is the magnifier, not the Explore compass.
   const layout = read('src/components/Layout.tsx');
-  assert.match(layout, /<IconButton to="\/search" label="Search">\s*<SearchIcon size=\{22\} \/>/);
+  assert.match(layout, /<IconButton to="\/search" label="Search"[^>]*>\s*<SearchIcon size=\{22\} \/>/);
   assert.match(layout, /pattern: '\/u\/:id\/:kind'/);
   assert.match(layout, /pattern: '\/profile\/:kind'/);
 

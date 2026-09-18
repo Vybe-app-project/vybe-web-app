@@ -1206,7 +1206,7 @@ function ChallengeCard({
 
       <div className="min-w-0 space-y-1">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="line-clamp-2 text-md font-semibold text-text-1">{challenge.title}</h3>
+          <h2 className="line-clamp-2 text-md font-semibold text-text-1">{challenge.title}</h2>
           {challenge.ownership === 'system' ? <Badge tone="info">Official</Badge> : null}
         </div>
         <p className="line-clamp-2 text-xs leading-5 text-text-2">{challenge.description}</p>
@@ -1519,8 +1519,8 @@ export default function Challenges() {
           </Button>
         }
         mobileActions={
-          <IconButton label="New challenge" variant="primary" size={40} onClick={() => setCreateOpen(true)}>
-            <Plus size={20} />
+          <IconButton label="New challenge" onClick={() => setCreateOpen(true)}>
+            <Plus size={22} />
           </IconButton>
         }
       />

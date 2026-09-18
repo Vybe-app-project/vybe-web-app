@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import type {
+  AnchorHTMLAttributes,
   ButtonHTMLAttributes,
   CSSProperties,
   HTMLAttributes,
@@ -257,8 +258,13 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; Icon: typeof
   { value: 'dark', label: 'Dark', Icon: Moon },
 ];
 
-/** Settings → Appearance. A radiogroup styled as a segmented control. */
-export function ThemeControl({ className, label = 'Appearance' }: { className?: string; label?: string }) {
+/**
+ * Settings → Appearance. A radiogroup styled as a segmented control.
+ * `iconOnly` is for rails narrower than ~280 px (the staff console sidebar):
+ * three labelled segments there squeezed the icons to 0–10 px, so the label
+ * moves to the accessible name and a tooltip instead.
+ */
+export function ThemeControl({ className, label = 'Appearance', iconOnly = false }: { className?: string; label?: string; iconOnly?: boolean }) {
   const preference = useTheme((s) => s.preference);
   const setPreference = useTheme((s) => s.setPreference);
   return (
@@ -271,19 +277,39 @@ export function ThemeControl({ className, label = 'Appearance' }: { className?: 
             type="button"
             role="radio"
             aria-checked={checked}
+            aria-label={iconOnly ? l : undefined}
+            title={iconOnly ? l : undefined}
             onClick={() => setPreference(value)}
             className={cx(
-              'inline-flex min-h-10 items-center justify-center gap-2 rounded-[calc(var(--radius-sm)-2px)] px-3 text-sm font-semibold transition-colors dur-1',
+              'inline-flex min-h-10 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-[calc(var(--radius-sm)-2px)] px-2 text-sm font-semibold transition-colors dur-1 pointer-coarse:min-h-11',
               checked ? 'bg-surface-1 text-text-1 shadow-1' : 'text-text-2 hover:text-text-1',
             )}
           >
-            <Icon size={18} />
-            {l}
+            <Icon size={18} className="shrink-0" />
+            {iconOnly ? null : <span className="truncate">{l}</span>}
           </button>
         );
       })}
     </div>
   );
+}
+
+/* ================================================================== document title */
+
+/**
+ * Sets the tab title for pages outside the app shell (auth, public support,
+ * not-found). Layout owns the title for routed pages; this restores whatever
+ * was there when the page unmounts so the two never fight.
+ */
+export function useDocumentTitle(title: string | undefined, suffix = ' · Vybe') {
+  useEffect(() => {
+    if (!title) return;
+    const previous = document.title;
+    document.title = `${title}${suffix}`;
+    return () => {
+      document.title = previous;
+    };
+  }, [title, suffix]);
 }
 
 /* ================================================================== page chrome */
@@ -354,7 +380,8 @@ export function PageHeader({
   className?: string;
   children?: ReactNode;
 }) {
-  usePageChrome({ title, subtitle, back, actions: mobileActions ?? actions, rail, wide, hideSectionTabs });
+  // `mobileActions={null}` means "nothing in the top bar"; only undefined falls back to the desktop set.
+  usePageChrome({ title, subtitle, back, actions: mobileActions === undefined ? actions : mobileActions, rail, wide, hideSectionTabs });
   return (
     <header className={cx('mb-6 hidden items-end justify-between gap-4 lg:flex', className)}>
       <div className="min-w-0">
@@ -738,6 +765,8 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   to?: string;
   /** Router state for `to` links. */
   state?: unknown;
+  /** Handlers for the link form (`to`), e.g. the shell's route-change intent props (preload + pending destination). */
+  linkProps?: Pick<AnchorHTMLAttributes<HTMLAnchorElement>, 'onPointerDown' | 'onMouseEnter' | 'onFocus' | 'onClick'>;
 };
 
 const ICON_BUTTON_VARIANT = {
@@ -755,6 +784,7 @@ export function IconButton({
   badge,
   to,
   state,
+  linkProps,
   className,
   children,
   type = 'button',
@@ -762,7 +792,7 @@ export function IconButton({
 }: IconButtonProps) {
   const cls = cx(
     'relative inline-flex shrink-0 items-center justify-center rounded-sm transition-colors dur-1',
-    size === 40 ? 'h-10 w-10' : size === 48 ? 'h-12 w-12' : 'h-11 w-11',
+    size === 40 ? 'h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11' : size === 48 ? 'h-12 w-12' : 'h-11 w-11',
     ICON_BUTTON_VARIANT[variant],
     active && variant === 'ghost' && 'bg-brand-soft text-brand-text',
     className,
@@ -775,7 +805,7 @@ export function IconButton({
   );
   if (to) {
     return (
-      <Link to={to} state={state} viewTransition aria-label={label} title={label} className={cls}>
+      <Link to={to} state={state} viewTransition aria-label={label} title={label} className={cls} {...linkProps}>
         {inner}
       </Link>
     );
@@ -1475,16 +1505,20 @@ export function CardHeader({
   subtitle,
   action,
   className,
+  level = 2,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   action?: ReactNode;
   className?: string;
+  /** Heading level. Cards sit directly under the page h1 by default; pass 3 inside a titled Section. */
+  level?: 2 | 3 | 4;
 }) {
+  const Heading = `h${level}` as const;
   return (
     <div className={cx('mb-3 flex items-start justify-between gap-3', className)}>
       <div className="min-w-0">
-        <h3 className="truncate text-md font-semibold text-text-1">{title}</h3>
+        <Heading className="truncate text-md font-semibold text-text-1">{title}</Heading>
         {subtitle ? <p className="mt-0.5 truncate text-xs text-text-2">{subtitle}</p> : null}
       </div>
       {action ? <div className="relative z-[2] shrink-0">{action}</div> : null}
@@ -1524,7 +1558,7 @@ const BADGE_TONES: Record<BadgeTone, string> = {
   neutral: 'bg-surface-2 text-text-2 border border-line',
   success: 'bg-success-soft text-brand-text dark:text-success',
   warning: 'bg-warning-soft text-warning-text',
-  danger: 'bg-danger-soft text-danger',
+  danger: 'bg-danger-soft text-danger-text',
   info: 'bg-info-soft text-info-text',
   accent: 'bg-accent-soft text-accent-text',
 };
@@ -1555,7 +1589,7 @@ export function Badge({
   );
 }
 
-/** Selectable / removable chip (filters, hashtags). Visual 36 px, hit area 44 px. */
+/** Selectable / removable chip (filters, hashtags). 36 px with a mouse, 44 px on touch. */
 export function Chip({
   selected = false,
   onClick,
@@ -1576,7 +1610,7 @@ export function Chip({
   removeLabel?: string;
 }) {
   const cls = cx(
-    'relative inline-flex h-9 items-center gap-1.5 rounded-xs px-3 text-xs font-semibold transition-colors dur-1',
+    'relative inline-flex h-9 items-center gap-1.5 rounded-xs px-3 text-xs font-semibold transition-colors dur-1 pointer-coarse:min-h-11',
     'before:absolute before:-inset-1 before:content-[""]',
     selected ? 'bg-brand-soft text-brand-text' : 'border border-line bg-surface-2 text-text-2 hover:text-text-1',
     className,
@@ -2311,6 +2345,7 @@ export function EmptyState({
   secondaryAction,
   size = 'md',
   className,
+  level = 2,
 }: {
   icon?: ReactNode;
   variant?: EmptyStateVariant;
@@ -2321,8 +2356,11 @@ export function EmptyState({
   secondaryAction?: EmptyStateAction;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  /** Heading level; an empty state usually stands in for the page body, one step under the h1. */
+  level?: 2 | 3;
 }) {
   const text = message || description;
+  const Heading = `h${level}` as const;
   const glyph =
     icon ??
     (variant === 'no-results' ? <SearchIcon size={26} /> : variant === 'offline' ? <WifiOff size={26} /> : variant === 'error' ? <AlertIcon size={26} /> : null);
@@ -2346,7 +2384,7 @@ export function EmptyState({
       ) : (
         <PairFigure size={size === 'sm' ? 64 : 96} className="text-text-3" />
       )}
-      <h3 className={cx('type-heading text-text-1', size === 'sm' ? 'text-md' : 'text-lg')}>{title}</h3>
+      <Heading className={cx('type-heading text-text-1', size === 'sm' ? 'text-md' : 'text-lg')}>{title}</Heading>
       {text ? <p className="max-w-sm text-sm leading-relaxed text-text-2">{text}</p> : null}
       {action || secondaryAction ? (
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
@@ -2471,8 +2509,11 @@ export function Tabs({
       const target = el.offsetLeft - (list.clientWidth - el.offsetWidth) / 2;
       list.scrollTo({ left: Math.max(0, target), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     }
+    // Observe the tabs too: the list's own box does not change when a label
+    // or count grows, but the overflow (and so the edge fade) does.
     const ro = new ResizeObserver(measure);
     ro.observe(list);
+    for (const child of Array.from(list.children)) ro.observe(child);
     document.fonts?.ready.then(measure).catch(() => {});
     return () => ro.disconnect();
   }, [selected, items.length, measure]);
@@ -2498,7 +2539,7 @@ export function Tabs({
   const tabCls = (isActive: boolean, disabled?: boolean) =>
     cx(
       'snap-item relative z-[1] inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap font-semibold outline-none transition-colors dur-1',
-      size === 'sm' ? 'min-h-10 px-3 text-xs' : 'min-h-11 px-3.5 text-sm',
+      size === 'sm' ? 'min-h-10 px-3 text-xs pointer-coarse:min-h-11' : 'min-h-11 px-3.5 text-sm',
       segmented ? 'rounded-[calc(var(--radius-sm)-2px)]' : 'rounded-xs',
       fill && 'flex-1',
       disabled ? 'cursor-not-allowed text-text-3' : isActive ? 'text-text-1' : 'text-text-2 hover:text-text-1',
@@ -2719,12 +2760,23 @@ export function Sparkline({
   color?: string;
 }) {
   const id = useId();
-  if (!data || data.length < 2) return <span className={className} style={{ display: 'inline-block', width, height }} aria-hidden="true" />;
+  const placeholder = <span className={className} style={{ display: 'inline-block', width, height }} aria-hidden="true" />;
+  if (!data || data.length < 2) return placeholder;
   const min = Math.min(...data);
   const max = Math.max(...data);
-  const span = max - min || 1;
   const w = 100;
   const h = 40;
+  // A flat series has no trend to show. All-zero (nothing logged) draws
+  // nothing at all; a constant non-zero value gets a quiet dashed baseline.
+  if (max === min) {
+    if (max === 0) return placeholder;
+    return (
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width={width} height={height} className={className} aria-hidden="true">
+        <path d={`M0 ${h / 2} L${w} ${h / 2}`} fill="none" stroke="var(--text-3)" strokeWidth={1} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+      </svg>
+    );
+  }
+  const span = max - min;
   const pts = data.map((v, i) => [(i / (data.length - 1)) * w, h - 3 - ((v - min) / span) * (h - 6)] as const);
   const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
   const area = `${line} L${w} ${h} L0 ${h} Z`;
@@ -2835,9 +2887,68 @@ export function StatTile({
   return <div className={cx('card p-4', className)}>{body}</div>;
 }
 
-/** 2-up on phones, 4-up on desktop. */
+/** 2-up on phones, full row from tablets (md). A 3-up grid lets its third tile span the phone row instead of leaving a hole. */
 export function StatGrid({ children, className, columns = 4 }: { children: ReactNode; className?: string; columns?: 2 | 3 | 4 }) {
-  return <div className={cx('grid grid-cols-2 gap-3', columns === 3 && 'lg:grid-cols-3', columns === 4 && 'lg:grid-cols-4', className)}>{children}</div>;
+  return (
+    <div
+      className={cx(
+        'grid grid-cols-2 gap-3',
+        columns === 3 && 'md:grid-cols-3 max-md:[&>*:nth-child(3n)]:col-span-2',
+        columns === 4 && 'md:grid-cols-4',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export type StatStripItem = {
+  label: string;
+  value: number | string;
+  to?: string;
+  onClick?: () => void;
+  tone?: 'neutral' | 'brand';
+};
+
+/**
+ * Profile counters in one row (posts · followers · following · workouts):
+ * tabular numerals over a 12 px label, each cell a 44 px target when it links
+ * somewhere. Replaces four full StatTiles, which cost 400 px of phone before
+ * any content.
+ */
+export function StatStrip({ items, className, 'aria-label': ariaLabel = 'Stats' }: { items: StatStripItem[]; className?: string; 'aria-label'?: string }) {
+  return (
+    <ul aria-label={ariaLabel} className={cx('card grid divide-x divide-line', className)} style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+      {items.map((item) => {
+        const body = (
+          <>
+            <span className={cx('type-stat block truncate text-lg leading-6 sm:text-xl sm:leading-7', item.tone === 'brand' ? 'text-brand-text' : 'text-text-1')}>
+              {typeof item.value === 'number' ? formatStat(item.value) : item.value}
+            </span>
+            <span className="type-label block truncate text-text-2">{item.label}</span>
+          </>
+        );
+        const cls = 'flex min-h-16 w-full flex-col items-center justify-center gap-0.5 px-1 py-2 text-center';
+        const interactive = 'rounded-[inherit] transition-colors dur-1 hover:bg-surface-2 focus-visible:bg-surface-2 outline-none';
+        return (
+          <li key={item.label} className="min-w-0">
+            {item.to ? (
+              <Link to={item.to} viewTransition className={cx(cls, interactive)}>
+                {body}
+              </Link>
+            ) : item.onClick ? (
+              <button type="button" onClick={item.onClick} className={cx(cls, interactive)}>
+                {body}
+              </button>
+            ) : (
+              <div className={cls}>{body}</div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** Progress ring (macros, goals). Stroke 10, animates once on mount. */
@@ -2970,6 +3081,106 @@ export function Callout({
         {children ? <div className={cx('text-text-2', !!title && 'mt-0.5')}>{children}</div> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+  );
+}
+
+/* ================================================================== scroll edges */
+
+export type ScrollEdges = {
+  /** Content extends past the start edge (left / top). */
+  start: boolean;
+  /** Content extends past the end edge (right / bottom). */
+  end: boolean;
+  /** The element scrolls at all. */
+  overflow: boolean;
+};
+
+/**
+ * Tracks whether a scroll container has more content beyond each edge, so
+ * callers can paint an edge fade or a shadow. Re-measures on scroll, on
+ * resize of the container and its children, and once fonts have loaded —
+ * measuring only on scroll (the previous Tabs behaviour) left first paint
+ * without the fade.
+ */
+export function useScrollEdges(ref: RefObject<HTMLElement | null>, axis: 'x' | 'y' = 'x'): ScrollEdges {
+  const [edges, setEdges] = useState<ScrollEdges>({ start: false, end: false, overflow: false });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const size = axis === 'x' ? el.clientWidth : el.clientHeight;
+      const scroll = axis === 'x' ? el.scrollWidth : el.scrollHeight;
+      const pos = axis === 'x' ? el.scrollLeft : el.scrollTop;
+      const overflow = scroll - size;
+      const next: ScrollEdges = overflow <= 4 ? { start: false, end: false, overflow: false } : { start: pos > 4, end: pos < overflow - 4, overflow: true };
+      setEdges((prev) => (prev.start === next.start && prev.end === next.end && prev.overflow === next.overflow ? prev : next));
+    };
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    document.fonts?.ready.then(measure).catch(() => {});
+    return () => {
+      el.removeEventListener('scroll', measure);
+      ro.disconnect();
+    };
+  }, [ref, axis]);
+  return edges;
+}
+
+/** Class for the mask utilities given the edges that have more content. */
+export function fadeClass(edges: ScrollEdges, axis: 'x' | 'y' = 'x'): string {
+  const [a, b, both] = axis === 'x' ? (['mask-fade-l', 'mask-fade-r', 'mask-fade-x'] as const) : (['mask-fade-t', 'mask-fade-b', 'mask-fade-y'] as const);
+  if (edges.start && edges.end) return both;
+  if (edges.start) return a;
+  if (edges.end) return b;
+  return '';
+}
+
+/**
+ * Horizontal scroll container with a painted scrollbar and `data-overflow` /
+ * `data-fade="l r"` attributes for CSS (admin tables pin their actions column
+ * and shadow it while columns hide beneath). Add `fade` for the mask-image
+ * treatment on rows without sticky cells.
+ */
+export function ScrollX({ className, fade = false, children, ...rest }: HTMLAttributes<HTMLDivElement> & { fade?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const edges = useScrollEdges(ref, 'x');
+  return (
+    <div
+      ref={ref}
+      data-overflow={edges.overflow ? 'true' : 'false'}
+      data-fade={[edges.start && 'l', edges.end && 'r'].filter(Boolean).join(' ') || undefined}
+      className={cx('overflow-x-auto', fade && fadeClass(edges, 'x'), className)}
+      {...rest}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ================================================================== page skeleton */
+
+/**
+ * Stand-in for a route whose code is still downloading: the page region
+ * shows structure immediately instead of holding the previous page.
+ */
+export function PageSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading page">
+      <div className="hidden space-y-2 lg:block">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-72 max-w-full" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <SkeletonTile key={i} />
+        ))}
+      </div>
+      <SkeletonCard media={false} />
+      <SkeletonCard media={false} />
     </div>
   );
 }

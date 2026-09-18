@@ -16,12 +16,9 @@ import {
   Menu,
   PageHeader,
   Skeleton,
-  SkeletonTile,
-  StatGrid,
-  StatTile,
+  StatStrip,
   Tabs,
   cx,
-  formatStat,
   humanize,
   useToast,
   type MenuItem,
@@ -212,11 +209,7 @@ export default function UserProfile() {
             </div>
           </div>
         </Card>
-        <StatGrid>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonTile key={i} />
-          ))}
-        </StatGrid>
+        <Skeleton className="h-16 w-full rounded-lg" />
       </div>
     );
   }
@@ -380,27 +373,15 @@ export default function UserProfile() {
 
       {canViewContent ? <HighlightsRow userId={user._id} author={user} /> : null}
 
-      <StatGrid>
-        <StatTile label="Posts" value={formatStat(postCount(user))} onClick={canViewContent ? () => setTab('posts') : undefined} />
-        <StatTile
-          label="Followers"
-          value={formatStat(followerCount(user))}
-          to={canViewContent ? `/u/${user._id}/followers` : undefined}
-          hint={canViewContent ? undefined : 'Private'}
-        />
-        <StatTile
-          label="Following"
-          value={formatStat(followingCount(user))}
-          to={canViewContent ? `/u/${user._id}/following` : undefined}
-          hint={canViewContent ? undefined : 'Private'}
-        />
-        <StatTile
-          label="Workouts"
-          value={formatStat(user.stats?.workouts || 0)}
-          onClick={canViewContent ? () => setTab('workouts') : undefined}
-          tone="brand"
-        />
-      </StatGrid>
+      <StatStrip
+        aria-label="Profile stats"
+        items={[
+          { label: 'Posts', value: postCount(user), onClick: canViewContent ? () => setTab('posts') : undefined },
+          { label: 'Followers', value: followerCount(user), to: canViewContent ? `/u/${user._id}/followers` : undefined },
+          { label: 'Following', value: followingCount(user), to: canViewContent ? `/u/${user._id}/following` : undefined },
+          { label: 'Workouts', value: user.stats?.workouts || 0, onClick: canViewContent ? () => setTab('workouts') : undefined, tone: 'brand' },
+        ]}
+      />
 
       {!canViewContent ? (
         <Card>

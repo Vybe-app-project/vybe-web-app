@@ -24,6 +24,7 @@ import {
 import { ChevronRight, Clock, Hash, Lock, Search as SearchIcon, Users, X, Zap } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
+import { dedupeRecentSearches, type RecentSearchLike } from '../lib/searchHistory';
 import { usePeopleSearch } from './PeopleSearch';
 import { MealTile, WorkoutTile, type MealItem, type WorkoutItem } from './ProfileTabs';
 
@@ -158,15 +159,9 @@ function SeeAll({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-/** Drop repeated queries (case-insensitively), keeping the most recent. */
-export function dedupeRecent<T extends { query: string }>(items: T[]): T[] {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = item.query.trim().toLowerCase();
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+/** Drop repeated queries (case-insensitively), keeping the most recent; shared with the header search. */
+export function dedupeRecent<T extends RecentSearchLike>(items: T[]): T[] {
+  return dedupeRecentSearches(items);
 }
 
 export default function Search() {

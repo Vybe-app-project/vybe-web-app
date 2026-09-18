@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { Brand, ButtonLink, cx } from './ui';
+import { Brand, ButtonLink, cx, useDocumentTitle } from './ui';
 
 /**
  * Chrome for the few pages that must work without an account. Today that is
@@ -24,6 +24,7 @@ export function PublicShell({
   // too; offering them "Log in / Join Vybe" read as if the session was gone.
   const user = useAuth((s) => s.user);
   const loading = useAuth((s) => s.loading);
+  useDocumentTitle(title);
   return (
     <div className="min-h-dvh bg-bg text-text-1">
       <header className="safe-top border-b border-line bg-surface-1">

@@ -322,13 +322,12 @@ export default function Notifications() {
 
   return (
     <>
-      <PageHeader title="Notifications" subtitle={subtitle} actions={markAllButton('md')} />
+      {/* The action lives in the page header on every viewport (top bar on phones); the phone
+          row below only repeats the unread count, so there is one "Mark all read" on screen. */}
+      <PageHeader title="Notifications" subtitle={subtitle} actions={unreadCount > 0 ? markAllButton('md') : undefined} mobileActions={unreadCount > 0 ? markAllButton('sm') : null} />
       <div className="w-full max-w-form space-y-4">
-        {query.isSuccess && notifications.length > 0 ? (
-          <div className="flex min-h-10 items-center justify-between gap-3 lg:hidden">
-            <p className="text-sm text-text-2">{subtitle}</p>
-            {unreadCount > 0 ? markAllButton('sm') : null}
-          </div>
+        {query.isSuccess && notifications.length > 0 && subtitle ? (
+          <p className="flex min-h-10 items-center text-sm text-text-2 lg:hidden">{subtitle}</p>
         ) : null}
 
         {query.isLoading ? <ListSkeleton /> : null}

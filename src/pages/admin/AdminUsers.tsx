@@ -14,6 +14,7 @@ import {
   IconButton,
   Input,
   Modal,
+  ScrollX,
   Select,
   Skeleton,
   Textarea,
@@ -31,6 +32,26 @@ type Suspension = {
   suspendedAt?: string | null;
   restoredAt?: string | null;
 };
+
+/** Verified / Admin / Premium / Deleted — shared by the table and the phone list. */
+function UserStatusBadges({ u }: { u: AdminUser }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {u.isVerified ? (
+        <Badge tone="success"><Check size={12} /> Verified</Badge>
+      ) : (
+        <Badge tone="neutral">Unverified</Badge>
+      )}
+      {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
+      {u.isPremium ? <Badge tone="info">Premium</Badge> : null}
+      {u.isDeleted ? (
+        <Badge tone="danger">Deleted</Badge>
+      ) : u.isActive === false ? (
+        <Badge tone="danger">Inactive</Badge>
+      ) : null}
+    </div>
+  );
+}
 
 type AdminUser = {
   _id: string;

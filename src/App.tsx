@@ -10,51 +10,59 @@ import { postLoginTarget } from './lib/authRedirect';
 import WelcomeSheet from './pages/WelcomeSheet';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth, useSessionRefresh } from './lib/auth';
+import { lazyPage } from './lib/navigation';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
  * bundle would make first paint on mobile noticeably worse, which matters
  * because this same origin backs the iOS web views.
+ *
+ * Consumer pages go through lazyPage (lib/navigation.ts): each loader is
+ * registered by path so the shell can warm a chunk when the user shows
+ * intent (pointer down / hover on a nav link) and the tab roots while the
+ * browser is idle, and a warmed page renders without suspending, so the
+ * skeleton only ever shows for a chunk that is genuinely still downloading.
  */
-const Feed = lazy(() => import('./pages/Feed'));
-const Discover = lazy(() => import('./pages/Discover'));
-const Search = lazy(() => import('./pages/Search'));
-const PostDetail = lazy(() => import('./pages/PostDetail'));
-const PublicPost = lazy(() => import('./pages/PublicPost'));
-const Profile = lazy(() => import('./pages/Profile'));
-const UserProfile = lazy(() => import('./pages/UserProfile'));
-const Connections = lazy(() => import('./pages/Connections'));
-const Settings = lazy(() => import('./pages/Settings'));
-const Notifications = lazy(() => import('./pages/Notifications'));
-const Messages = lazy(() => import('./pages/Messages'));
-const Friends = lazy(() => import('./pages/Friends'));
-const Stories = lazy(() => import('./pages/Stories'));
-const Gyms = lazy(() => import('./pages/Gyms'));
-const GymCommunity = lazy(() => import('./pages/GymCommunity'));
-const Livestreams = lazy(() => import('./pages/Livestreams'));
-const Support = lazy(() => import('./pages/Support'));
-const OpenHandoff = lazy(() => import('./pages/OpenHandoff'));
+const Feed = lazyPage('/', () => import('./pages/Feed'));
+const Discover = lazyPage('/discover', () => import('./pages/Discover'));
+const Search = lazyPage('/search', () => import('./pages/Search'));
+const PostDetail = lazyPage(null, () => import('./pages/PostDetail'));
+const PublicPost = lazyPage(null, () => import('./pages/PublicPost'));
+const Profile = lazyPage('/profile', () => import('./pages/Profile'));
+const UserProfile = lazyPage(null, () => import('./pages/UserProfile'));
+const Connections = lazyPage(null, () => import('./pages/Connections'));
+const Settings = lazyPage('/settings', () => import('./pages/Settings'));
+const Notifications = lazyPage('/notifications', () => import('./pages/Notifications'));
+const Messages = lazyPage('/messages', () => import('./pages/Messages'));
+const Friends = lazyPage('/friends', () => import('./pages/Friends'));
+const Stories = lazyPage('/stories', () => import('./pages/Stories'));
+const Gyms = lazyPage('/gyms', () => import('./pages/Gyms'));
+const GymCommunity = lazyPage('/communities', () => import('./pages/GymCommunity'));
+const Livestreams = lazyPage('/live', () => import('./pages/Livestreams'));
+const Support = lazyPage('/support', () => import('./pages/Support'));
+const OpenHandoff = lazyPage(null, () => import('./pages/OpenHandoff'));
+const NotFound = lazyPage(null, () => import('./pages/NotFound'));
 
-const Workouts = lazy(() => import('./pages/Workouts'));
-const WorkoutDetail = lazy(() => import('./pages/WorkoutDetail'));
-const WorkoutPlanDetail = lazy(() => import('./pages/WorkoutPlanDetail'));
-const WorkoutLogs = lazy(() => import('./pages/WorkoutLogs'));
-const Meals = lazy(() => import('./pages/Meals'));
-const MealDetail = lazy(() => import('./pages/MealDetail'));
-const SharedMeal = lazy(() => import('./pages/SharedMeal'));
-const MealTemplates = lazy(() => import('./pages/MealTemplates'));
-const WeeklyPlans = lazy(() => import('./pages/WeeklyPlans'));
-const Health = lazy(() => import('./pages/Health'));
-const HealthGoals = lazy(() => import('./pages/HealthGoals'));
-const Water = lazy(() => import('./pages/Water'));
-const ProgressPhotos = lazy(() => import('./pages/ProgressPhotos'));
-const Challenges = lazy(() => import('./pages/Challenges'));
-const Achievements = lazy(() => import('./pages/Achievements'));
+const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
+const WorkoutDetail = lazyPage(null, () => import('./pages/WorkoutDetail'));
+const WorkoutPlanDetail = lazyPage(null, () => import('./pages/WorkoutPlanDetail'));
+const WorkoutLogs = lazyPage('/workouts/logs', () => import('./pages/WorkoutLogs'));
+const Meals = lazyPage('/meals', () => import('./pages/Meals'));
+const MealDetail = lazyPage(null, () => import('./pages/MealDetail'));
+const SharedMeal = lazyPage(null, () => import('./pages/SharedMeal'));
+const MealTemplates = lazyPage('/meals/templates', () => import('./pages/MealTemplates'));
+const WeeklyPlans = lazyPage('/meals/plans', () => import('./pages/WeeklyPlans'));
+const Health = lazyPage('/health', () => import('./pages/Health'));
+const HealthGoals = lazyPage('/health/goals', () => import('./pages/HealthGoals'));
+const Water = lazyPage('/health/water', () => import('./pages/Water'));
+const ProgressPhotos = lazyPage('/health/photos', () => import('./pages/ProgressPhotos'));
+const Challenges = lazyPage('/challenges', () => import('./pages/Challenges'));
+const Achievements = lazyPage('/achievements', () => import('./pages/Achievements'));
 
-const Login = lazy(() => import('./pages/Login'));
-const Register = lazy(() => import('./pages/Register'));
-const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
-const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const Login = lazyPage(null, () => import('./pages/Login'));
+const Register = lazyPage(null, () => import('./pages/Register'));
+const ForgotPassword = lazyPage(null, () => import('./pages/ForgotPassword'));
+const ResetPassword = lazyPage(null, () => import('./pages/ResetPassword'));
 
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin'));
 const AdminForgotPassword = lazy(() => import('./pages/admin/AdminForgotPassword'));
@@ -267,6 +275,8 @@ export default function App() {
               <Route path="admins" element={<AdminAdmins />} />
               <Route path="audit" element={<AdminAudit />} />
               <Route path="system" element={<AdminSystem />} />
+              {/* Unknown console URLs stay in the console. */}
+              <Route path="*" element={<Navigate to="/admin" replace />} />
             </Route>
 
             {/* Authenticated app. The first-run sheet answers /?welcome=1 on any route. */}
@@ -322,7 +332,7 @@ export default function App() {
               <Route path="livestreams/:streamId" element={<RedirectLive />} />
             </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </RouteErrorBoundary>
       </Suspense>

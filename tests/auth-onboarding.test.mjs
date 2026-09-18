@@ -286,7 +286,7 @@ test('sign-in errors are human, focus lands on the first invalid field, and the 
 
 test('the signed-out pages title the tab and the legal links are 44 px targets that open in a new tab', () => {
   const login = read('src/pages/Login.tsx');
-  assert.match(login, /document\.title = `\$\{tabTitle\} · Vybe`;/);
+  assert.match(login, /useDocumentTitle\(documentTitle \?\? title\);/);
   assert.match(login, /documentTitle="Sign in"/);
   assert.match(read('src/pages/ResetPassword.tsx'), /documentTitle="Reset your password"/);
   assert.match(read('src/pages/Register.tsx'), /title="Create your account"/);

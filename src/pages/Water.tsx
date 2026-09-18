@@ -453,7 +453,7 @@ export default function Water() {
           </>
         }
         mobileActions={
-          <IconButton label="Log water" variant="primary" onClick={() => setLogOpen(true)}>
+          <IconButton label="Log water" onClick={() => setLogOpen(true)}>
             <Plus size={22} />
           </IconButton>
         }

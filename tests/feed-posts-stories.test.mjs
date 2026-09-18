@@ -200,5 +200,5 @@ test('the responses sheet never reads a disabled query, and render errors get a 
   assert.match(boundary, /static getDerivedStateFromError\(error: Error\): State/);
   assert.match(boundary, /export function RouteErrorBoundary/);
   assert.match(read('src/App.tsx'), /<RouteErrorBoundary>\n\s+<Routes>/, 'every routed screen renders inside a boundary');
-  assert.match(read('src/components/Layout.tsx'), /<RouteErrorBoundary>\{children \?\? <Outlet \/>\}<\/RouteErrorBoundary>/, 'the shell survives a broken page');
+  assert.match(read('src/components/Layout.tsx'), /<RouteErrorBoundary>\{waiting \? <PageSkeleton \/> : \(children \?\? <Outlet \/>\)\}<\/RouteErrorBoundary>/, 'the shell survives a broken page');
 });
