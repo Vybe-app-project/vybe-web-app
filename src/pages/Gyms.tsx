@@ -679,8 +679,9 @@ export default function Gyms() {
     queryKey: ['gyms', 'places', debounced],
     enabled: tab === 'places' && debounced.length > 0,
     queryFn: async () => {
+      // kind=gym keeps the provider from offering farms and cafés as gyms.
       const { data } = await api.get('/gyms/place-search', {
-        params: { q: debounced, limit: PLACE_LIMIT },
+        params: { q: debounced, limit: PLACE_LIMIT, kind: 'gym' },
       });
       return (data.results || data.places || []) as Place[];
     },

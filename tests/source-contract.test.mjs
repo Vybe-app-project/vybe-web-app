@@ -192,6 +192,13 @@ test('public legal and deletion pages ship without placeholder configuration', (
   }
 });
 
+test('the Gyms places search asks the API for fitness places only', () => {
+  const gyms = read('src/pages/Gyms.tsx');
+  // Without kind=gym the OpenStreetMap fallback offers any named place
+  // (farms, helipads, cafés) as a gym to join.
+  assert.match(gyms, /api\.get\('\/gyms\/place-search',\s*\{\s*params:\s*\{[^}]*kind:\s*'gym'/s);
+});
+
 test('OVH release scripts require clean immutable commit artifacts', () => {
   const local = read('scripts/release-ovh.sh');
   const remote = read('scripts/deploy-web-remote.sh');
