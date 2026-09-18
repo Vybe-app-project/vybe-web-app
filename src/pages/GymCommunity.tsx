@@ -1,23 +1,43 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
+import { useDebounced } from '../lib/hooks';
 import {
   Avatar,
   Badge,
   Button,
   Card,
+  CardMedia,
   ConfirmDialog,
   EmptyState,
   ErrorState,
-  Input,
   Modal,
+  PageHeader,
+  SearchField,
   Skeleton,
-  Spinner,
+  SkeletonRow,
+  SkeletonText,
   Tabs,
+  cx,
+  humanize,
   useToast,
 } from './ui';
-import { Check, Users, X } from './icons';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Globe,
+  Heart,
+  Lock,
+  MapPin,
+  MessageCircle,
+  Users,
+  X,
+} from './icons';
+
+/* ------------------------------------------------------------------ types */
 
 type Community = {
   _id: string;
@@ -52,12 +72,23 @@ type CommunityPost = {
   content?: string;
   createdAt?: string;
   media?: { uri?: string; url?: string; type?: string }[];
+  medias?: { uri?: string; url?: string; type?: string }[];
   author?: { _id: string; username?: string; fullName?: string; avatar?: string };
   likes?: unknown[];
   comments?: unknown[];
 };
 
-const PAGE = 20;
+type Paged<T> = {
+  gymCommunities: T[];
+  pagination: { currentPage: number; totalPages: number; hasNext: boolean };
+};
+
+type ListTab = 'explore' | 'mine';
+
+const PAGE = 18;
+const MOD_ROLES = ['owner', 'admin', 'moderator', 'founder'];
+
+/* ------------------------------------------------------------------ helpers */
 
 const ago = (iso?: string) => {
   if (!iso) return '';
@@ -70,16 +101,64 @@ const ago = (iso?: string) => {
   }
 };
 
-function useDebounced<T>(value: T, delay = 400): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = window.setTimeout(() => setV(value), delay);
-    return () => window.clearTimeout(t);
-  }, [value, delay]);
-  return v;
+const coverOf = (c: Community) => mediaUrl(c.coverImage || c.photos?.[0]?.url || '');
+const nameOf = (u?: { username?: string; fullName?: string }) => u?.fullName?.trim() || u?.username || 'Member';
+const isModRole = (role?: string | null) => MOD_ROLES.includes(String(role || '').toLowerCase());
+
+function Pager({
+  page,
+  totalPages,
+  hasNext,
+  onPrev,
+  onNext,
+  className,
+}: {
+  page: number;
+  totalPages?: number;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  className?: string;
+}) {
+  return (
+    <nav aria-label="Pagination" className={cx('flex items-center justify-between gap-3', className)}>
+      <Button variant="secondary" size="sm" disabled={page <= 1} onClick={onPrev} icon={<ChevronLeft size={16} />}>
+        Previous
+      </Button>
+      <span className="tabular text-xs font-semibold text-text-2">
+        Page {page}
+        {totalPages ? ` of ${Math.max(totalPages, 1)}` : ''}
+      </span>
+      <Button variant="secondary" size="sm" disabled={!hasNext} onClick={onNext} iconRight={<ChevronRight size={16} />}>
+        Next
+      </Button>
+    </nav>
+  );
 }
 
-const coverOf = (c: Community) => mediaUrl(c.coverImage || c.photos?.[0]?.url || '');
+function CommunityCardSkeleton() {
+  return (
+    <div className="card p-3">
+      <Skeleton className="aspect-video w-full rounded-md" />
+      <div className="mt-3 space-y-2 px-1">
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-3 w-1/2" />
+        <div className="flex gap-2 pt-1">
+          <Skeleton className="h-6 w-20 rounded-xs" />
+          <Skeleton className="h-6 w-16 rounded-xs" />
+        </div>
+      </div>
+      <Skeleton className="mt-3 h-11 w-full rounded-sm" />
+    </div>
+  );
+}
+
+function RoleBadge({ role }: { role?: string | null }) {
+  if (!role) return null;
+  return <Badge tone={isModRole(role) ? 'brand' : 'neutral'}>{humanize(role)}</Badge>;
+}
+
+/* ------------------------------------------------------------------ card */
 
 function CommunityCard({
   community,
@@ -91,34 +170,54 @@ function CommunityCard({
   action?: React.ReactNode;
 }) {
   const cover = coverOf(community);
+  const members = community.stats?.totalMembers ?? 0;
   return (
-    <article className="card overflow-hidden">
-      <button type="button" onClick={onOpen} className="block w-full text-left">
-        <div className="h-28 w-full bg-[var(--color-surface-2)]">
+    <article className="card flex flex-col p-3">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="group -m-1 flex-1 rounded-md p-1 text-left"
+        aria-label={`${community.name || 'Community'} — open`}
+      >
+        <CardMedia ratio="16/9">
           {cover ? (
-            <img src={cover} alt={community.name} className="h-full w-full object-cover" />
+            <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
           ) : (
-            <span className="flex h-full w-full items-center justify-center text-[var(--color-muted)]">
-              <Users />
+            <span className="flex h-full w-full items-center justify-center text-text-3">
+              <Users size={28} />
             </span>
           )}
-        </div>
-        <div className="space-y-1 p-3">
-          <p className="truncate text-sm font-semibold">{community.name || 'Community'}</p>
-          <p className="truncate text-xs text-[var(--color-muted)]">
-            {community.vicinity || community.description || 'Gym community'}
+        </CardMedia>
+        <div className="mt-3 space-y-1 px-1">
+          <p className="truncate text-md font-semibold text-text-1 group-hover:underline group-hover:underline-offset-2">
+            {community.name || 'Community'}
           </p>
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <Badge>{community.stats?.totalMembers ?? 0} members</Badge>
-            {community.category && <Badge>{community.category}</Badge>}
-            {community.settings?.requireApproval && <Badge>Approval required</Badge>}
+          <p className="flex min-w-0 items-center gap-1 truncate text-xs text-text-2">
+            {community.vicinity ? <MapPin size={13} className="shrink-0 text-text-3" /> : null}
+            <span className="truncate">{community.vicinity || community.description || 'Gym community'}</span>
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <Badge tone="neutral">
+              <Users size={12} />
+              <span className="tabular">{members}</span> {members === 1 ? 'member' : 'members'}
+            </Badge>
+            {community.category ? <Badge tone="neutral">{humanize(community.category)}</Badge> : null}
+            {community.settings?.requireApproval ? (
+              <Badge tone="warning">
+                <Lock size={12} />
+                Approval
+              </Badge>
+            ) : null}
+            {community.isMember ? <RoleBadge role={community.userRole || 'member'} /> : null}
           </div>
         </div>
       </button>
-      {action && <div className="border-t border-[var(--color-line)] p-3">{action}</div>}
+      {action ? <div className="mt-3 border-t border-line pt-3">{action}</div> : null}
     </article>
   );
 }
+
+/* ------------------------------------------------------------------ detail */
 
 function CommunityDetail({
   communityId,
@@ -129,7 +228,7 @@ function CommunityDetail({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState('posts');
+  const [tab, setTab] = useState<'posts' | 'members' | 'requests'>('posts');
   const [memberPage, setMemberPage] = useState(1);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
@@ -143,33 +242,36 @@ function CommunityDetail({
     enabled: Boolean(communityId),
     queryFn: async () => {
       const { data } = await api.get(`/gyms/community/${communityId}`);
-      return (data.data || data) as Community;
+      return (data.data || data.gymCommunity || data) as Community;
     },
   });
+
+  const community = detail.data;
+  const canModerate = isModRole(community?.userRole);
 
   const members = useQuery({
     queryKey: ['community', communityId, 'members', memberPage],
     enabled: Boolean(communityId) && tab === 'members',
     queryFn: async () => {
       const { data } = await api.get(`/gyms/community/${communityId}/members`, {
-        params: { page: memberPage, limit: PAGE },
+        params: { page: memberPage, limit: 20 },
       });
-      return data.data as {
+      return (data.data || data) as {
         members: Member[];
-        pagination: { currentPage: number; totalPages: number; hasNext: boolean };
+        pagination?: { currentPage: number; totalPages: number; hasNext: boolean };
       };
     },
   });
 
   const requests = useQuery({
     queryKey: ['community', communityId, 'requests'],
-    enabled: Boolean(communityId) && tab === 'requests',
+    enabled: Boolean(communityId) && canModerate,
     retry: false,
     queryFn: async () => {
       const { data } = await api.get(`/gyms/community/${communityId}/membership-requests`, {
         params: { limit: 50 },
       });
-      return (data.requests || []) as MembershipRequest[];
+      return (data.requests || data.data?.requests || []) as MembershipRequest[];
     },
   });
 
@@ -178,7 +280,7 @@ function CommunityDetail({
     enabled: Boolean(communityId) && tab === 'posts',
     queryFn: async () => {
       const { data } = await api.get(`/posts/gym/community/posts/all/${communityId}`, {
-        params: { page: 1, limit: PAGE },
+        params: { page: 1, limit: 20 },
       });
       return (data.posts || []) as CommunityPost[];
     },
@@ -186,14 +288,12 @@ function CommunityDetail({
 
   const approve = useMutation({
     mutationFn: async (requestId: string) => {
-      await api.post(
-        `/gyms/community/${communityId}/membership-requests/${requestId}/approve`,
-      );
+      await api.post(`/gyms/community/${communityId}/membership-requests/${requestId}/approve`);
     },
     onSuccess: () => {
       toast.success('Member approved');
-      requests.refetch();
       qc.invalidateQueries({ queryKey: ['community', communityId] });
+      qc.invalidateQueries({ queryKey: ['communities'] });
     },
     onError: (e) => toast.error(errMsg(e, 'Could not approve the request')),
   });
@@ -203,10 +303,10 @@ function CommunityDetail({
       await api.delete(`/gyms/community/${communityId}/membership-requests/${requestId}`);
     },
     onSuccess: () => {
-      toast.success('Request denied');
-      requests.refetch();
+      toast.success('Request declined');
+      qc.invalidateQueries({ queryKey: ['community', communityId, 'requests'] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not deny the request')),
+    onError: (e) => toast.error(errMsg(e, 'Could not decline the request')),
   });
 
   const leave = useMutation({
@@ -217,6 +317,7 @@ function CommunityDetail({
       toast.success('You left the community');
       setConfirmLeave(false);
       qc.invalidateQueries({ queryKey: ['communities'] });
+      qc.invalidateQueries({ queryKey: ['community', communityId] });
       onClose();
     },
     onError: (e) => {
@@ -225,217 +326,288 @@ function CommunityDetail({
     },
   });
 
-  const community = detail.data;
-  const canModerate = ['owner', 'admin', 'moderator', 'founder'].includes(
-    String(community?.userRole || '').toLowerCase(),
-  );
+  const cover = community ? coverOf(community) : '';
+  const pendingCount = requests.data?.length ?? 0;
 
   return (
-    <Modal open={Boolean(communityId)} onClose={onClose} title={community?.name || 'Community'}>
-      {detail.isLoading && <Skeleton className="h-40 w-full" />}
-      {detail.isError && (
-        <ErrorState message={errMsg(detail.error)} onRetry={() => detail.refetch()} />
-      )}
-      {community && (
-        <div className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm text-[var(--color-muted)]">{community.vicinity}</p>
-              {community.description && <p className="mt-1 text-sm">{community.description}</p>}
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Badge>{community.stats?.totalMembers ?? 0} members</Badge>
-                {community.category && <Badge>{community.category}</Badge>}
-                {community.userRole && <Badge>{community.userRole}</Badge>}
+    <Modal
+      open={Boolean(communityId)}
+      onClose={onClose}
+      size="lg"
+      title={community?.name || 'Community'}
+      description={community?.vicinity || undefined}
+    >
+      {detail.isLoading ? (
+        <div className="space-y-4" aria-busy="true">
+          <Skeleton className="aspect-video w-full rounded-md" />
+          <SkeletonText lines={2} />
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      ) : null}
+      {detail.isError ? <ErrorState error={detail.error} onRetry={() => detail.refetch()} /> : null}
+      {community ? (
+        <div className="space-y-5">
+          {cover ? (
+            <CardMedia ratio="16/9">
+              <img src={cover} alt={community.name || 'Community cover'} className="h-full w-full object-cover" />
+            </CardMedia>
+          ) : null}
+
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-2">
+              {community.description ? (
+                <p className="prose-measure text-base text-text-1">{community.description}</p>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge tone="neutral">
+                  <Users size={12} />
+                  <span className="tabular">{community.stats?.totalMembers ?? 0}</span> members
+                </Badge>
+                {typeof community.stats?.totalPosts === 'number' ? (
+                  <Badge tone="neutral">
+                    <span className="tabular">{community.stats.totalPosts}</span> posts
+                  </Badge>
+                ) : null}
+                {community.category ? <Badge tone="neutral">{humanize(community.category)}</Badge> : null}
+                {community.settings?.isPublic === false ? (
+                  <Badge tone="warning">
+                    <Lock size={12} />
+                    Private
+                  </Badge>
+                ) : null}
+                {community.isMember ? <RoleBadge role={community.userRole || 'member'} /> : null}
               </div>
             </div>
-            {community.isMember && (
-              <Button variant="ghost" onClick={() => setConfirmLeave(true)}>
+            {community.isMember ? (
+              <Button variant="secondary" size="sm" onClick={() => setConfirmLeave(true)}>
                 Leave
               </Button>
-            )}
+            ) : null}
           </div>
 
           <Tabs
+            aria-label="Community sections"
             tabs={[
               { value: 'posts', label: 'Posts' },
-              { value: 'members', label: 'Members' },
-              ...(canModerate ? [{ value: 'requests', label: 'Requests' }] : []),
+              { value: 'members', label: 'Members', count: community.stats?.totalMembers },
+              ...(canModerate
+                ? [{ value: 'requests', label: 'Requests', count: pendingCount || undefined }]
+                : []),
             ]}
             value={tab}
-            onChange={setTab}
+            onChange={(k) => setTab(k as typeof tab)}
           />
 
-          {tab === 'posts' && (
+          {tab === 'posts' ? (
             <div className="space-y-3">
-              {posts.isLoading &&
-                Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-24 w-full" />
-                ))}
-              {posts.isError && (
-                <ErrorState message={errMsg(posts.error)} onRetry={() => posts.refetch()} />
-              )}
-              {posts.isSuccess && (posts.data?.length || 0) === 0 && (
-                <EmptyState
-                  title="No posts yet"
-                  description="Community posts will appear here."
-                />
-              )}
-              {(posts.data || []).map((p) => {
-                const media = p.media?.[0];
-                const src = mediaUrl(media?.uri || media?.url || '');
-                return (
-                  <article key={p._id} className="rounded-xl bg-[var(--color-surface-2)] p-3">
-                    <div className="flex items-center gap-2">
-                      <Avatar
-                        src={mediaUrl(p.author?.avatar)}
-                        name={p.author?.fullName || p.author?.username}
-                        size={30}
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-medium">
-                          {p.author?.fullName || p.author?.username}
-                        </p>
-                        <p className="text-[11px] text-[var(--color-muted)]">
-                          {ago(p.createdAt)}
-                        </p>
-                      </div>
+              {posts.isLoading ? (
+                <div className="space-y-3" aria-busy="true">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="rounded-md bg-surface-2 p-3">
+                      <SkeletonRow className="py-0" />
+                      <SkeletonText lines={2} className="mt-3" />
                     </div>
-                    {p.content && <p className="mt-2 whitespace-pre-wrap text-sm">{p.content}</p>}
-                    {src && (
-                      <img
-                        src={src}
-                        alt="post media"
-                        className="mt-2 max-h-64 w-full rounded-lg object-cover"
-                      />
-                    )}
-                    <p className="mt-2 text-[11px] text-[var(--color-muted)]">
-                      {p.likes?.length ?? 0} likes · {p.comments?.length ?? 0} comments
-                    </p>
+                  ))}
+                </div>
+              ) : null}
+              {posts.isError ? <ErrorState error={posts.error} onRetry={() => posts.refetch()} /> : null}
+              {posts.isSuccess && (posts.data?.length || 0) === 0 ? (
+                <EmptyState
+                  size="sm"
+                  title="No posts yet"
+                  message={
+                    community.isMember
+                      ? 'Be the first to post — share a session from the Home feed and tag this community.'
+                      : 'Members have not posted here yet. Join to see what they share.'
+                  }
+                  action={community.isMember ? { label: 'Go to feed', to: '/?compose=1', variant: 'secondary' } : undefined}
+                />
+              ) : null}
+              {(posts.data || []).map((p) => {
+                const media = p.media?.[0] || p.medias?.[0];
+                const src = mediaUrl(media?.uri || media?.url || '');
+                const author = p.author;
+                return (
+                  <article key={p._id} className="rounded-md bg-surface-2 p-3">
+                    <div className="flex items-center gap-2.5">
+                      {author?._id ? (
+                        <Link to={`/u/${author._id}`} viewTransition className="flex min-w-0 items-center gap-2.5 rounded-sm">
+                          <Avatar src={author.avatar} name={nameOf(author)} size="sm" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-text-1">{nameOf(author)}</span>
+                            <span className="block text-xs text-text-3">{ago(p.createdAt)}</span>
+                          </span>
+                        </Link>
+                      ) : (
+                        <>
+                          <Avatar name="Member" size="sm" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-text-1">Member</span>
+                            <span className="block text-xs text-text-3">{ago(p.createdAt)}</span>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <Link to={`/p/${p._id}`} viewTransition className="mt-2 block rounded-sm">
+                      {p.content ? <p className="prose-measure whitespace-pre-wrap text-base text-text-1">{p.content}</p> : null}
+                      {src ? (
+                        <CardMedia className="mt-2 max-h-72">
+                          <img src={src} alt="" loading="lazy" className="max-h-72 w-full object-cover" />
+                        </CardMedia>
+                      ) : null}
+                    </Link>
+                    <div className="mt-2 flex items-center gap-4 text-xs text-text-2">
+                      <span className="inline-flex items-center gap-1">
+                        <Heart size={14} />
+                        <span className="tabular">{p.likes?.length ?? 0}</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <MessageCircle size={14} />
+                        <span className="tabular">{p.comments?.length ?? 0}</span>
+                      </span>
+                      <Link to={`/p/${p._id}`} viewTransition className="ml-auto font-semibold text-brand-text underline-offset-2 hover:underline">
+                        Open post
+                      </Link>
+                    </div>
                   </article>
                 );
               })}
             </div>
-          )}
+          ) : null}
 
-          {tab === 'members' && (
+          {tab === 'members' ? (
             <div className="space-y-2">
-              {members.isLoading &&
-                Array.from({ length: 5 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 w-full" />
-                ))}
-              {members.isError && (
-                <ErrorState message={errMsg(members.error)} onRetry={() => members.refetch()} />
-              )}
-              {members.isSuccess && (members.data?.members?.length || 0) === 0 && (
-                <EmptyState title="No members" description="This community has no members yet." />
-              )}
-              <ul className="space-y-1">
-                {(members.data?.members || []).map((m, i) => (
-                  <li
-                    key={m._id || m.user?._id || i}
-                    className="flex items-center gap-3 rounded-xl bg-[var(--color-surface-2)] p-2"
-                  >
-                    <Avatar
-                      src={mediaUrl(m.user?.avatar)}
-                      name={m.user?.fullName || m.user?.username}
-                      size={34}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">
-                        {m.user?.fullName || m.user?.username || 'Member'}
-                      </p>
-                      <p className="text-[11px] text-[var(--color-muted)]">
-                        joined {ago(m.joinedAt)}
-                      </p>
-                    </div>
-                    {m.role && <Badge>{m.role}</Badge>}
-                  </li>
-                ))}
-              </ul>
-              {(members.data?.members?.length || 0) > 0 && (
-                <div className="flex items-center justify-between">
-                  <Button
-                    variant="ghost"
-                    disabled={memberPage === 1}
-                    onClick={() => setMemberPage((p) => Math.max(1, p - 1))}
-                  >
-                    Previous
-                  </Button>
-                  <span className="text-xs text-[var(--color-muted)]">
-                    Page {members.data?.pagination?.currentPage ?? memberPage}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    disabled={!members.data?.pagination?.hasNext}
-                    onClick={() => setMemberPage((p) => p + 1)}
-                  >
-                    Next
-                  </Button>
+              {members.isLoading ? (
+                <div aria-busy="true">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <SkeletonRow key={i} />
+                  ))}
                 </div>
-              )}
+              ) : null}
+              {members.isError ? <ErrorState error={members.error} onRetry={() => members.refetch()} /> : null}
+              {members.isSuccess && (members.data?.members?.length || 0) === 0 ? (
+                <EmptyState size="sm" icon={<Users size={24} />} title="No members to show" message="This community has no visible members yet." />
+              ) : null}
+              {(members.data?.members?.length || 0) > 0 ? (
+                <ul className="divide-y divide-line">
+                  {(members.data?.members || []).map((m, i) => {
+                    const name = nameOf(m.user);
+                    const row = (
+                      <>
+                        <Avatar src={m.user?.avatar} name={name} size="md" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold text-text-1">{name}</span>
+                          {m.joinedAt ? <span className="block text-xs text-text-3">Joined {ago(m.joinedAt)}</span> : null}
+                        </span>
+                        <RoleBadge role={m.role} />
+                      </>
+                    );
+                    return (
+                      <li key={m._id || m.user?._id || i}>
+                        {m.user?._id ? (
+                          <Link to={`/u/${m.user._id}`} viewTransition className="flex min-h-14 items-center gap-3 rounded-sm px-1 py-2 transition-colors dur-1 hover:bg-surface-2">
+                            {row}
+                          </Link>
+                        ) : (
+                          <div className="flex min-h-14 items-center gap-3 px-1 py-2">{row}</div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {(members.data?.members?.length || 0) > 0 || memberPage > 1 ? (
+                <Pager
+                  page={members.data?.pagination?.currentPage ?? memberPage}
+                  totalPages={members.data?.pagination?.totalPages}
+                  hasNext={Boolean(members.data?.pagination?.hasNext)}
+                  onPrev={() => setMemberPage((p) => Math.max(1, p - 1))}
+                  onNext={() => setMemberPage((p) => p + 1)}
+                />
+              ) : null}
             </div>
-          )}
+          ) : null}
 
-          {tab === 'requests' && (
+          {tab === 'requests' ? (
             <div className="space-y-2">
-              {requests.isLoading &&
-                Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 w-full" />
-                ))}
-              {requests.isError && (
+              {requests.isLoading ? (
+                <div aria-busy="true">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <SkeletonRow key={i} />
+                  ))}
+                </div>
+              ) : null}
+              {requests.isError ? (
                 <ErrorState
-                  message={errMsg(requests.error, 'You cannot moderate this community')}
+                  error={requests.error}
+                  title="Requests are unavailable"
+                  message={errMsg(requests.error, 'Only moderators can review membership requests.')}
                   onRetry={() => requests.refetch()}
                 />
-              )}
-              {requests.isSuccess && (requests.data?.length || 0) === 0 && (
+              ) : null}
+              {requests.isSuccess && pendingCount === 0 ? (
                 <EmptyState
+                  size="sm"
+                  icon={<Check size={24} />}
                   title="No pending requests"
-                  description="Membership requests will show up here."
+                  message="New requests to join appear here for you to approve or decline."
                 />
-              )}
-              <ul className="space-y-1">
-                {(requests.data || []).map((r) => (
-                  <li
-                    key={r._id}
-                    className="flex items-center gap-3 rounded-xl bg-[var(--color-surface-2)] p-2"
-                  >
-                    <Avatar
-                      src={mediaUrl(r.user?.avatar)}
-                      name={r.user?.fullName || r.user?.username}
-                      size={34}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">
-                        {r.user?.fullName || r.user?.username}
-                      </p>
-                      <p className="text-[11px] text-[var(--color-muted)]">
-                        requested {ago(r.requestedAt)}
-                      </p>
-                    </div>
-                    <Button disabled={approve.isPending} onClick={() => approve.mutate(r._id)}>
-                      <Check /> Approve
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={deny.isPending}
-                      onClick={() => deny.mutate(r._id)}
-                    >
-                      <X /> Deny
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              ) : null}
+              {pendingCount > 0 ? (
+                <ul className="divide-y divide-line">
+                  {(requests.data || []).map((r) => {
+                    const name = nameOf(r.user);
+                    return (
+                      <li key={r._id} className="flex flex-wrap items-center gap-3 py-2">
+                        <Avatar src={r.user?.avatar} name={name} size="md" />
+                        <div className="min-w-0 flex-1">
+                          {r.user?._id ? (
+                            <Link to={`/u/${r.user._id}`} viewTransition className="block truncate text-sm font-semibold text-text-1 hover:underline">
+                              {name}
+                            </Link>
+                          ) : (
+                            <p className="truncate text-sm font-semibold text-text-1">{name}</p>
+                          )}
+                          {r.requestedAt ? <p className="text-xs text-text-3">Requested {ago(r.requestedAt)}</p> : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            icon={<Check size={16} />}
+                            loading={approve.isPending && approve.variables === r._id}
+                            disabled={approve.isPending || deny.isPending}
+                            onClick={() => approve.mutate(r._id)}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<X size={16} />}
+                            loading={deny.isPending && deny.variables === r._id}
+                            disabled={approve.isPending || deny.isPending}
+                            onClick={() => deny.mutate(r._id)}
+                          >
+                            Decline
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       <ConfirmDialog
         open={confirmLeave}
-        title="Leave community"
-        description="You will lose access to this community's posts and members."
-        confirmLabel="Leave"
+        title="Leave this community?"
+        description="You will stop seeing its posts and members. You can ask to join again later."
+        confirmLabel="Leave community"
         destructive
         loading={leave.isPending}
         onClose={() => setConfirmLeave(false)}
@@ -445,14 +617,16 @@ function CommunityDetail({
   );
 }
 
+/* ------------------------------------------------------------------ page */
+
 export default function GymCommunity() {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState('explore');
+  const [tab, setTab] = useState<ListTab>('explore');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<string | null>(null);
-  const debounced = useDebounced(search);
+  const debounced = useDebounced(search.trim(), 400);
 
   useEffect(() => setPage(1), [debounced, tab]);
 
@@ -463,10 +637,7 @@ export default function GymCommunity() {
       const { data } = await api.get('/gyms/community/explore', {
         params: { page, limit: PAGE, search: debounced || undefined },
       });
-      return data.data as {
-        gymCommunities: Community[];
-        pagination: { currentPage: number; totalPages: number; hasNext: boolean };
-      };
+      return data.data as Paged<Community>;
     },
   });
 
@@ -477,134 +648,150 @@ export default function GymCommunity() {
       const { data } = await api.get('/gyms/community/my-communities', {
         params: { page, limit: PAGE, search: debounced || undefined },
       });
-      return data.data as {
-        gymCommunities: Community[];
-        pagination: { currentPage: number; totalPages: number; hasNext: boolean };
-      };
+      return data.data as Paged<Community>;
     },
   });
 
   const join = useMutation({
     mutationFn: async (gymId: string) => {
       const { data } = await api.post('/gyms/community/join', { gymId });
-      return data as { message?: string };
+      return data as { message?: string; membership?: { status?: string } };
     },
     onSuccess: (data) => {
-      toast.success(data?.message || 'Joined the community');
+      const msg = data?.message || '';
+      if (/cancel/i.test(msg)) toast.info('Request withdrawn');
+      else if (/request|approval|pending/i.test(msg)) toast.info(msg || 'Request sent — a moderator will review it');
+      else toast.success(msg || 'You joined the community');
       qc.invalidateQueries({ queryKey: ['communities'] });
     },
     onError: (e) => toast.error(errMsg(e, 'Could not join this community')),
   });
 
   const active = tab === 'explore' ? explore : mine;
-  const communities = useMemo(
-    () => active.data?.gymCommunities || [],
-    [active.data],
-  );
+  const communities = useMemo(() => active.data?.gymCommunities || [], [active.data]);
+  const pagination = active.data?.pagination;
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 px-4 py-6">
-      <header>
-        <h1 className="text-xl font-semibold">Gym communities</h1>
-        <p className="text-sm text-[var(--color-muted)]">
-          Join the crews training at your gym and follow their posts.
-        </p>
-      </header>
+    <div className="space-y-6">
+      <PageHeader title="Communities" subtitle="Join the crews training at your gym and follow what they post." />
 
       <Tabs
+        variant="segmented"
+        aria-label="Community lists"
         tabs={[
           { value: 'explore', label: 'Explore' },
           { value: 'mine', label: 'My communities' },
         ]}
         value={tab}
-        onChange={setTab}
+        onChange={(k) => setTab(k as ListTab)}
       />
 
-      <Input
-        placeholder="Search communities"
+      <SearchField
+        label={tab === 'mine' ? 'Search my communities' : 'Search communities'}
+        hideLabel
+        placeholder={tab === 'mine' ? 'Search your communities' : 'Search by gym or community name'}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
 
-      {active.isLoading && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {active.isLoading ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading communities">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-52 w-full" />
+            <CommunityCardSkeleton key={i} />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {active.isError && (
-        <ErrorState message={errMsg(active.error)} onRetry={() => active.refetch()} />
-      )}
+      {active.isError ? <ErrorState error={active.error} onRetry={() => active.refetch()} /> : null}
 
-      {active.isSuccess && communities.length === 0 && (
-        <Card className="p-6">
+      {active.isSuccess && communities.length === 0 ? (
+        tab === 'mine' ? (
+          debounced ? (
+            <EmptyState
+              variant="no-results"
+              title={`None of your communities match “${debounced}”`}
+              message="Try another name, or clear the search to see them all."
+              action={{ label: 'Clear search', onClick: () => setSearch(''), variant: 'secondary' }}
+            />
+          ) : (
+            <EmptyState
+              icon={<Globe size={26} />}
+              title="You have not joined a community yet"
+              message="Communities are built around gyms. Find yours and join the people you already train next to."
+              action={{ label: 'Explore communities', onClick: () => setTab('explore') }}
+              secondaryAction={{ label: 'Find gyms nearby', to: '/gyms' }}
+            />
+          )
+        ) : debounced ? (
           <EmptyState
-            icon={<Users />}
-            title={tab === 'mine' ? 'You have not joined any community' : 'No communities found'}
-            description={
-              tab === 'mine'
-                ? 'Explore communities to find your gym crew.'
-                : 'Try a different search or check back later.'
-            }
+            variant="no-results"
+            title={`No communities match “${debounced}”`}
+            message="Check the spelling, or search the gym directory — a community starts the moment someone joins a gym."
+            action={{ label: 'Search gyms', to: '/gyms', variant: 'secondary' }}
           />
-        </Card>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {communities.map((c) => (
-          <CommunityCard
-            key={c._id}
-            community={c}
-            onOpen={() => setOpenId(c._id)}
-            action={
-              tab === 'explore' ? (
-                c.userMembership?.status === 'pending' ? (
-                  <Button className="w-full" variant="ghost" disabled>
-                    Request pending
-                  </Button>
-                ) : (
-                  <Button
-                    className="w-full"
-                    disabled={join.isPending}
-                    onClick={() => join.mutate(c._id)}
-                  >
-                    {join.isPending ? <Spinner size={16} /> : 'Join'}
-                  </Button>
-                )
-              ) : (
-                <Button className="w-full" variant="ghost" onClick={() => setOpenId(c._id)}>
-                  Open
-                </Button>
-              )
-            }
+        ) : (
+          <EmptyState
+            icon={<Globe size={26} />}
+            title="No communities to explore yet"
+            message="Nobody has started a community around a gym near you. Find your gym and be the first."
+            action={{ label: 'Find gyms', to: '/gyms' }}
           />
-        ))}
-      </div>
+        )
+      ) : null}
 
-      {communities.length > 0 && (
-        <div className="flex items-center justify-between">
-          <Button
-            variant="ghost"
-            disabled={page === 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            Previous
-          </Button>
-          <span className="text-xs text-[var(--color-muted)]">
-            Page {active.data?.pagination?.currentPage ?? page} of{' '}
-            {active.data?.pagination?.totalPages ?? 1}
-          </span>
-          <Button
-            variant="ghost"
-            disabled={!active.data?.pagination?.hasNext}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      )}
+      {communities.length > 0 ? (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {communities.map((c) => {
+              const pending = c.userMembership?.status === 'pending';
+              const busy = join.isPending && join.variables === c._id;
+              return (
+                <CommunityCard
+                  key={c._id}
+                  community={c}
+                  onOpen={() => setOpenId(c._id)}
+                  action={
+                    tab === 'explore' && !c.isMember ? (
+                      pending ? (
+                        <Button
+                          block
+                          variant="secondary"
+                          loading={busy}
+                          disabled={join.isPending && !busy}
+                          onClick={() => join.mutate(c._id)}
+                        >
+                          Cancel request
+                        </Button>
+                      ) : (
+                        <Button
+                          block
+                          variant="primary"
+                          loading={busy}
+                          disabled={join.isPending && !busy}
+                          onClick={() => join.mutate(c._id)}
+                        >
+                          {c.settings?.requireApproval ? 'Request to join' : 'Join'}
+                        </Button>
+                      )
+                    ) : (
+                      <Button block variant="secondary" onClick={() => setOpenId(c._id)}>
+                        Open
+                      </Button>
+                    )
+                  }
+                />
+              );
+            })}
+          </div>
+          <Pager
+            page={pagination?.currentPage ?? page}
+            totalPages={pagination?.totalPages}
+            hasNext={Boolean(pagination?.hasNext)}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => p + 1)}
+          />
+        </>
+      ) : null}
 
       <CommunityDetail communityId={openId} onClose={() => setOpenId(null)} />
     </div>

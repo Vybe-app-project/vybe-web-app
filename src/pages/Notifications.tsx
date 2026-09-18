@@ -1,27 +1,35 @@
+import { useMemo, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQueryClient,
-} from '@tanstack/react-query';
-import { api, errMsg, mediaUrl } from '../lib/api';
-import {
-  displayName,
-  timeAgo,
-  useInfiniteScroll,
-  type AppNotification,
-} from '../lib/hooks';
+import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { api, errMsg } from '../lib/api';
+import { displayName, timeAgo, useInfiniteScroll, type AppNotification } from '../lib/hooks';
 import {
   Avatar,
   Button,
   Card,
   EmptyState,
   ErrorState,
+  Menu,
+  PageHeader,
   Skeleton,
   Spinner,
+  cx,
   useToast,
+  type MenuItem,
 } from './ui';
-import { Check, Trash } from './icons';
+import {
+  Bell,
+  Check,
+  CheckCircle,
+  Dumbbell,
+  Hash,
+  Heart,
+  Inbox,
+  MessageCircle,
+  Trash,
+  UserPlus,
+  Users,
+} from './icons';
 
 type Page = {
   notifications: AppNotification[];
@@ -35,8 +43,10 @@ const TYPE_TEXT: Record<string, string> = {
   comment_like: 'liked your comment',
   post_comment: 'commented on your post',
   comment: 'commented on your post',
+  comment_reply: 'replied to your comment',
   follow: 'started following you',
   follow_request: 'requested to follow you',
+  follow_accept: 'accepted your follow request',
   friend_request: 'sent you a friend request',
   friend_accept: 'accepted your friend request',
   message: 'sent you a message',
@@ -44,20 +54,163 @@ const TYPE_TEXT: Record<string, string> = {
   mention: 'mentioned you',
 };
 
+/** Small glyph on the avatar so the kind of event reads before the text does. */
+const TYPE_GLYPH: Record<string, { icon: ReactNode; className: string }> = {
+  post_like: { icon: <Heart size={12} filled />, className: 'bg-danger-soft text-danger' },
+  comment_like: { icon: <Heart size={12} filled />, className: 'bg-danger-soft text-danger' },
+  post_comment: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
+  comment: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
+  comment_reply: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
+  follow: { icon: <UserPlus size={12} />, className: 'bg-brand-soft text-brand-text' },
+  follow_request: { icon: <UserPlus size={12} />, className: 'bg-brand-soft text-brand-text' },
+  follow_accept: { icon: <UserPlus size={12} />, className: 'bg-brand-soft text-brand-text' },
+  friend_request: { icon: <Users size={12} />, className: 'bg-brand-soft text-brand-text' },
+  friend_accept: { icon: <Users size={12} />, className: 'bg-brand-soft text-brand-text' },
+  message: { icon: <Inbox size={12} />, className: 'bg-info-soft text-info-text' },
+  workout_post: { icon: <Dumbbell size={12} />, className: 'bg-accent-soft text-accent-text' },
+  mention: { icon: <Hash size={12} />, className: 'bg-surface-3 text-text-2' },
+};
+
 function notificationText(n: AppNotification): string {
   return n.body || n.message || TYPE_TEXT[n.type] || 'sent you an update';
 }
 
-function notificationHref(n: AppNotification): string | null {
-  const postId = n.data?.postId || n.data?.post;
-  if (postId) return `/post/${postId}`;
-  const senderId = n.sender?._id || n.data?.sender || n.data?.userId;
+const idOf = (v: unknown): string | null => {
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object' && '_id' in (v as object)) return String((v as { _id: unknown })._id);
+  return null;
+};
+
+/** Canonical destinations: posts live at `/p/:postId`, threads at `/messages/:roomId`. */
+export function notificationHref(n: AppNotification): string | null {
+  const d = n.data || {};
+  const postId = idOf(d.postId) || idOf(d.post);
+  if (postId) return `/p/${postId}`;
+
+  if (n.type === 'message' || d.roomId || d.chatRoom || d.room) {
+    const room = idOf(d.roomId) || idOf(d.chatRoom) || idOf(d.room);
+    return room ? `/messages/${room}` : '/messages';
+  }
+  if (n.type === 'friend_request' || n.type === 'follow_request') return '/friends';
+
+  const senderId = idOf(n.sender?._id) || idOf(d.sender) || idOf(d.userId) || idOf(d.followerId);
   if (senderId) return `/u/${senderId}`;
   return null;
 }
 
 function isUnread(n: AppNotification) {
   return !(n.isRead ?? n.read ?? false);
+}
+
+type Bucket = 'Today' | 'Yesterday' | 'This week' | 'Earlier';
+const BUCKET_ORDER: Bucket[] = ['Today', 'Yesterday', 'This week', 'Earlier'];
+const DAY = 86_400_000;
+
+function bucketOf(iso: string, now = Date.now()): Bucket {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 'Earlier';
+  const d = new Date(now);
+  const startToday = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  if (t >= startToday) return 'Today';
+  if (t >= startToday - DAY) return 'Yesterday';
+  if (t >= startToday - 6 * DAY) return 'This week';
+  return 'Earlier';
+}
+
+function NotificationRow({
+  n,
+  onRead,
+  onDelete,
+  busy,
+}: {
+  n: AppNotification;
+  onRead: () => void;
+  onDelete: () => void;
+  busy: boolean;
+}) {
+  const href = notificationHref(n);
+  const unread = isUnread(n);
+  const glyph = TYPE_GLYPH[n.type];
+  const text = notificationText(n);
+
+  const items: MenuItem[] = [
+    ...(unread ? [{ label: 'Mark as read', icon: <Check size={18} />, onSelect: onRead, disabled: busy }] : []),
+    { label: 'Delete', icon: <Trash size={18} />, onSelect: onDelete, danger: true, disabled: busy, divider: unread },
+  ];
+
+  const body = (
+    <>
+      <span className="relative shrink-0">
+        <Avatar src={n.sender?.avatar} name={displayName(n.sender)} size={44} />
+        {glyph ? (
+          <span
+            aria-hidden="true"
+            className={cx('absolute -bottom-0.5 -right-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-surface-1', glyph.className)}
+          >
+            {glyph.icon}
+          </span>
+        ) : null}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={cx('block text-sm leading-snug', unread ? 'text-text-1' : 'text-text-2')}>
+          {n.sender ? <span className="font-semibold text-text-1">{displayName(n.sender)} </span> : null}
+          {text}
+        </span>
+        {n.title && n.title !== text ? <span className="mt-0.5 block truncate text-xs text-text-2">{n.title}</span> : null}
+        <span className="mt-1 flex items-center gap-2 text-xs text-text-3">
+          <time dateTime={n.createdAt}>{timeAgo(n.createdAt)}</time>
+          {unread ? <span className="font-semibold text-brand-text">New</span> : null}
+        </span>
+      </span>
+    </>
+  );
+
+  const rowCls = cx(
+    'flex min-h-11 flex-1 items-start gap-3 rounded-sm p-3 text-left transition-colors dur-1',
+    href && 'hover:bg-surface-2',
+  );
+
+  return (
+    <li className={cx('flex items-start pr-1 transition-colors dur-2', unread && 'bg-brand-soft/40')}>
+      {href ? (
+        <Link
+          to={href}
+          viewTransition
+          className={rowCls}
+          onClick={() => {
+            if (unread) onRead();
+          }}
+        >
+          {body}
+        </Link>
+      ) : (
+        <div className={rowCls}>{body}</div>
+      )}
+      <span className="flex items-center gap-1 self-center">
+        {unread ? <span aria-hidden="true" className="h-2 w-2 rounded-full bg-brand" /> : null}
+        <Menu items={items} label="Notification options" size={44} />
+      </span>
+    </li>
+  );
+}
+
+function ListSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <Card padded={false} aria-busy="true" aria-label="Loading notifications">
+      <ul className="divide-y divide-line">
+        {Array.from({ length: rows }).map((_, i) => (
+          <li key={i} className="flex items-center gap-3 p-3">
+            <Skeleton className="h-11 w-11 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-3/4" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
 }
 
 export default function Notifications() {
@@ -67,6 +220,7 @@ export default function Notifications() {
   const query = useInfiniteQuery({
     queryKey: ['notifications'],
     initialPageParam: 1,
+    refetchInterval: 60_000,
     queryFn: async ({ pageParam }) => {
       const { data } = await api.get('/notifications', {
         params: { page: pageParam, limit: 20 },
@@ -77,202 +231,155 @@ export default function Notifications() {
   });
 
   const sentinelRef = useInfiniteScroll(() => {
-    if (query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage();
+    if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
   }, !!query.hasNextPage);
+
+  /** Flip the read flag locally so the dot and badge react before the server does. */
+  const patchRead = (ids: Set<string> | 'all') => {
+    qc.setQueryData<InfiniteData<Page>>(['notifications'], (old) =>
+      old
+        ? {
+            ...old,
+            pages: old.pages.map((p) => ({
+              ...p,
+              notifications: (p.notifications || []).map((n) =>
+                ids === 'all' || ids.has(n._id) ? { ...n, isRead: true, read: true } : n,
+              ),
+            })),
+          }
+        : old,
+    );
+  };
 
   const markOne = useMutation({
     mutationFn: async (id: string) => {
       await api.put(`/notifications/${id}/read`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+    onMutate: (id) => patchRead(new Set([id])),
     onError: (e) => toast.error(errMsg(e, 'Could not mark this notification as read.')),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
 
   const markAll = useMutation({
     mutationFn: async (ids: string[]) => {
       await api.post('/notifications/mark-read', { ids, all: true });
     },
-    onSuccess: () => {
-      toast.success('All notifications marked as read');
-      qc.invalidateQueries({ queryKey: ['notifications'] });
-    },
+    onMutate: () => patchRead('all'),
+    onSuccess: () => toast.success('All caught up'),
     onError: (e) => toast.error(errMsg(e, 'Could not mark notifications as read.')),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/notifications/${id}`);
     },
-    onSuccess: () => {
-      toast.success('Notification removed');
-      qc.invalidateQueries({ queryKey: ['notifications'] });
+    onMutate: (id) => {
+      qc.setQueryData<InfiniteData<Page>>(['notifications'], (old) =>
+        old
+          ? { ...old, pages: old.pages.map((p) => ({ ...p, notifications: (p.notifications || []).filter((n) => n._id !== id) })) }
+          : old,
+      );
     },
+    onSuccess: () => toast.success('Notification removed'),
     onError: (e) => toast.error(errMsg(e, 'Could not delete this notification.')),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
 
-  const notifications = query.data?.pages.flatMap((p) => p.notifications || []) ?? [];
+  const notifications = useMemo(() => query.data?.pages.flatMap((p) => p.notifications || []) ?? [], [query.data]);
   const unreadIds = notifications.filter(isUnread).map((n) => n._id);
+  const unreadCount = unreadIds.length;
+  const busy = markOne.isPending || remove.isPending || markAll.isPending;
+
+  const groups = useMemo(() => {
+    const map = new Map<Bucket, AppNotification[]>();
+    for (const n of notifications) {
+      const b = bucketOf(n.createdAt);
+      const list = map.get(b);
+      if (list) list.push(n);
+      else map.set(b, [n]);
+    }
+    return BUCKET_ORDER.filter((b) => map.has(b)).map((b) => ({ label: b, items: map.get(b)! }));
+  }, [notifications]);
+
+  const subtitle = query.isSuccess
+    ? unreadCount > 0
+      ? `${unreadCount}${query.hasNextPage && unreadCount === notifications.length ? '+' : ''} unread`
+      : 'You are all caught up.'
+    : undefined;
+
+  const markAllButton = (size: 'sm' | 'md') => (
+    <Button
+      variant="ghost"
+      size={size}
+      icon={<CheckCircle size={18} />}
+      disabled={!unreadCount}
+      loading={markAll.isPending}
+      onClick={() => markAll.mutate(unreadIds)}
+    >
+      Mark all read
+    </Button>
+  );
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Notifications</h1>
-          {unreadIds.length > 0 && (
-            <p className="mt-1 text-sm text-[var(--color-muted)]">
-              {unreadIds.length} unread
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => query.refetch()} loading={query.isRefetching}>
-            Refresh
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!unreadIds.length || markAll.isPending}
-            loading={markAll.isPending}
-            onClick={() => markAll.mutate(unreadIds)}
-          >
-            Mark all read
-          </Button>
-        </div>
-      </header>
+    <>
+      <PageHeader title="Notifications" subtitle={subtitle} actions={markAllButton('md')} />
+      <div className="w-full max-w-form space-y-4">
+        {query.isSuccess && notifications.length > 0 ? (
+          <div className="flex min-h-10 items-center justify-between gap-3 lg:hidden">
+            <p className="text-sm text-text-2">{subtitle}</p>
+            {unreadCount > 0 ? markAllButton('sm') : null}
+          </div>
+        ) : null}
 
-      {query.isLoading && (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i} className="flex items-center gap-3 p-3">
-              <Skeleton className="h-10 w-10 rounded-full" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-3 w-2/3" />
-                <Skeleton className="h-3 w-20" />
-              </div>
+        {query.isLoading ? <ListSkeleton /> : null}
+
+        {query.isError && !query.isLoading ? (
+          <ErrorState title="Notifications unavailable" error={query.error} retry={() => void query.refetch()} />
+        ) : null}
+
+        {query.isSuccess && notifications.length === 0 ? (
+          <EmptyState
+            icon={<Bell size={26} />}
+            title="No notifications yet"
+            message="Likes, comments, follows and friend requests land here as they happen."
+            action={{ label: 'Find people to follow', to: '/discover' }}
+          />
+        ) : null}
+
+        {groups.map((g) => (
+          <section key={g.label} aria-labelledby={`notif-${g.label.replace(/\s/g, '-')}`} className="space-y-2">
+            <h2 id={`notif-${g.label.replace(/\s/g, '-')}`} className="type-label px-1 text-text-2">
+              {g.label}
+            </h2>
+            <Card padded={false} className="overflow-hidden">
+              <ul className="divide-y divide-line">
+                {g.items.map((n) => (
+                  <NotificationRow
+                    key={n._id}
+                    n={n}
+                    busy={busy}
+                    onRead={() => markOne.mutate(n._id)}
+                    onDelete={() => remove.mutate(n._id)}
+                  />
+                ))}
+              </ul>
             </Card>
-          ))}
-        </div>
-      )}
+          </section>
+        ))}
 
-      {query.isError && !query.isLoading && (
-        <ErrorState
-          title="Notifications unavailable"
-          message={errMsg(query.error, 'Please check your connection and try again.')}
-          action={
-            <Button variant="primary" onClick={() => query.refetch()}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {!query.isLoading && !query.isError && notifications.length === 0 && (
-        <EmptyState
-          title="No notifications yet"
-          message="Likes, comments, follows and friend requests will appear here."
-          action={
-            <Link to="/discover">
-              <Button variant="primary">Find people to follow</Button>
-            </Link>
-          }
-        />
-      )}
-
-      <div className="space-y-2">
-        {notifications.map((n) => {
-          const href = notificationHref(n);
-          const unread = isUnread(n);
-
-          const body = (
-            <div className="flex items-start gap-3">
-              <Avatar
-                src={mediaUrl(n.sender?.avatar)}
-                name={displayName(n.sender)}
-                size={40}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm">
-                  {n.sender && (
-                    <span className="font-semibold">{displayName(n.sender)} </span>
-                  )}
-                  <span className={unread ? '' : 'text-[var(--color-muted)]'}>
-                    {notificationText(n)}
-                  </span>
-                </p>
-                {n.title && n.title !== notificationText(n) && (
-                  <p className="mt-0.5 truncate text-xs text-[var(--color-muted)]">
-                    {n.title}
-                  </p>
-                )}
-                <p className="mt-1 text-xs text-[var(--color-muted)]">
-                  {timeAgo(n.createdAt)}
-                </p>
-              </div>
-              {unread && (
-                <span
-                  aria-label="Unread"
-                  className="mt-2 h-2 w-2 shrink-0 rounded-full bg-[var(--color-brand-2)]"
-                />
-              )}
-            </div>
-          );
-
-          return (
-            <Card
-              key={n._id}
-              className={`p-3 ${unread ? 'border-[var(--color-brand)]/40' : ''}`}
-            >
-              {href ? (
-                <Link
-                  to={href}
-                  onClick={() => {
-                    if (unread) markOne.mutate(n._id);
-                  }}
-                  className="block"
-                >
-                  {body}
-                </Link>
-              ) : (
-                body
-              )}
-
-              <div className="mt-2 flex items-center justify-end gap-2 border-t border-[var(--color-line)] pt-2">
-                {unread && (
-                  <button
-                    type="button"
-                    className="flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-white"
-                    onClick={() => markOne.mutate(n._id)}
-                    disabled={markOne.isPending}
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                    Mark read
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-red-400"
-                  onClick={() => remove.mutate(n._id)}
-                  disabled={remove.isPending}
-                >
-                  <Trash className="h-3.5 w-3.5" />
-                  Delete
-                </button>
-              </div>
-            </Card>
-          );
-        })}
+        {query.hasNextPage ? (
+          <div ref={sentinelRef} className="flex justify-center py-4">
+            {query.isFetchingNextPage ? (
+              <Spinner />
+            ) : (
+              <Button variant="ghost" onClick={() => void query.fetchNextPage()}>
+                Show older
+              </Button>
+            )}
+          </div>
+        ) : null}
       </div>
-
-      {query.hasNextPage && (
-        <div ref={sentinelRef} className="py-6 text-center">
-          {query.isFetchingNextPage ? (
-            <Spinner />
-          ) : (
-            <Button variant="ghost" onClick={() => query.fetchNextPage()}>
-              Load more
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
+    </>
   );
 }

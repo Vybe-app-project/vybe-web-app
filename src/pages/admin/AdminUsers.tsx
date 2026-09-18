@@ -10,20 +10,15 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
+  Select,
   Skeleton,
   cx,
   useToast,
 } from '../../components/ui';
-import {
-  Users,
-  Search,
-  Trash,
-  Check,
-  X,
-  ChevronLeft,
-  ChevronRight,
-} from '../../components/icons';
+import { Users, Trash, Check, X, Search } from '../../components/icons';
+import { AdminPageHeader, Pager } from './AdminLayout';
 
 type AdminUser = {
   _id: string;
@@ -54,7 +49,7 @@ type UsersResponse = {
 /** Validators cap these; keep the client inside the same bounds. */
 const MIN_PAGE = 1;
 const MAX_PAGE = 100000;
-const LIMIT_OPTIONS = [25, 50, 100];
+const LIMIT_OPTIONS = [25, 50, 100].map((n) => ({ value: String(n), label: `${n} rows` }));
 
 export default function AdminUsers() {
   const qc = useQueryClient();
@@ -92,8 +87,8 @@ export default function AdminUsers() {
       await adminApi.delete(`/admin/users/${userId}`);
     },
     onSuccess: (_d, userId) => {
-      const label = pending?.username || pending?.email || userId;
-      success(`Deleted ${label} and all owned data.`);
+      const label = pending?.username ? `@${pending.username}` : pending?.email || userId;
+      success(`Deleted ${label} and all owned data`);
       setPending(null);
       void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'analytics'] });
@@ -121,62 +116,51 @@ export default function AdminUsers() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-50">Users</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Search the member directory and remove accounts along with their owned data.
-          </p>
-        </div>
-        <Badge tone="neutral">{total.toLocaleString()} total</Badge>
-      </div>
+      <AdminPageHeader
+        title="Users"
+        subtitle="Search the member directory and remove accounts along with the data they own."
+        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> total</Badge>}
+      />
 
-      <Card className="border-slate-800 bg-slate-950/60">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[220px] flex-1">
-            <Search
-              size={16}
-              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-500"
-            />
+      <Card>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[240px] flex-1">
             <Input
+              label="Search users"
+              hideLabel
+              role="searchbox"
+              inputMode="search"
+              autoComplete="off"
+              leading={<Search size={18} />}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search username, name or email"
-              aria-label="Search users"
               maxLength={100}
-              className="border-slate-800 bg-slate-900/70 pl-9 text-slate-100"
+              trailing={
+                searchInput ? (
+                  <IconButton label="Clear search" size={40} onClick={() => setSearchInput('')}>
+                    <X size={18} />
+                  </IconButton>
+                ) : undefined
+              }
             />
-            {searchInput ? (
-              <button
-                type="button"
-                onClick={() => setSearchInput('')}
-                aria-label="Clear search"
-                className="absolute top-1/2 right-2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 hover:text-slate-200"
-              >
-                <X size={15} />
-              </button>
-            ) : null}
           </div>
-
-          <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-            Rows
-            <select
-              value={limit}
-              onChange={(e) => {
-                setLimit(Number(e.target.value));
+          <div className="w-36">
+            <Select
+              label="Rows per page"
+              hideLabel
+              options={LIMIT_OPTIONS}
+              value={String(limit)}
+              onChange={(v) => {
+                setLimit(Number(v));
                 setPage(1);
               }}
-              className="input-base w-auto border-slate-800 bg-slate-900/70 py-2 text-sm text-slate-100"
-            >
-              {LIMIT_OPTIONS.map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-          </label>
+            />
+          </div>
         </div>
       </Card>
 
-      <Card padded={false} className="overflow-hidden border-slate-800 bg-slate-950/60">
+      <Card padded={false} className="overflow-hidden">
         {query.isError ? (
           <ErrorState
             error={query.error}
@@ -184,7 +168,7 @@ export default function AdminUsers() {
             title="Could not load users"
           />
         ) : query.isLoading ? (
-          <div className="space-y-3 p-4">
+          <div className="space-y-3 p-4" aria-busy="true" aria-label="Loading users">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3">
                 <Skeleton className="h-9 w-9 rounded-full" />
@@ -196,63 +180,54 @@ export default function AdminUsers() {
           </div>
         ) : users.length === 0 ? (
           <EmptyState
-            icon={<Users size={22} />}
-            title={search ? 'No matching users' : 'No users yet'}
+            variant={search ? 'no-results' : 'first-run'}
+            icon={search ? undefined : <Users size={24} />}
+            title={search ? 'No matching users' : 'No members yet'}
             message={
               search
                 ? `Nothing matched “${search}”. Try a different username, name or email.`
-                : 'Members will appear here once they register.'
+                : 'Members appear here as soon as they register.'
             }
-            action={
-              search ? (
-                <Button variant="ghost" onClick={() => setSearchInput('')}>Clear search</Button>
-              ) : undefined
-            }
+            action={search ? { label: 'Clear search', onClick: () => setSearchInput(''), variant: 'secondary' } : undefined}
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="admin-table min-w-[760px]">
               <thead>
-                <tr className="border-b border-slate-800 font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                  <th className="px-4 py-3 font-semibold">User</th>
-                  <th className="px-4 py-3 font-semibold">Email</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold">Joined</th>
-                  <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                <tr>
+                  <th scope="col">User</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Joined</th>
+                  <th scope="col" className="text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className={cx('divide-y divide-slate-800/70', query.isFetching && 'opacity-60')}>
+              <tbody className={cx(query.isFetching && 'admin-fetching')}>
                 {users.map((u) => (
-                  <tr key={u._id} className="transition-colors hover:bg-slate-900/40">
-                    <td className="px-4 py-3">
+                  <tr key={u._id}>
+                    <td>
                       <div className="flex items-center gap-3">
                         <Avatar src={u.avatar} name={u.fullName || u.username} size="sm" />
                         <div className="min-w-0">
-                          <p className="truncate font-semibold text-slate-100">
-                            {u.username ? `@${u.username}` : '(no username)'}
+                          <p className="truncate font-semibold text-text-1">
+                            {u.username ? `@${u.username}` : 'No username'}
                           </p>
-                          <p className="truncate text-[11px] text-slate-500">
-                            {u.fullName || '—'}
-                          </p>
+                          <p className="truncate text-xs text-text-2">{u.fullName || '—'}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-[12px] break-all text-slate-400">
-                        {u.email || '—'}
-                      </span>
+                    <td>
+                      <span className="text-sm break-all text-text-2">{u.email || '—'}</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td>
                       <div className="flex flex-wrap items-center gap-1.5">
                         {u.isVerified ? (
-                          <Badge tone="success">
-                            <Check size={12} /> Verified
-                          </Badge>
+                          <Badge tone="success"><Check size={12} /> Verified</Badge>
                         ) : (
                           <Badge tone="neutral">Unverified</Badge>
                         )}
                         {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
-                        {u.isPremium ? <Badge tone="brand">Premium</Badge> : null}
+                        {u.isPremium ? <Badge tone="info">Premium</Badge> : null}
                         {u.isDeleted ? (
                           <Badge tone="danger">Deleted</Badge>
                         ) : u.isActive === false ? (
@@ -260,17 +235,17 @@ export default function AdminUsers() {
                         ) : null}
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-[12px] whitespace-nowrap text-slate-500">
+                    <td className="tabular whitespace-nowrap text-text-2">
                       {u.createdAt ? format(new Date(u.createdAt), 'MMM d, yyyy') : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="text-right">
                       <Button
                         size="sm"
-                        variant="ghost"
-                        icon={<Trash size={14} />}
-                        className="border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                        variant="danger"
+                        icon={<Trash size={16} />}
                         onClick={() => setPending(u)}
                         disabled={remove.isPending}
+                        aria-label={`Delete ${u.username ? `@${u.username}` : u.email || 'user'}`}
                       >
                         Delete
                       </Button>
@@ -283,31 +258,17 @@ export default function AdminUsers() {
         )}
 
         {users.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 px-4 py-3">
-            <p className="font-mono text-[11px] text-slate-500">{rangeLabel}</p>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<ChevronLeft size={14} />}
-                disabled={!canPrev || query.isFetching}
-                onClick={() => go(page - 1)}
-              >
-                Prev
-              </Button>
-              <span className="font-mono text-xs text-slate-400">
-                {page} / {totalPages}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!canNext || query.isFetching}
-                onClick={() => go(page + 1)}
-              >
-                Next <ChevronRight size={14} />
-              </Button>
-            </div>
-          </div>
+          <Pager
+            className="border-t border-line px-4 py-3"
+            page={page}
+            totalPages={totalPages}
+            canPrev={canPrev}
+            canNext={canNext}
+            busy={query.isFetching}
+            onPrev={() => go(page - 1)}
+            onNext={() => go(page + 1)}
+            label={rangeLabel}
+          />
         ) : null}
       </Card>
 
@@ -321,7 +282,7 @@ export default function AdminUsers() {
           pending ? (
             <>
               This permanently deletes{' '}
-              <strong className="text-slate-100">
+              <strong className="text-text-1">
                 {pending.username ? `@${pending.username}` : pending.email}
               </strong>{' '}
               and every post, workout, meal and message they own. This cannot be undone and is
@@ -338,7 +299,7 @@ export default function AdminUsers() {
       />
 
       <p className="sr-only" role="status">
-        {query.isFetching ? 'Loading users…' : `${users.length} users shown`}
+        {query.isFetching ? 'Loading users' : `${users.length} users shown`}
       </p>
     </div>
   );

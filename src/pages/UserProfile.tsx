@@ -1,17 +1,9 @@
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg, mediaUrl } from '../lib/api';
+import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import {
-  compactNumber,
-  displayName,
-  followerCount,
-  followingCount,
-  postCount,
-  timeAgo,
-  type PublicUser,
-} from '../lib/hooks';
+import { displayName, followerCount, followingCount, postCount, type PublicUser } from '../lib/hooks';
 import {
   Avatar,
   Badge,
@@ -20,47 +12,34 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
-  Modal,
+  IconButton,
+  Menu,
+  PageHeader,
   Skeleton,
+  SkeletonTile,
+  StatGrid,
+  StatTile,
   Tabs,
-  Textarea,
+  cx,
+  formatStat,
+  humanize,
   useToast,
+  type MenuItem,
 } from './ui';
-import { FollowButton } from './UserRow';
-import {
-  PROFILE_TABS,
-  ProfileMeals,
-  ProfilePosts,
-  ProfileWorkouts,
-  type ProfileTabKey,
-} from './ProfileTabs';
+import { Calendar, Check, Copy, Flag, Lock, MapPin, MessageCircle, ShareUp, Shield, UserPlus, Users, X } from './icons';
+import { FollowButton, UserBadges } from './UserRow';
+import { useReportModal } from './Report';
+import { PAGE, ProfileCover } from './Profile';
+import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
 
-const REPORT_REASONS = [
-  'spam',
-  'harassment',
-  'nudity',
-  'hate_speech',
-  'impersonation',
-  'other',
-] as const;
+type FriendStatus = 'none' | 'requested' | 'incoming' | 'friends' | 'pending' | string;
 
-const REASON_LABELS: Record<string, string> = {
-  spam: 'Spam or scam',
-  harassment: 'Harassment or bullying',
-  nudity: 'Nudity or sexual content',
-  hate_speech: 'Hate speech',
-  impersonation: 'Impersonation',
-  other: 'Something else',
+const joinedLabel = (iso?: string) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 };
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="text-center">
-      <div className="text-base font-bold">{compactNumber(value)}</div>
-      <div className="text-xs text-[var(--color-muted)]">{label}</div>
-    </div>
-  );
-}
 
 export default function UserProfile() {
   const { id = '' } = useParams();
@@ -68,31 +47,49 @@ export default function UserProfile() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const { report, reportModal } = useReportModal();
 
-  const [tab, setTab] = useState<ProfileTabKey>('posts');
-  const [reportOpen, setReportOpen] = useState(false);
-  const [reportReason, setReportReason] = useState<string>('spam');
-  const [reportDetail, setReportDetail] = useState('');
+  const tabParam = params.get('tab');
+  const tab: ProfileTabKey = isProfileTab(tabParam) ? tabParam : 'posts';
+  const setTab = (next: string) => {
+    setParams(
+      (prev) => {
+        if (next === 'posts') prev.delete('tab');
+        else prev.set('tab', next);
+        return prev;
+      },
+      { replace: true },
+    );
+  };
+
   const [confirmBlock, setConfirmBlock] = useState(false);
+  const [confirmUnfriend, setConfirmUnfriend] = useState(false);
 
   const userQuery = useQuery({
     queryKey: ['user', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await api.get(`/users/${id}`);
-      return (data.user || data) as PublicUser;
+      return (data.user || data) as PublicUser & { friendStatus?: FriendStatus; friendRequestId?: string };
     },
   });
+
+  const refreshRelationship = () => {
+    qc.invalidateQueries({ queryKey: ['user', id] });
+    qc.invalidateQueries({ queryKey: ['friends'] });
+  };
 
   const block = useMutation({
     mutationFn: async () => {
       await api.post('/users/block', { userId: id });
     },
     onSuccess: () => {
-      toast.success('User blocked');
+      toast.success(`${displayName(userQuery.data)} blocked`);
       setConfirmBlock(false);
       qc.invalidateQueries({ queryKey: ['feed'] });
       qc.invalidateQueries({ queryKey: ['user', id] });
+      qc.invalidateQueries({ queryKey: ['friends'] });
       navigate('/discover', { replace: true });
     },
     onError: (e) => {
@@ -101,58 +98,125 @@ export default function UserProfile() {
     },
   });
 
-  const report = useMutation({
+  const addFriend = useMutation({
     mutationFn: async () => {
-      await api.post('/users/report', {
-        userId: id,
-        reason: reportReason,
-        ...(reportDetail.trim() ? { detail: reportDetail.trim() } : {}),
-      });
+      await api.post('/friends/send', { receiverId: id });
     },
     onSuccess: () => {
-      setReportOpen(false);
-      setReportDetail('');
-      toast.success('Report submitted. Our moderation team will review it.');
+      toast.success('Friend request sent');
+      refreshRelationship();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not submit your report.')),
+    onError: (e) => toast.error(errMsg(e, 'Could not send the friend request.')),
   });
+
+  const cancelFriend = useMutation({
+    mutationFn: async (requestId?: string) => {
+      if (requestId) await api.delete(`/friends/requests/${requestId}`);
+      else await api.delete(`/friends/requests/with/${id}`);
+    },
+    onSuccess: () => {
+      toast.success('Friend request withdrawn');
+      refreshRelationship();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not withdraw the request.')),
+  });
+
+  const acceptFriend = useMutation({
+    mutationFn: async (requestId: string) => {
+      await api.post(`/friends/requests/${requestId}/accept`);
+    },
+    onSuccess: () => {
+      toast.success(`You and ${displayName(userQuery.data)} are now friends`);
+      refreshRelationship();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not accept the request.')),
+  });
+
+  const removeFriend = useMutation({
+    mutationFn: async () => {
+      await api.delete(`/friends/${id}`);
+    },
+    onSuccess: () => {
+      toast.success('Friend removed');
+      setConfirmUnfriend(false);
+      refreshRelationship();
+    },
+    onError: (e) => {
+      toast.error(errMsg(e, 'Could not remove this friend.'));
+      setConfirmUnfriend(false);
+    },
+  });
+
+  async function shareProfile() {
+    const user = userQuery.data;
+    if (!user) return;
+    const url = `${window.location.origin}/u/${user._id}`;
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: `${displayName(user)} on Vybe`, url });
+        return;
+      }
+      await copyLink();
+    } catch (e) {
+      if ((e as { name?: string })?.name === 'AbortError') return;
+      toast.error('Could not share this profile.');
+    }
+  }
+
+  async function copyLink() {
+    const url = `${window.location.origin}/u/${id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Profile link copied');
+    } catch {
+      toast.error('Could not copy the link.');
+    }
+  }
 
   if (me && String(me._id) === String(id)) return <Navigate to="/profile" replace />;
 
   if (userQuery.isLoading) {
     return (
-      <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-        <Card className="p-5">
-          <div className="flex items-center gap-4">
-            <Skeleton className="h-20 w-20 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-24" />
-              <Skeleton className="h-3 w-56" />
+      <div className={PAGE} aria-busy="true">
+        <PageHeader title="Profile" back />
+        <Card padded={false} className="overflow-hidden">
+          <Skeleton className="h-28 w-full rounded-none sm:h-36" />
+          <div className="px-4 pb-4 sm:px-5 sm:pb-5">
+            <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <Skeleton className="h-24 w-24 rounded-full ring-4 ring-surface-1" />
+              <div className="flex gap-2">
+                <Skeleton className="h-11 w-28 rounded-sm" />
+                <Skeleton className="h-11 w-11 rounded-sm" />
+                <Skeleton className="h-11 w-11 rounded-sm" />
+              </div>
+            </div>
+            <div className="mt-4 space-y-2">
+              <Skeleton className="h-6 w-48" />
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-72 max-w-full" />
             </div>
           </div>
-          <div className="mt-5 grid grid-cols-4 gap-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-10 w-full rounded-xl" />
-            ))}
-          </div>
         </Card>
+        <StatGrid>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonTile key={i} />
+          ))}
+        </StatGrid>
       </div>
     );
   }
 
   if (userQuery.isError || !userQuery.data) {
     return (
-      <div className="mx-auto w-full max-w-2xl px-4 py-6">
+      <div className={PAGE}>
+        <PageHeader title="Profile" back />
         <ErrorState
+          error={userQuery.error}
           title="Profile not found"
-          message={errMsg(
-            userQuery.error,
-            'This account may have been removed, or it is not visible to you.',
-          )}
+          message={errMsg(userQuery.error, 'This account may have been removed, or it is not visible to you.')}
           action={
             <Button variant="primary" onClick={() => navigate('/discover')}>
-              Discover people
+              Explore people
             </Button>
           }
         />
@@ -161,144 +225,188 @@ export default function UserProfile() {
   }
 
   const user = userQuery.data;
-  const isPrivate = user.settings?.privacy === 'private';
+  const name = displayName(user);
+  const isPrivate = user.settings?.privacy === 'private' || user.isPrivate === true;
   const canViewContent = user.canViewContent !== false;
+  const friendStatus: FriendStatus = user.friendStatus || 'none';
+  const requestId = user.friendRequestId;
+  const joined = joinedLabel(user.createdAt);
+  const friendBusy = addFriend.isPending || cancelFriend.isPending || acceptFriend.isPending;
+
+  const menuItems: MenuItem[] = [
+    { label: 'Share profile', icon: <ShareUp size={18} />, onSelect: shareProfile },
+    { label: 'Copy link', icon: <Copy size={18} />, onSelect: copyLink },
+    {
+      label: 'Report',
+      description: 'Flag this account for review',
+      icon: <Flag size={18} />,
+      divider: true,
+      onSelect: () => report({ targetType: 'user', targetId: id, targetLabel: name }),
+    },
+    ...(friendStatus === 'friends'
+      ? [{ label: 'Remove friend', icon: <X size={18} />, danger: true, onSelect: () => setConfirmUnfriend(true) } as MenuItem]
+      : []),
+    { label: 'Block', icon: <Shield size={18} />, danger: true, onSelect: () => setConfirmBlock(true) },
+  ];
+
+  const friendControl =
+    friendStatus === 'friends' ? (
+      <Badge tone="brand" className="h-11 px-3 text-xs">
+        <Users size={14} />
+        Friends
+      </Badge>
+    ) : friendStatus === 'incoming' && requestId ? (
+      <Button
+        variant="secondary"
+        icon={<Check size={18} />}
+        loading={acceptFriend.isPending}
+        disabled={friendBusy}
+        onClick={() => acceptFriend.mutate(requestId)}
+      >
+        Accept request
+      </Button>
+    ) : friendStatus === 'requested' || friendStatus === 'pending' ? (
+      <Button
+        variant="secondary"
+        title="Withdraw friend request"
+        loading={cancelFriend.isPending}
+        disabled={friendBusy}
+        onClick={() => cancelFriend.mutate(requestId)}
+      >
+        Requested
+      </Button>
+    ) : (
+      <Button
+        variant="secondary"
+        icon={<UserPlus size={18} />}
+        loading={addFriend.isPending}
+        disabled={friendBusy}
+        onClick={() => addFriend.mutate()}
+      >
+        Add friend
+      </Button>
+    );
+
+  // The ⋯ menu lives in the shell's top bar below `lg` (right edge, always
+  // reachable) and in the hero action row on desktop.
+  const overflowMenu = <Menu label="More options" items={menuItems} />;
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-      <Card className="overflow-hidden">
-        {user.coverPicture ? (
-          <img src={mediaUrl(user.coverPicture)} alt="" className="h-32 w-full object-cover" />
-        ) : (
-          <div className="h-24 w-full bg-gradient-to-r from-[var(--color-brand)]/40 to-[var(--color-brand-2)]/30" />
-        )}
+    <div className={PAGE}>
+      <PageHeader title={name} back mobileActions={overflowMenu} actions={<></>} />
 
-        <div className="p-5">
-          <div className="-mt-14 flex items-end justify-between">
-            <Avatar
-              src={mediaUrl(user.avatar)}
-              name={displayName(user)}
-              size={88}
-              className="ring-4 ring-[var(--color-surface)]"
-            />
-            <div className="flex items-center gap-2">
+      <Card padded={false} className="overflow-hidden">
+        <ProfileCover src={user.coverPicture} />
+        <div className="px-4 pb-4 sm:px-5 sm:pb-5">
+          <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="relative z-[1] w-fit">
+              <Avatar src={user.avatar} name={name} size={96} className="bg-surface-1 ring-4 ring-surface-1" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:pb-1">
               <FollowButton user={user} onChanged={() => userQuery.refetch()} />
-              <Button variant="ghost" onClick={() => setReportOpen(true)}>
-                Report
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirmBlock(true)}>
-                Block
-              </Button>
+              {friendControl}
+              <IconButton to={`/messages?to=${user._id}`} label={`Message ${name}`} variant="secondary">
+                <MessageCircle size={20} />
+              </IconButton>
+              <span className="hidden lg:inline-flex">
+                <Menu label="More options" items={menuItems} triggerClassName="border border-line-strong bg-surface-2 hover:bg-surface-3" />
+              </span>
             </div>
           </div>
 
           <div className="mt-4">
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold">{displayName(user)}</h1>
-              {user.isVerified && <Badge variant="brand">Verified</Badge>}
-              {(user.isCoach || user.isTrainer) && <Badge>Coach</Badge>}
-              {isPrivate && <Badge>Private</Badge>}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h2 className="type-heading text-xl text-text-1">{name}</h2>
+              <UserBadges user={user} />
+              {isPrivate ? (
+                <Badge>
+                  <Lock size={12} />
+                  Private
+                </Badge>
+              ) : null}
             </div>
-            <p className="text-sm text-[var(--color-muted)]">@{user.username}</p>
-            {user.bio && <p className="mt-2 whitespace-pre-wrap text-sm">{user.bio}</p>}
-            {!!user.fields?.length && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
+            <p className="text-sm text-text-2">@{user.username}</p>
+            {user.bio ? <p className="prose-measure mt-3 whitespace-pre-wrap text-base text-text-1">{user.bio}</p> : null}
+            {user.fields?.length ? (
+              <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Coaching specialties">
                 {user.fields.map((f) => (
-                  <Badge key={f}>{f}</Badge>
+                  <Badge key={f} tone="info">
+                    {humanize(f)}
+                  </Badge>
                 ))}
               </div>
-            )}
-            <p className="mt-2 text-xs text-[var(--color-muted)]">
-              {user.location ? `${user.location} · ` : ''}
-              Joined {user.createdAt ? timeAgo(user.createdAt) + ' ago' : 'recently'}
-            </p>
-          </div>
-
-          <div className="mt-4 grid grid-cols-4 gap-2 border-t border-[var(--color-line)] pt-4">
-            <Stat label="Posts" value={postCount(user)} />
-            <Stat label="Followers" value={followerCount(user)} />
-            <Stat label="Following" value={followingCount(user)} />
-            <Stat label="Workouts" value={user.stats?.workouts || 0} />
+            ) : null}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-2">
+              {user.location ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin size={14} className="text-text-3" aria-hidden="true" />
+                  {user.location}
+                </span>
+              ) : null}
+              <span className="inline-flex items-center gap-1.5">
+                <Calendar size={14} className="text-text-3" aria-hidden="true" />
+                {joined ? `Joined ${joined}` : 'Joined recently'}
+              </span>
+            </div>
           </div>
         </div>
       </Card>
 
-      {!canViewContent ? (
-        <EmptyState
-          title="This account is private"
-          message={`Follow ${displayName(user)} to see their posts, workouts and meals.`}
-          action={<FollowButton user={user} onChanged={() => userQuery.refetch()} />}
+      <StatGrid>
+        <StatTile label="Posts" value={formatStat(postCount(user))} onClick={canViewContent ? () => setTab('posts') : undefined} />
+        <StatTile label="Followers" value={formatStat(followerCount(user))} />
+        <StatTile label="Following" value={formatStat(followingCount(user))} />
+        <StatTile
+          label="Workouts"
+          value={formatStat(user.stats?.workouts || 0)}
+          onClick={canViewContent ? () => setTab('workouts') : undefined}
+          tone="brand"
         />
-      ) : (
-        <>
-          <Tabs
-            tabs={PROFILE_TABS.map((t) => ({ key: t.key, label: t.label }))}
-            value={tab}
-            onChange={(key) => setTab(key as ProfileTabKey)}
+      </StatGrid>
+
+      {!canViewContent ? (
+        <Card>
+          <EmptyState
+            icon={<Lock size={26} />}
+            title="This account is private"
+            message={`Follow ${name} to see their posts, workouts and meals. They approve requests themselves.`}
+            action={<FollowButton user={user} onChanged={() => userQuery.refetch()} />}
           />
-          {tab === 'posts' && <ProfilePosts userId={user._id} />}
-          {tab === 'workouts' && <ProfileWorkouts userId={user._id} isOwn={false} />}
-          {tab === 'meals' && <ProfileMeals userId={user._id} isOwn={false} />}
-        </>
+        </Card>
+      ) : (
+        <section className="space-y-4" aria-label={`${name}’s activity`}>
+          <Tabs
+            aria-label="Profile content"
+            tabs={PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
+            value={tab}
+            onChange={setTab}
+          />
+          <div className={cx('anim-fade-in')} key={tab}>
+            {tab === 'posts' && <ProfilePosts userId={user._id} name={name} />}
+            {tab === 'workouts' && <ProfileWorkouts userId={user._id} name={name} />}
+            {tab === 'meals' && <ProfileMeals userId={user._id} name={name} />}
+          </div>
+        </section>
       )}
 
-      <Modal open={reportOpen} title={`Report ${displayName(user)}`} onClose={() => setReportOpen(false)}>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            report.mutate();
-          }}
-        >
-          <fieldset className="space-y-2">
-            <legend className="mb-1 text-xs font-semibold">Why are you reporting?</legend>
-            {REPORT_REASONS.map((reason) => (
-              <label
-                key={reason}
-                className="flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2 text-sm"
-              >
-                <input
-                  type="radio"
-                  name="report-reason"
-                  value={reason}
-                  checked={reportReason === reason}
-                  onChange={() => setReportReason(reason)}
-                />
-                {REASON_LABELS[reason]}
-              </label>
-            ))}
-          </fieldset>
+      {reportModal}
 
-          <div>
-            <label htmlFor="report-detail" className="mb-1.5 block text-xs font-semibold">
-              Additional detail (optional)
-            </label>
-            <Textarea
-              id="report-detail"
-              rows={3}
-              maxLength={500}
-              value={reportDetail}
-              onChange={(e) => setReportDetail(e.target.value)}
-              placeholder="Anything that helps our moderators…"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setReportOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" loading={report.isPending} disabled={report.isPending}>
-              Submit report
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      <ConfirmDialog
+        open={confirmUnfriend}
+        title={`Remove ${name} as a friend?`}
+        message="You can send a new request later. They will not be notified."
+        confirmLabel="Remove friend"
+        destructive
+        loading={removeFriend.isPending}
+        onConfirm={() => removeFriend.mutate()}
+        onCancel={() => setConfirmUnfriend(false)}
+      />
 
       <ConfirmDialog
         open={confirmBlock}
-        title={`Block ${displayName(user)}?`}
-        message="You will no longer see each other's posts, comments or messages, and any follow relationship is removed."
-        confirmLabel="Block user"
+        title={`Block ${name}?`}
+        message="You will no longer see each other’s posts, comments or messages, and any follow or friend relationship is removed."
+        confirmLabel="Block"
         destructive
         loading={block.isPending}
         onConfirm={() => block.mutate()}

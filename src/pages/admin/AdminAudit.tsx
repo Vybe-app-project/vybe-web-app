@@ -8,20 +8,16 @@ import {
   Card,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
   Modal,
+  Select,
   Skeleton,
   cx,
+  humanize,
 } from '../../components/ui';
-import {
-  List,
-  Filter,
-  X,
-  Refresh,
-  Eye,
-  ChevronLeft,
-  ChevronRight,
-} from '../../components/icons';
+import { List, X, Refresh, Eye } from '../../components/icons';
+import { AdminPageHeader, Pager } from './AdminLayout';
 
 type AuditEntry = {
   _id: string;
@@ -41,12 +37,15 @@ type AuditResponse = {
   pagination?: { page: number; limit: number; total: number; pages: number };
 };
 
-const LIMIT_OPTIONS = [25, 50, 100];
+const LIMIT_OPTIONS = [25, 50, 100].map((n) => ({ value: String(n), label: `${n} rows` }));
 
 /** Server-side pattern: /^[A-Za-z][A-Za-z0-9_]{2,79}$/ */
 const ACTION_RE = /^[A-Za-z][A-Za-z0-9_]{2,79}$/;
 
-const TARGET_TYPE_OPTIONS = ['', 'user', 'post', 'admin', 'report', 'comment', 'support'];
+const TARGET_TYPE_OPTIONS = [
+  { value: '', label: 'All types' },
+  ...['user', 'post', 'admin', 'report', 'comment', 'support'].map((t) => ({ value: t, label: humanize(t) })),
+];
 
 function toneForAction(action?: string): 'danger' | 'warning' | 'success' | 'info' | 'neutral' {
   const a = (action || '').toUpperCase();
@@ -58,40 +57,47 @@ function toneForAction(action?: string): 'danger' | 'warning' | 'success' | 'inf
   return 'neutral';
 }
 
+/** Action codes are machine strings, so they keep their mono treatment. */
+function ActionBadge({ action }: { action?: string }) {
+  return (
+    <Badge tone={toneForAction(action)} className="admin-code normal-case">
+      {action || 'UNKNOWN'}
+    </Badge>
+  );
+}
+
+const stamp = (iso?: string) => (iso ? format(new Date(iso), 'MMM d, yyyy HH:mm:ss') : '—');
+
 function EntryModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
   const blocks: Array<[string, unknown]> = [
     ['Target snapshot', entry.targetSnapshot],
     ['Metadata', entry.metadata],
     ['Request', entry.request],
   ];
+  const facts: Array<[string, string, boolean]> = [
+    ['Actor', entry.actorSnapshot?.fullName || entry.actorSnapshot?.email || '—', false],
+    ['Actor email', entry.actorSnapshot?.email || '—', false],
+    ['Actor model', entry.actorModel || '—', false],
+    ['Target ID', entry.targetId || '—', true],
+    ['Timestamp', stamp(entry.createdAt), false],
+    ['Entry ID', entry._id, true],
+  ];
   return (
     <Modal open onClose={onClose} title="Audit entry" size="lg">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={toneForAction(entry.action)}>{entry.action || 'UNKNOWN'}</Badge>
-          {entry.targetType ? <Badge tone="neutral">{entry.targetType}</Badge> : null}
+          <ActionBadge action={entry.action} />
+          {entry.targetType ? <Badge tone="neutral">{humanize(entry.targetType)}</Badge> : null}
           {entry.actorSnapshot?.role ? (
-            <Badge tone="info">{entry.actorSnapshot.role.replace(/_/g, ' ')}</Badge>
+            <Badge tone="info">{humanize(entry.actorSnapshot.role)}</Badge>
           ) : null}
         </div>
 
         <dl className="grid gap-2 sm:grid-cols-2">
-          {[
-            ['Actor', entry.actorSnapshot?.fullName || entry.actorSnapshot?.email || '—'],
-            ['Actor email', entry.actorSnapshot?.email || '—'],
-            ['Actor model', entry.actorModel || '—'],
-            ['Target id', entry.targetId || '—'],
-            [
-              'Timestamp',
-              entry.createdAt ? format(new Date(entry.createdAt), 'MMM d, yyyy HH:mm:ss') : '—',
-            ],
-            ['Entry id', entry._id],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
-              <dt className="font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                {label}
-              </dt>
-              <dd className="mt-1 font-mono text-[12px] break-all text-slate-200">{String(value)}</dd>
+          {facts.map(([label, value, mono]) => (
+            <div key={label} className="admin-kv">
+              <dt>{label}</dt>
+              <dd className={cx(mono ? 'admin-code' : 'tabular')}>{value}</dd>
             </div>
           ))}
         </dl>
@@ -99,12 +105,8 @@ function EntryModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void
         {blocks.map(([label, value]) =>
           value && typeof value === 'object' && Object.keys(value as object).length > 0 ? (
             <div key={label}>
-              <p className="mb-1.5 font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                {label}
-              </p>
-              <pre className="max-h-64 overflow-auto rounded-lg border border-slate-800 bg-slate-900/60 p-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-slate-300">
-                {JSON.stringify(value, null, 2)}
-              </pre>
+              <p className="type-label mb-1.5 text-text-2">{label}</p>
+              <pre className="admin-pre">{JSON.stringify(value, null, 2)}</pre>
             </div>
           ) : null,
         )}
@@ -159,89 +161,65 @@ export default function AdminAudit() {
     return `${from.toLocaleString()}–${Math.min(page * limit, total).toLocaleString()} of ${total.toLocaleString()}`;
   }, [page, limit, total]);
 
+  const clearFilters = () => { setActionInput(''); setTargetType(''); setPage(1); };
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-50">Audit log</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Immutable record of privileged staff actions. SUPER_ADMIN access only.
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<Refresh size={14} />}
-          loading={query.isFetching}
-          onClick={() => void query.refetch()}
-        >
-          Refresh
-        </Button>
-      </div>
+      <AdminPageHeader
+        title="Audit log"
+        subtitle="Immutable record of privileged staff actions. Super admin access only."
+        actions={
+          <IconButton
+            label="Refresh audit log"
+            variant="secondary"
+            onClick={() => void query.refetch()}
+            disabled={query.isFetching}
+          >
+            <Refresh size={18} className={cx(query.isFetching && 'animate-spin')} />
+          </IconButton>
+        }
+      />
 
-      <Card className="border-slate-800 bg-slate-950/60">
+      <Card>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[220px] flex-1">
+          <div className="min-w-[240px] flex-1">
             <Input
-              label="Action"
+              label="Action code"
               value={actionInput}
               onChange={(e) => setActionInput(e.target.value)}
               placeholder="e.g. USER_ACCOUNT_DELETED"
               maxLength={80}
-              error={actionInvalid ? 'Letters, digits and underscores only (3–80 chars).' : null}
-              className="border-slate-800 bg-slate-900/70 font-mono text-slate-100"
+              autoCapitalize="characters"
+              spellCheck={false}
+              error={actionInvalid ? 'Letters, digits and underscores only (3–80 characters).' : null}
+              className="admin-code"
             />
           </div>
           <div className="min-w-[180px]">
-            <label
-              htmlFor="audit-target-type"
-              className="mb-1.5 block text-xs font-semibold text-slate-400"
-            >
-              Target type
-            </label>
-            <select
-              id="audit-target-type"
+            <Select
+              label="Target type"
+              options={TARGET_TYPE_OPTIONS}
               value={targetType}
-              onChange={(e) => { setTargetType(e.target.value); setPage(1); }}
-              className="input-base border-slate-800 bg-slate-900/70 text-slate-100"
-            >
-              {TARGET_TYPE_OPTIONS.map((t) => (
-                <option key={t || 'all'} value={t}>{t || 'All types'}</option>
-              ))}
-            </select>
+              onChange={(v) => { setTargetType(v); setPage(1); }}
+            />
           </div>
-          <div className="min-w-[110px]">
-            <label htmlFor="audit-limit" className="mb-1.5 block text-xs font-semibold text-slate-400">
-              Rows
-            </label>
-            <select
-              id="audit-limit"
-              value={limit}
-              onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
-              className="input-base border-slate-800 bg-slate-900/70 text-slate-100"
-            >
-              {LIMIT_OPTIONS.map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
+          <div className="w-32">
+            <Select
+              label="Rows"
+              options={LIMIT_OPTIONS}
+              value={String(limit)}
+              onChange={(v) => { setLimit(Number(v)); setPage(1); }}
+            />
           </div>
           {hasFilters ? (
-            <Button
-              variant="ghost"
-              icon={<X size={14} />}
-              onClick={() => { setActionInput(''); setTargetType(''); setPage(1); }}
-            >
-              Clear
+            <Button variant="ghost" icon={<X size={16} />} onClick={clearFilters}>
+              Clear filters
             </Button>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 pb-2.5 text-xs text-slate-600">
-              <Filter size={13} /> No filters applied
-            </span>
-          )}
+          ) : null}
         </div>
       </Card>
 
-      <Card padded={false} className="overflow-hidden border-slate-800 bg-slate-950/60">
+      <Card padded={false} className="overflow-hidden">
         {query.isError ? (
           <ErrorState
             error={query.error}
@@ -249,7 +227,7 @@ export default function AdminAudit() {
             title="Could not load the audit log"
           />
         ) : query.isLoading ? (
-          <div className="space-y-3 p-4">
+          <div className="space-y-3 p-4" aria-busy="true" aria-label="Loading audit entries">
             {Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3">
                 <Skeleton className="h-3 w-40" />
@@ -260,62 +238,54 @@ export default function AdminAudit() {
           </div>
         ) : entries.length === 0 ? (
           <EmptyState
-            icon={<List size={22} />}
+            variant={hasFilters ? 'no-results' : 'first-run'}
+            icon={hasFilters ? undefined : <List size={24} />}
             title={hasFilters ? 'No matching entries' : 'No audit entries yet'}
             message={
               hasFilters
-                ? 'Adjust the action or target-type filter to widen the search.'
-                : 'Privileged staff actions will be recorded here.'
+                ? 'Widen the action or target-type filter to see more.'
+                : 'Privileged staff actions are recorded here as they happen.'
             }
-            action={
-              hasFilters ? (
-                <Button variant="ghost" onClick={() => { setActionInput(''); setTargetType(''); }}>
-                  Clear filters
-                </Button>
-              ) : undefined
-            }
+            action={hasFilters ? { label: 'Clear filters', onClick: clearFilters, variant: 'secondary' } : undefined}
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-left text-sm">
+            <table className="admin-table min-w-[880px]">
               <thead>
-                <tr className="border-b border-slate-800 font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                  <th className="px-4 py-3 font-semibold">When</th>
-                  <th className="px-4 py-3 font-semibold">Action</th>
-                  <th className="px-4 py-3 font-semibold">Actor</th>
-                  <th className="px-4 py-3 font-semibold">Target</th>
-                  <th className="px-4 py-3 text-right font-semibold" />
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col">Action</th>
+                  <th scope="col">Actor</th>
+                  <th scope="col">Target</th>
+                  <th scope="col" className="text-right"><span className="sr-only">Details</span></th>
                 </tr>
               </thead>
-              <tbody className={cx('divide-y divide-slate-800/70', query.isFetching && 'opacity-60')}>
+              <tbody className={cx(query.isFetching && 'admin-fetching')}>
                 {entries.map((e) => (
-                  <tr key={e._id} className="transition-colors hover:bg-slate-900/40">
-                    <td className="px-4 py-3 font-mono text-[12px] whitespace-nowrap text-slate-500">
-                      {e.createdAt ? format(new Date(e.createdAt), 'MMM d, yyyy HH:mm:ss') : '—'}
+                  <tr key={e._id}>
+                    <td className="tabular whitespace-nowrap text-text-2">
+                      <time dateTime={e.createdAt}>{stamp(e.createdAt)}</time>
                     </td>
-                    <td className="px-4 py-3">
-                      <Badge tone={toneForAction(e.action)}>{e.action || 'UNKNOWN'}</Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="truncate font-semibold text-slate-200">
+                    <td><ActionBadge action={e.action} /></td>
+                    <td>
+                      <p className="truncate font-semibold text-text-1">
                         {e.actorSnapshot?.fullName || e.actorSnapshot?.email || '—'}
                       </p>
-                      <p className="truncate font-mono text-[11px] text-slate-500">
+                      <p className="truncate text-xs text-text-2">
                         {e.actorSnapshot?.email || e.actorModel || ''}
                       </p>
                     </td>
-                    <td className="px-4 py-3">
-                      <p className="text-slate-300">{e.targetType || '—'}</p>
-                      <p className="truncate font-mono text-[11px] text-slate-600">
-                        {e.targetId || ''}
-                      </p>
+                    <td>
+                      <p className="text-text-1">{e.targetType ? humanize(e.targetType) : '—'}</p>
+                      {e.targetId ? <p className="admin-code truncate text-text-3">{e.targetId}</p> : null}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="text-right">
                       <Button
                         size="sm"
                         variant="ghost"
-                        icon={<Eye size={14} />}
+                        icon={<Eye size={16} />}
                         onClick={() => setSelected(e)}
+                        aria-label={`Details for ${e.action || 'entry'} at ${stamp(e.createdAt)}`}
                       >
                         Details
                       </Button>
@@ -328,31 +298,17 @@ export default function AdminAudit() {
         )}
 
         {entries.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 px-4 py-3">
-            <p className="font-mono text-[11px] text-slate-500">{rangeLabel}</p>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<ChevronLeft size={14} />}
-                disabled={page <= 1 || query.isFetching}
-                onClick={() => setPage((n) => Math.max(1, n - 1))}
-              >
-                Prev
-              </Button>
-              <span className="font-mono text-xs text-slate-400">
-                {page} / {totalPages}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={page >= totalPages || query.isFetching}
-                onClick={() => setPage((n) => Math.min(totalPages, n + 1))}
-              >
-                Next <ChevronRight size={14} />
-              </Button>
-            </div>
-          </div>
+          <Pager
+            className="border-t border-line px-4 py-3"
+            page={page}
+            totalPages={totalPages}
+            canPrev={page > 1}
+            canNext={page < totalPages}
+            busy={query.isFetching}
+            onPrev={() => setPage((n) => Math.max(1, n - 1))}
+            onNext={() => setPage((n) => Math.min(totalPages, n + 1))}
+            label={rangeLabel}
+          />
         ) : null}
       </Card>
 

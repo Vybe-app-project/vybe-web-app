@@ -12,6 +12,7 @@ import {
   Avatar,
   Badge,
   Button,
+  Callout,
   Card,
   EmptyState,
   ErrorState,
@@ -20,17 +21,11 @@ import {
   Tabs,
   Textarea,
   cx,
+  humanize,
   useToast,
 } from '../../components/ui';
-import {
-  Flag,
-  Check,
-  Trash,
-  Alert,
-  Shield,
-  ChevronLeft,
-  ChevronRight,
-} from '../../components/icons';
+import { Flag, Check, Trash, Shield } from '../../components/icons';
+import { AdminPageHeader, Pager } from './AdminLayout';
 
 /* --------------------------------------------------------------- types */
 
@@ -87,14 +82,14 @@ const ACTIONS: Array<{
   {
     value: 'mark_reviewed',
     label: 'Mark reviewed',
-    description: 'Acknowledge the report without enforcement. The note is optional.',
+    description: 'Acknowledge the report without enforcement. A note is optional.',
     requiresNote: false,
     destructive: false,
   },
   {
     value: 'dismiss',
     label: 'Dismiss',
-    description: 'Close the report as not actionable. The note is optional.',
+    description: 'Close the report as not actionable. A note is optional.',
     requiresNote: false,
     destructive: false,
   },
@@ -138,6 +133,9 @@ const STATUS_TONE: Record<ReportStatus, 'warning' | 'info' | 'success' | 'neutra
 
 const LIMIT = 20;
 
+const when = (iso?: string | null, withTime = true) =>
+  iso ? format(new Date(iso), withTime ? 'MMM d, yyyy HH:mm' : 'MMM d, yyyy') : '—';
+
 /* --------------------------------------------------------- preview cell */
 
 function TargetPreview({ report }: { report: Report }) {
@@ -156,27 +154,45 @@ function TargetPreview({ report }: { report: Report }) {
 
   if (!preview) {
     return (
-      <p className="text-[12px] text-slate-600 italic">
-        Target content is unavailable (it may already be removed).
+      <p className="text-xs text-text-3 italic">
+        Target content is unavailable. It may already have been removed.
       </p>
     );
   }
 
   return (
-    <div className="flex gap-3 rounded-lg border border-slate-800 bg-slate-900/50 p-2.5">
+    <div className="flex gap-3 rounded-sm border border-line bg-surface-2 p-2.5">
       {image ? (
         <img
           src={mediaUrl(String(image))}
           alt=""
           loading="lazy"
-          className="h-14 w-14 shrink-0 rounded-lg border border-slate-800 object-cover"
+          className="h-14 w-14 shrink-0 rounded-xs border border-line object-cover"
         />
       ) : null}
       <div className="min-w-0 flex-1">
-        <p className="line-clamp-3 text-[13px] leading-relaxed text-slate-300">
-          {String(text).trim() || (
-            <span className="text-slate-600 italic">No text content</span>
-          )}
+        <p className="line-clamp-3 text-sm leading-relaxed text-text-1">
+          {String(text).trim() || <span className="text-text-3 italic">No text content</span>}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Party({
+  label,
+  person,
+}: {
+  label: string;
+  person?: { username?: string; fullName?: string; avatar?: string } | null;
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <Avatar src={person?.avatar} name={person?.fullName || person?.username} size="sm" />
+      <div className="min-w-0">
+        <p className="type-label text-text-2">{label}</p>
+        <p className="truncate text-sm text-text-1">
+          {person?.username ? `@${person.username}` : person?.fullName || '—'}
         </p>
       </div>
     </div>
@@ -185,13 +201,7 @@ function TargetPreview({ report }: { report: Report }) {
 
 /* ---------------------------------------------------------- action modal */
 
-function ActionModal({
-  report,
-  onClose,
-}: {
-  report: Report;
-  onClose: () => void;
-}) {
+function ActionModal({ report, onClose }: { report: Report; onClose: () => void }) {
   const qc = useQueryClient();
   const { success } = useToast();
   const [action, setAction] = useState<ModerationAction | null>(null);
@@ -214,7 +224,7 @@ function ActionModal({
       return data;
     },
     onSuccess: () => {
-      success(`Report ${chosen?.label.toLowerCase() ?? 'updated'}.`);
+      success(chosen ? `Report ${chosen.label.toLowerCase()}` : 'Report updated');
       void qc.invalidateQueries({ queryKey: ['admin', 'reports'] });
       onClose();
     },
@@ -250,54 +260,46 @@ function ActionModal({
       open
       onClose={() => { if (!mutation.isPending) onClose(); }}
       title="Enforce moderation decision"
+      description="Pick one action. Destructive actions need a written reason and are recorded in the audit log."
       size="lg"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
+          <Button variant="secondary" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
           <Button
-            variant={chosen?.destructive ? 'ghost' : 'primary'}
+            variant={chosen?.destructive ? 'danger' : 'primary'}
             loading={mutation.isPending}
             onClick={submit}
-            className={
-              chosen?.destructive
-                ? 'border-red-500/40 bg-red-500/15 text-red-300'
-                : undefined
-            }
           >
             {chosen ? `Apply: ${chosen.label}` : 'Apply action'}
           </Button>
         </>
       }
     >
-      <div className="space-y-4">
-        <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <Badge tone="danger">{report.reason || 'unspecified'}</Badge>
-            <Badge tone="neutral">{report.targetType || 'unknown target'}</Badge>
+      <div className="space-y-5">
+        <div className="rounded-sm border border-line bg-surface-2 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="danger">{humanize(report.reason) || 'Unspecified'}</Badge>
+            <Badge tone="neutral">{humanize(report.targetType) || 'Unknown target'}</Badge>
             {report.status ? (
-              <Badge tone={STATUS_TONE[report.status] ?? 'neutral'}>{report.status}</Badge>
+              <Badge tone={STATUS_TONE[report.status] ?? 'neutral'}>{humanize(report.status)}</Badge>
             ) : null}
           </div>
           {report.detail ? (
-            <p className="mt-2 text-[13px] leading-relaxed text-slate-300">{report.detail}</p>
+            <p className="mt-2 text-sm leading-relaxed text-text-1">{report.detail}</p>
           ) : null}
-          <p className="mt-2 text-[11px] text-slate-500">
+          <p className="mt-2 text-xs text-text-2">
             Reported by{' '}
             {report.reporter?.username
               ? `@${report.reporter.username}`
               : report.reporter?.fullName || 'a member'}
-            {report.createdAt
-              ? ` · ${format(new Date(report.createdAt), 'MMM d, yyyy HH:mm')}`
-              : ''}
+            {report.createdAt ? ` on ${when(report.createdAt)}` : ''}
           </p>
         </div>
 
-        <div>
-          <p className="mb-2 font-mono text-[10px] font-semibold tracking-[0.14em] text-slate-500 uppercase">
-            Enforcement action
-          </p>
+        <fieldset>
+          <legend className="type-label mb-2 text-text-2">Enforcement action</legend>
           <div className="grid gap-2 sm:grid-cols-2">
             {ACTIONS.map((a) => {
               const active = action === a.value;
@@ -305,33 +307,26 @@ function ActionModal({
                 <button
                   key={a.value}
                   type="button"
+                  aria-pressed={active}
+                  data-tone={a.destructive ? 'danger' : 'brand'}
                   onClick={() => { setAction(a.value); setFormError(null); }}
-                  className={cx(
-                    'rounded-xl border p-3 text-left transition-colors',
-                    active
-                      ? a.destructive
-                        ? 'border-red-500/50 bg-red-500/10'
-                        : 'border-amber-500/50 bg-amber-500/10'
-                      : 'border-slate-800 bg-slate-900/40 hover:border-slate-700',
-                  )}
+                  className="admin-option"
                 >
                   <span
                     className={cx(
-                      'flex items-center gap-1.5 text-sm font-bold',
-                      active ? (a.destructive ? 'text-red-200' : 'text-amber-200') : 'text-slate-200',
+                      'flex items-center gap-1.5 text-sm font-semibold',
+                      active ? (a.destructive ? 'text-danger' : 'text-brand-text') : 'text-text-1',
                     )}
                   >
-                    {a.destructive ? <Trash size={14} /> : <Check size={14} />}
+                    {a.destructive ? <Trash size={16} /> : <Check size={16} />}
                     {a.label}
                   </span>
-                  <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
-                    {a.description}
-                  </span>
+                  <span className="mt-1 block text-xs leading-relaxed text-text-2">{a.description}</span>
                 </button>
               );
             })}
           </div>
-        </div>
+        </fieldset>
 
         <Textarea
           label={noteRequired ? 'Moderation note (required)' : 'Moderation note (optional)'}
@@ -341,31 +336,20 @@ function ActionModal({
           rows={3}
           placeholder={
             noteRequired
-              ? 'Explain why this enforcement is being applied…'
-              : 'Optional context for the audit log…'
+              ? 'Explain why this enforcement is being applied'
+              : 'Optional context for the audit log'
           }
           hint={`${note.length}/1000`}
-          className="border-slate-800 bg-slate-900/70 text-slate-100"
         />
 
         {conflict ? (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
-            <Alert size={16} className="mt-0.5 shrink-0 text-amber-400" />
-            <div>
-              <p className="text-sm font-semibold text-amber-200">Moderation conflict</p>
-              <p className="mt-0.5 text-[12px] leading-relaxed text-amber-200/80">
-                {conflict} Refresh the queue and confirm the current state before retrying — your
-                change was not applied.
-              </p>
-            </div>
-          </div>
+          <Callout tone="warning" title="Moderation conflict">
+            {conflict} Refresh the queue and confirm the current state before retrying. Your change
+            was not applied.
+          </Callout>
         ) : null}
 
-        {formError ? (
-          <p role="alert" className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-            {formError}
-          </p>
-        ) : null}
+        {formError ? <Callout tone="danger">{formError}</Callout> : null}
       </div>
     </Modal>
   );
@@ -398,40 +382,35 @@ export default function AdminReports() {
   const total = query.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
-  const tabs = useMemo(
-    () => STATUS_TABS.map((t) => ({ key: t.key, label: t.label })),
-    [],
-  );
+  const tabs = useMemo(() => STATUS_TABS.map((t) => ({ key: t.key, label: t.label })), []);
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-50">Reports</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Every decision requires a concrete enforcement action; destructive actions also require
-            a written reason.
-          </p>
-        </div>
-        <Badge tone="neutral">{total.toLocaleString()} in queue</Badge>
-      </div>
+      <AdminPageHeader
+        title="Reports"
+        subtitle="Every decision needs a concrete enforcement action; destructive actions also need a written reason."
+        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> in queue</Badge>}
+      />
 
       <Tabs
+        aria-label="Report status"
         tabs={tabs}
         active={status}
         onChange={(k) => { setStatus(k); setPage(1); }}
       />
 
       {query.isError ? (
-        <ErrorState
-          error={query.error}
-          retry={() => void query.refetch()}
-          title="Could not load reports"
-        />
+        <Card>
+          <ErrorState
+            error={query.error}
+            retry={() => void query.refetch()}
+            title="Could not load reports"
+          />
+        </Card>
       ) : query.isLoading ? (
-        <div className="space-y-3">
+        <div className="space-y-3" aria-busy="true" aria-label="Loading reports">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i} className="border-slate-800 bg-slate-950/60">
+            <Card key={i}>
               <Skeleton className="h-3 w-40" />
               <Skeleton className="mt-3 h-14 w-full" />
               <Skeleton className="mt-3 h-3 w-56" />
@@ -439,40 +418,46 @@ export default function AdminReports() {
           ))}
         </div>
       ) : reports.length === 0 ? (
-        <Card className="border-slate-800 bg-slate-950/60">
+        <Card>
           <EmptyState
-            icon={<Flag size={22} />}
-            title={status === 'pending' ? 'Queue is clear' : 'No reports here'}
+            variant={status === 'pending' ? 'first-run' : 'no-results'}
+            icon={status === 'pending' ? <Flag size={24} /> : undefined}
+            title={status === 'pending' ? 'The queue is clear' : 'No reports here'}
             message={
               status === 'pending'
-                ? 'There are no pending reports awaiting moderation.'
-                : `No reports with status “${status}”.`
+                ? 'Nothing is waiting for moderation. New member reports land here first.'
+                : `No reports with the status “${humanize(status).toLowerCase()}”.`
+            }
+            action={
+              status !== 'pending'
+                ? { label: 'Show pending', onClick: () => { setStatus('pending'); setPage(1); }, variant: 'secondary' }
+                : undefined
             }
           />
         </Card>
       ) : (
-        <div className={cx('space-y-3', query.isFetching && 'opacity-60')}>
+        <div className={cx('space-y-3', query.isFetching && 'admin-fetching')}>
           {reports.map((r) => {
             const owner = r.targetOwner;
             const suspended = Boolean(owner?.moderationSuspension?.active);
             return (
-              <Card key={r._id} className="border-slate-800 bg-slate-950/60">
+              <Card key={r._id}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="danger">{r.reason || 'unspecified'}</Badge>
-                    <Badge tone="neutral">{r.targetType || 'unknown'}</Badge>
+                    <Badge tone="danger">{humanize(r.reason) || 'Unspecified'}</Badge>
+                    <Badge tone="neutral">{humanize(r.targetType) || 'Unknown'}</Badge>
                     {r.status ? (
-                      <Badge tone={STATUS_TONE[r.status] ?? 'neutral'}>{r.status}</Badge>
+                      <Badge tone={STATUS_TONE[r.status] ?? 'neutral'}>{humanize(r.status)}</Badge>
                     ) : null}
                     {suspended ? <Badge tone="warning">Owner suspended</Badge> : null}
                   </div>
-                  <span className="font-mono text-[11px] text-slate-500">
-                    {r.createdAt ? format(new Date(r.createdAt), 'MMM d, yyyy HH:mm') : '—'}
-                  </span>
+                  <time className="tabular text-xs text-text-2" dateTime={r.createdAt}>
+                    {when(r.createdAt)}
+                  </time>
                 </div>
 
                 {r.detail ? (
-                  <p className="mt-3 text-[13px] leading-relaxed text-slate-300">{r.detail}</p>
+                  <p className="mt-3 text-sm leading-relaxed text-text-1">{r.detail}</p>
                 ) : null}
 
                 <div className="mt-3">
@@ -480,58 +465,28 @@ export default function AdminReports() {
                 </div>
 
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div className="flex items-center gap-2.5">
-                    <Avatar
-                      src={r.reporter?.avatar}
-                      name={r.reporter?.fullName || r.reporter?.username}
-                      size="sm"
-                    />
-                    <div className="min-w-0">
-                      <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                        Reporter
-                      </p>
-                      <p className="truncate text-[13px] text-slate-200">
-                        {r.reporter?.username ? `@${r.reporter.username}` : r.reporter?.fullName || '—'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <Avatar
-                      src={owner?.avatar}
-                      name={owner?.fullName || owner?.username}
-                      size="sm"
-                    />
-                    <div className="min-w-0">
-                      <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                        Content owner
-                      </p>
-                      <p className="truncate text-[13px] text-slate-200">
-                        {owner?.username ? `@${owner.username}` : owner?.fullName || '—'}
-                      </p>
-                    </div>
-                  </div>
+                  <Party label="Reporter" person={r.reporter} />
+                  <Party label="Content owner" person={owner} />
                 </div>
 
                 {r.moderationAction || r.moderationNote ? (
-                  <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
-                    <p className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                      <Shield size={12} /> Prior decision
+                  <div className="mt-3 rounded-sm border border-line bg-surface-2 px-3 py-2">
+                    <p className="type-label flex items-center gap-1.5 text-text-2">
+                      <Shield size={14} /> Prior decision
                     </p>
-                    <p className="mt-1 text-[12px] text-slate-300">
-                      {r.moderationAction ? r.moderationAction.replace(/_/g, ' ') : 'n/a'}
-                      {r.reviewedBy?.fullName ? ` · by ${r.reviewedBy.fullName}` : ''}
-                      {r.reviewedAt
-                        ? ` · ${format(new Date(r.reviewedAt), 'MMM d, yyyy HH:mm')}`
-                        : ''}
+                    <p className="mt-1 text-xs text-text-1">
+                      {r.moderationAction ? humanize(r.moderationAction) : 'Not recorded'}
+                      {r.reviewedBy?.fullName ? ` by ${r.reviewedBy.fullName}` : ''}
+                      {r.reviewedAt ? ` on ${when(r.reviewedAt)}` : ''}
                     </p>
                     {r.moderationNote ? (
-                      <p className="mt-1 text-[12px] text-slate-500 italic">“{r.moderationNote}”</p>
+                      <p className="mt-1 text-xs text-text-2 italic">“{r.moderationNote}”</p>
                     ) : null}
                   </div>
                 ) : null}
 
                 <div className="mt-4 flex justify-end">
-                  <Button variant="primary" size="sm" onClick={() => setActive(r)}>
+                  <Button variant="primary" icon={<Shield size={16} />} onClick={() => setActive(r)}>
                     Take action
                   </Button>
                 </div>
@@ -542,38 +497,20 @@ export default function AdminReports() {
       )}
 
       {reports.length > 0 ? (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-slate-500">
-            Page {page} of {totalPages} · {total.toLocaleString()} reports
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<ChevronLeft size={14} />}
-              disabled={page <= 1 || query.isFetching}
-              onClick={() => setPage((n) => Math.max(1, n - 1))}
-            >
-              Prev
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!query.data?.hasNextPage || query.isFetching}
-              onClick={() => setPage((n) => n + 1)}
-            >
-              Next <ChevronRight size={14} />
-            </Button>
-          </div>
-        </div>
+        <Pager
+          page={page}
+          totalPages={totalPages}
+          canPrev={page > 1}
+          canNext={Boolean(query.data?.hasNextPage)}
+          busy={query.isFetching}
+          onPrev={() => setPage((n) => Math.max(1, n - 1))}
+          onNext={() => setPage((n) => n + 1)}
+          label={`${total.toLocaleString()} reports`}
+        />
       ) : null}
 
       {active ? (
-        <ActionModal
-          key={active._id}
-          report={active}
-          onClose={() => setActive(null)}
-        />
+        <ActionModal key={active._id} report={active} onClose={() => setActive(null)} />
       ) : null}
     </div>
   );

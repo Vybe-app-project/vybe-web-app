@@ -1,30 +1,59 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import { eachDayOfInterval, format, isValid, parseISO, startOfDay, subDays } from 'date-fns';
+  differenceInCalendarDays,
+  eachDayOfInterval,
+  format,
+  isToday,
+  isValid,
+  isYesterday,
+  parseISO,
+  startOfDay,
+  subDays,
+} from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import {
   Badge,
   Button,
   Card,
   ConfirmDialog,
+  DateField,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
+  Menu,
   Modal,
+  PageHeader,
+  SegmentedControl,
+  Select,
   Skeleton,
+  SkeletonTile,
+  StatGrid,
+  StatTile,
   Textarea,
+  VIZ,
+  chartTheme,
+  cx,
+  formatStat,
+  humanize,
+  useIsCompact,
   useToast,
+  type MenuItem,
 } from './ui';
-import { Dumbbell, Plus, Trash, Edit, Clock, TrendingUp } from './icons';
+import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, Zap } from './icons';
+import {
+  CATEGORY_OPTIONS,
+  ExerciseRows,
+  MetaList,
+  emptyExercise,
+  exerciseDraftFrom,
+  toExercisePayload,
+  type ExerciseDraft,
+  type SocialWorkout,
+} from './Workouts';
 
 /* ------------------------------------------------------------------ types */
 
@@ -59,16 +88,8 @@ type LogsResponse = {
   hasNextPage: boolean;
 };
 
-const TYPES = [
-  'strength',
-  'cardio',
-  'yoga',
-  'running',
-  'hiit',
-  'flexibility',
-  'sports',
-  'other',
-] as const;
+/** A session seeded from a workout or a previous log; no `_id` means it will be created. */
+type LogSeed = Partial<Omit<WorkoutLog, '_id'>>;
 
 /* -------------------------------------------------------------- utilities */
 
@@ -79,7 +100,7 @@ const num = (v: string): number | undefined => {
 };
 
 /** Total tonnage for a session: sum of sets x reps x weight per exercise. */
-export function sessionVolume(log: WorkoutLog): number {
+export function sessionVolume(log: Pick<WorkoutLog, 'exercises'>): number {
   return (log.exercises ?? []).reduce((sum, ex) => {
     const sets = Number(ex.sets) || 0;
     const reps = Number(ex.reps) || 0;
@@ -94,25 +115,13 @@ const parseDate = (value?: string): Date | null => {
   return isValid(d) ? d : null;
 };
 
+const dayKey = (d: Date) => format(startOfDay(d), 'yyyy-MM-dd');
+
+const dayLabel = (d: Date) => (isToday(d) ? 'Today' : isYesterday(d) ? 'Yesterday' : format(d, 'EEEE d MMMM'));
+
+const plural = (n: number, one: string, many = `${one}s`) => `${formatStat(n)} ${n === 1 ? one : many}`;
+
 /* ------------------------------------------------------------- form types */
-
-type ExerciseDraft = {
-  name: string;
-  sets: string;
-  reps: string;
-  weight: string;
-  duration: string;
-  notes: string;
-};
-
-const emptyExercise = (): ExerciseDraft => ({
-  name: '',
-  sets: '',
-  reps: '',
-  weight: '',
-  duration: '',
-  notes: '',
-});
 
 type FormState = {
   name: string;
@@ -124,75 +133,88 @@ type FormState = {
   exercises: ExerciseDraft[];
 };
 
-const formFrom = (log?: WorkoutLog | null): FormState => {
+const formFrom = (log?: LogSeed | null): FormState => {
   const d = parseDate(log?.date) ?? new Date();
   return {
     name: log?.name ?? '',
     type: log?.type ?? 'strength',
     date: format(d, "yyyy-MM-dd'T'HH:mm"),
-    duration: log?.duration != null ? String(log.duration) : '',
-    caloriesBurned: log?.caloriesBurned != null ? String(log.caloriesBurned) : '',
+    duration: log?.duration != null && log.duration !== 0 ? String(log.duration) : '',
+    caloriesBurned: log?.caloriesBurned != null && log.caloriesBurned !== 0 ? String(log.caloriesBurned) : '',
     notes: log?.notes ?? '',
-    exercises:
-      log?.exercises?.length
-        ? log.exercises.map((e) => ({
-            name: e.name ?? '',
-            sets: e.sets != null ? String(e.sets) : '',
-            reps: e.reps != null ? String(e.reps) : '',
-            weight: e.weight != null ? String(e.weight) : '',
-            duration: e.duration != null ? String(e.duration) : '',
-            notes: e.notes ?? '',
-          }))
-        : [emptyExercise()],
+    exercises: log?.exercises?.length ? log.exercises.map(exerciseDraftFrom) : [emptyExercise()],
   };
 };
+
+/** Seed a fresh session from a library workout ("Log this workout"). */
+const seedFromWorkout = (w: SocialWorkout): LogSeed => ({
+  name: w.title,
+  type: w.category,
+  duration: w.duration,
+  caloriesBurned: w.caloriesBurned,
+  exercises: (w.exercises ?? []).map((e) => ({
+    name: e.name,
+    sets: e.sets,
+    reps: e.reps,
+    weight: e.weight,
+    duration: e.duration,
+    notes: e.notes,
+  })),
+});
+
+/** Seed a fresh session from a past one ("Log again"): same content, dated now. */
+const seedFromLog = (log: WorkoutLog): LogSeed => ({
+  name: log.name,
+  type: log.type,
+  duration: log.duration,
+  caloriesBurned: log.caloriesBurned,
+  notes: log.notes,
+  exercises: log.exercises,
+});
 
 /* --------------------------------------------------------------- log modal */
 
 function LogModal({
   open,
   editing,
+  seed,
+  seedKey,
   onClose,
 }: {
   open: boolean;
+  /** Existing log → PATCH. */
   editing: WorkoutLog | null;
+  /** Prefill for a new log → POST. */
+  seed?: LogSeed | null;
+  /** Changes whenever `seed` changes so the form re-seeds. */
+  seedKey?: string;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState<FormState>(() => formFrom(editing));
-  const [seedKey, setSeedKey] = useState('');
+  const formId = useId();
+  const [form, setForm] = useState<FormState>(() => formFrom(editing ?? seed));
+  const [formKey, setFormKey] = useState('');
+  const [errors, setErrors] = useState<{ date?: string; exercises?: string }>({});
 
-  const seed = `${open ? 'open' : 'closed'}:${editing?._id ?? 'new'}`;
-  if (seed !== seedKey) {
-    setSeedKey(seed);
-    setForm(formFrom(editing));
+  const key = `${open ? 'open' : 'closed'}:${editing?._id ?? 'new'}:${seedKey ?? ''}`;
+  if (key !== formKey) {
+    setFormKey(key);
+    setForm(formFrom(editing ?? seed));
+    setErrors({});
   }
 
-  const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
-    setForm((f) => ({ ...f, [k]: v }));
-
-  const updateExercise = (i: number, patch: Partial<ExerciseDraft>) =>
-    set(
-      'exercises',
-      form.exercises.map((row, idx) => (idx === i ? { ...row, ...patch } : row)),
-    );
+  const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = useMutation({
     mutationFn: async () => {
-      const exercises: LogExercise[] = form.exercises
-        .filter((e) => e.name.trim())
-        .map((e) => ({
-          name: e.name.trim(),
-          sets: num(e.sets),
-          reps: num(e.reps),
-          weight: num(e.weight),
-          duration: num(e.duration),
-          notes: e.notes.trim() || undefined,
-        }));
-      if (!exercises.length) throw new Error('At least one exercise is required');
+      const exercises: LogExercise[] = form.exercises.map(toExercisePayload).filter((e) => e.name.length > 0);
       const parsed = new Date(form.date);
-      if (!isValid(parsed)) throw new Error('Enter a valid date');
+      const next: typeof errors = {};
+      if (!exercises.length) next.exercises = 'Add at least one exercise with a name.';
+      if (!isValid(parsed)) next.date = 'Enter a valid date and time.';
+      setErrors(next);
+      if (next.exercises || next.date) throw Object.assign(new Error('validation'), { silent: true });
 
       const payload = {
         name: form.name.trim() || 'Workout',
@@ -213,152 +235,254 @@ function LogModal({
       return data;
     },
     onSuccess: () => {
-      toast.success(editing ? 'Session updated' : 'Session logged');
+      toast.success(editing ? 'Session saved' : 'Session logged');
       qc.invalidateQueries({ queryKey: ['workout-logs'] });
       onClose();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save session')),
+    onError: (e) => {
+      if ((e as { silent?: boolean })?.silent) return;
+      toast.error(errMsg(e, 'Could not save session'));
+    },
   });
 
   return (
-    <Modal open={open} onClose={onClose} title={editing ? 'Edit session' : 'Log a session'}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={editing ? 'Edit session' : 'Log a session'}
+      description={editing ? undefined : seed?.name ? `Based on ${seed.name}. Adjust what you actually did.` : 'What you did, when, and how much you moved.'}
+      size="lg"
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={save.isPending}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" loading={save.isPending}>
+            {editing ? 'Save changes' : 'Log session'}
+          </Button>
+        </>
+      }
+    >
       <form
-        className="space-y-4"
+        id={formId}
+        className="space-y-5"
+        noValidate
         onSubmit={(e) => {
           e.preventDefault();
           save.mutate();
         }}
       >
         <Input
-          placeholder="Session name"
+          label="Session name"
+          hint="Optional. Defaults to “Workout”."
+          placeholder="e.g. Push day A"
+          autoComplete="off"
           value={form.name}
           onChange={(e) => set('name', e.target.value)}
         />
         <div className="grid grid-cols-2 gap-3">
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--color-muted)]">Type</span>
-            <select
-              className="input-base"
-              value={form.type}
-              onChange={(e) => set('type', e.target.value)}
-            >
-              {TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--color-muted)]">Date</span>
-            <Input
-              type="datetime-local"
-              value={form.date}
-              onChange={(e) => set('date', e.target.value)}
-            />
-          </label>
+          <Select label="Type" options={CATEGORY_OPTIONS} value={form.type} onChange={(v) => set('type', v)} />
+          <DateField
+            label="Date and time"
+            type="datetime-local"
+            containerClassName="col-span-2 sm:col-span-1"
+            required
+            value={form.date}
+            error={errors.date}
+            onChange={(e) => {
+              set('date', e.target.value);
+              if (errors.date) setErrors((er) => ({ ...er, date: undefined }));
+            }}
+          />
           <Input
+            label="Duration (min)"
             type="number"
+            inputMode="numeric"
             min={0}
             max={1440}
-            placeholder="Duration (min)"
+            placeholder="45"
             value={form.duration}
             onChange={(e) => set('duration', e.target.value)}
           />
           <Input
+            label="Calories (kcal)"
             type="number"
+            inputMode="numeric"
             min={0}
-            placeholder="Calories burned"
+            placeholder="350"
             value={form.caloriesBurned}
             onChange={(e) => set('caloriesBurned', e.target.value)}
           />
         </div>
 
-        <div className="space-y-3">
-          <p className="text-sm font-semibold">Exercises</p>
-          {form.exercises.map((row, i) => (
-            <div key={i} className="space-y-2 rounded-xl border border-[var(--color-line)] p-3">
-              <div className="flex items-center gap-2">
-                <Input
-                  placeholder="Exercise name"
-                  value={row.name}
-                  onChange={(e) => updateExercise(i, { name: e.target.value })}
-                />
-                {form.exercises.length > 1 && (
-                  <button
-                    type="button"
-                    aria-label={`Remove exercise ${i + 1}`}
-                    className="btn btn-ghost px-2"
-                    onClick={() =>
-                      set(
-                        'exercises',
-                        form.exercises.filter((_, idx) => idx !== i),
-                      )
-                    }
-                  >
-                    <Trash size={16} />
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Sets"
-                  value={row.sets}
-                  onChange={(e) => updateExercise(i, { sets: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Reps"
-                  value={row.reps}
-                  onChange={(e) => updateExercise(i, { reps: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.5"
-                  placeholder="Weight (kg)"
-                  value={row.weight}
-                  onChange={(e) => updateExercise(i, { weight: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Minutes"
-                  value={row.duration}
-                  onChange={(e) => updateExercise(i, { duration: e.target.value })}
-                />
-              </div>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => set('exercises', [...form.exercises, emptyExercise()])}
-          >
-            <Plus size={16} /> Add exercise
-          </Button>
-        </div>
+        <ExerciseRows
+          value={form.exercises}
+          showNotes={false}
+          error={errors.exercises}
+          onChange={(v) => {
+            set('exercises', v);
+            if (errors.exercises) setErrors((er) => ({ ...er, exercises: undefined }));
+          }}
+        />
 
         <Textarea
-          rows={3}
-          placeholder="Notes (optional)"
+          label="Notes"
+          hint="Optional. Energy, sleep, anything worth remembering."
+          rows={2}
+          autoGrow
+          maxRows={6}
           value={form.notes}
           onChange={(e) => set('notes', e.target.value)}
         />
-
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" loading={save.isPending}>
-            {editing ? 'Save changes' : 'Log session'}
-          </Button>
-        </div>
       </form>
     </Modal>
+  );
+}
+
+/* --------------------------------------------------------------- session card */
+
+function SessionCard({
+  log,
+  onEdit,
+  onRepeat,
+  onDelete,
+}: {
+  log: WorkoutLog;
+  onEdit: (log: WorkoutLog) => void;
+  onRepeat: (log: WorkoutLog) => void;
+  onDelete: (log: WorkoutLog) => void;
+}) {
+  const d = parseDate(log.date);
+  const volume = sessionVolume(log);
+  const exercises = log.exercises ?? [];
+  const menu: MenuItem[] = [
+    { label: 'Edit', icon: <Edit size={18} />, onSelect: () => onEdit(log) },
+    { label: 'Log again', description: 'Same session, dated now', icon: <Copy size={18} />, onSelect: () => onRepeat(log) },
+    { label: 'Delete', icon: <Trash size={18} />, danger: true, divider: true, onSelect: () => onDelete(log) },
+  ];
+  return (
+    <Card className="flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="truncate text-md font-semibold text-text-1">{log.name || 'Workout'}</h3>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-2">
+            {d ? (
+              <time dateTime={d.toISOString()} className="tabular">
+                {format(d, 'HH:mm')}
+              </time>
+            ) : (
+              <span>Unknown time</span>
+            )}
+            {log.type ? <Badge size="sm">{humanize(log.type)}</Badge> : null}
+          </p>
+        </div>
+        <Menu items={menu} label={`Options for ${log.name || 'workout'}`} className="-mr-2 -mt-1.5" />
+      </div>
+
+      <MetaList
+        items={[
+          !!log.duration && { icon: <Clock size={14} />, label: `${formatStat(log.duration)} min` },
+          !!log.caloriesBurned && { icon: <Flame size={14} />, label: `${formatStat(log.caloriesBurned)} kcal` },
+          volume > 0 && { icon: <Dumbbell size={14} />, label: `${formatStat(volume, { compact: volume >= 10_000 })} kg lifted`, title: `${volume.toLocaleString()} kg` },
+          { icon: <Activity size={14} />, label: plural(exercises.length, 'exercise') },
+        ]}
+      />
+
+      {exercises.length > 0 ? (
+        <ul className="grid gap-1.5 sm:grid-cols-2">
+          {exercises.map((ex, i) => {
+            const facts = [
+              ex.sets ? `${formatStat(ex.sets)} × ${formatStat(ex.reps ?? 0)}` : ex.reps ? `${formatStat(ex.reps)} reps` : null,
+              ex.weight ? `${formatStat(ex.weight)} kg` : null,
+              ex.duration ? `${formatStat(ex.duration)} min` : null,
+              ex.distance ? `${formatStat(ex.distance)} km` : null,
+            ].filter(Boolean) as string[];
+            return (
+              <li key={`${log._id}-${i}`} className="flex min-h-10 items-center justify-between gap-3 rounded-sm bg-surface-2 px-3 py-1.5 text-sm">
+                <span className="truncate font-medium text-text-1">{ex.name}</span>
+                {facts.length ? (
+                  <span className="type-stat shrink-0 text-sm text-text-2">
+                    {facts.map((f, j) => (
+                      <span key={f} className={cx(j > 0 && 'ml-2.5')}>
+                        {f}
+                      </span>
+                    ))}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      {log.notes ? <p className="prose-measure text-sm text-text-2">{log.notes}</p> : null}
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------------- week chart */
+
+type Metric = 'volume' | 'minutes' | 'sessions';
+const METRICS: Array<{ key: Metric; label: string; unit: string }> = [
+  { key: 'volume', label: 'Volume', unit: 'kg' },
+  { key: 'minutes', label: 'Minutes', unit: 'min' },
+  { key: 'sessions', label: 'Sessions', unit: '' },
+];
+
+function WeekChart({
+  data,
+  metric,
+  onMetric,
+  loading,
+}: {
+  data: Array<{ day: string; date: string; volume: number; minutes: number; sessions: number }>;
+  metric: Metric;
+  onMetric: (m: Metric) => void;
+  loading: boolean;
+}) {
+  const meta = METRICS.find((m) => m.key === metric) ?? METRICS[0];
+  const empty = !loading && data.every((d) => d[metric] === 0);
+  return (
+    <Card padded={false} className="p-4 sm:p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="type-heading text-lg text-text-1">Last 7 days</h2>
+          <p className="text-xs text-text-2">{meta.key === 'volume' ? 'Sets × reps × weight, per day' : meta.key === 'minutes' ? 'Time trained per day' : 'Sessions per day'}</p>
+        </div>
+        <SegmentedControl
+          aria-label="Chart metric"
+          tabs={METRICS.map((m) => ({ key: m.key, label: m.label }))}
+          value={metric}
+          onChange={(k) => onMetric(k as Metric)}
+        />
+      </div>
+      {loading ? (
+        <Skeleton className="h-52 w-full" />
+      ) : (
+        <div className="relative h-52 w-full" role="img" aria-label={`${meta.label} for the last 7 days`}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: -12 }} barCategoryGap="28%">
+              <CartesianGrid {...chartTheme.cartesianGrid} strokeDasharray="3 3" />
+              <XAxis dataKey="day" {...chartTheme.axisProps} />
+              <YAxis {...chartTheme.axisProps} allowDecimals={false} width={44} tickFormatter={(v: number) => formatStat(v, { compact: true })} />
+              <Tooltip
+                {...chartTheme.tooltip}
+                formatter={(value) => [`${formatStat(Number(value ?? 0))}${meta.unit ? ` ${meta.unit}` : ''}`, meta.label]}
+                labelFormatter={(_label, payload) => {
+                  const iso = (payload?.[0]?.payload as { date?: string } | undefined)?.date;
+                  const d = iso ? parseISO(iso) : null;
+                  return d && isValid(d) ? format(d, 'EEEE d MMM') : String(_label);
+                }}
+              />
+              <Bar dataKey={metric} fill={VIZ.brand} radius={[6, 6, 0, 0]} maxBarSize={40} animationDuration={chartTheme.animationDuration} />
+            </BarChart>
+          </ResponsiveContainer>
+          {empty ? (
+            <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-sm text-text-3">No sessions in the last 7 days</p>
+          ) : null}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -367,21 +491,62 @@ function LogModal({
 export default function WorkoutLogs() {
   const qc = useQueryClient();
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<WorkoutLog | null>(null);
+  const [seed, setSeed] = useState<{ key: string; value: LogSeed } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WorkoutLog | null>(null);
+  const [metric, setMetric] = useState<Metric>('volume');
+  const compact = useIsCompact();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['workout-logs'],
     queryFn: async (): Promise<LogsResponse> => {
-      const { data } = await api.get<LogsResponse>('/workouts/logs', {
-        params: { page: 1, limit: 100 },
-      });
+      const { data } = await api.get<LogsResponse>('/workouts/logs', { params: { page: 1, limit: 100 } });
       return data;
     },
   });
 
-  const logs = data?.workouts ?? [];
+  const logs = useMemo(
+    () =>
+      [...(data?.workouts ?? [])].sort((a, b) => (parseDate(b.date)?.getTime() ?? 0) - (parseDate(a.date)?.getTime() ?? 0)),
+    [data],
+  );
+
+  const openNew = (next?: { key: string; value: LogSeed } | null) => {
+    setEditing(null);
+    setSeed(next ?? null);
+    setModal(true);
+  };
+
+  // Deep links: ?log=1 opens the form; ?from=<workoutId> prefills it from a library workout.
+  const wantsLog = params.get('log') === '1';
+  const fromId = params.get('from');
+  const fromWorkout = useQuery({
+    queryKey: ['workout', fromId],
+    queryFn: async (): Promise<SocialWorkout> => {
+      const { data } = await api.get<{ data: SocialWorkout }>(`/workouts/workout/info/single-workout/${fromId}`);
+      return data.data;
+    },
+    enabled: Boolean(fromId),
+  });
+
+  useEffect(() => {
+    if (!wantsLog) return;
+    if (fromId && fromWorkout.isPending) return; // wait for the prefill
+    if (fromId && fromWorkout.isError) toast.error('Could not load that workout; starting an empty session.');
+    openNew(fromId && fromWorkout.data ? { key: fromWorkout.data._id, value: seedFromWorkout(fromWorkout.data) } : null);
+    setParams(
+      (prev) => {
+        const n = new URLSearchParams(prev);
+        n.delete('log');
+        n.delete('from');
+        return n;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsLog, fromId, fromWorkout.isPending, fromWorkout.isError, fromWorkout.data]);
 
   const remove = useMutation({
     mutationFn: async (log: WorkoutLog) => {
@@ -411,207 +576,209 @@ export default function WorkoutLogs() {
     },
   });
 
-  const chartData = useMemo(() => {
+  /* ---- derived: 14-day buckets → this week, last week, streak */
+  const { chartData, week, lastWeek, streak } = useMemo(() => {
     const end = startOfDay(new Date());
-    const start = subDays(end, 6);
+    const start = subDays(end, 13);
     const buckets = new Map<string, { volume: number; sessions: number; minutes: number }>();
-    for (const day of eachDayOfInterval({ start, end })) {
-      buckets.set(format(day, 'yyyy-MM-dd'), { volume: 0, sessions: 0, minutes: 0 });
-    }
+    for (const day of eachDayOfInterval({ start, end })) buckets.set(dayKey(day), { volume: 0, sessions: 0, minutes: 0 });
+    const trainedDays = new Set<string>();
     for (const log of logs) {
       const d = parseDate(log.date);
       if (!d) continue;
-      const key = format(startOfDay(d), 'yyyy-MM-dd');
-      const bucket = buckets.get(key);
+      const k = dayKey(d);
+      trainedDays.add(k);
+      const bucket = buckets.get(k);
       if (!bucket) continue;
       bucket.volume += sessionVolume(log);
       bucket.sessions += 1;
       bucket.minutes += Number(log.duration) || 0;
     }
-    return [...buckets.entries()].map(([key, value]) => ({
+    const rows = [...buckets.entries()].map(([key, value]) => ({
       day: format(parseISO(key), 'EEE'),
       date: key,
       ...value,
       volume: Math.round(value.volume),
     }));
+    const sum = (list: typeof rows) =>
+      list.reduce(
+        (acc, r) => ({ volume: acc.volume + r.volume, sessions: acc.sessions + r.sessions, minutes: acc.minutes + r.minutes }),
+        { volume: 0, sessions: 0, minutes: 0 },
+      );
+    const thisWeek = rows.slice(7);
+    const prevWeek = rows.slice(0, 7);
+
+    // Streak: consecutive trained days ending today (or yesterday, if today is still open).
+    let cursor = trainedDays.has(dayKey(end)) ? end : subDays(end, 1);
+    let run = 0;
+    while (trainedDays.has(dayKey(cursor))) {
+      run += 1;
+      cursor = subDays(cursor, 1);
+    }
+    return { chartData: thisWeek, week: sum(thisWeek), lastWeek: sum(prevWeek), streak: run };
   }, [logs]);
 
-  const weekTotals = useMemo(
-    () =>
-      chartData.reduce(
-        (acc, d) => ({
-          volume: acc.volume + d.volume,
-          sessions: acc.sessions + d.sessions,
-          minutes: acc.minutes + d.minutes,
-        }),
-        { volume: 0, sessions: 0, minutes: 0 },
-      ),
-    [chartData],
-  );
+  const lastTrained = logs.length ? parseDate(logs[0].date) : null;
+  const daysSince = lastTrained ? differenceInCalendarDays(new Date(), lastTrained) : null;
+
+  /* ---- history grouped by day */
+  const groups = useMemo(() => {
+    const out: Array<{ key: string; label: string; items: WorkoutLog[] }> = [];
+    for (const log of logs) {
+      const d = parseDate(log.date);
+      const key = d ? dayKey(d) : 'unknown';
+      const last = out[out.length - 1];
+      if (last && last.key === key) last.items.push(log);
+      else out.push({ key, label: d ? dayLabel(d) : 'Unknown date', items: [log] });
+    }
+    return out;
+  }, [logs]);
+
+  const delta = (now: number, before: number) => (before === 0 && now === 0 ? undefined : { value: now - before, label: 'vs last week' });
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5 p-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Workout log</h1>
-          <p className="text-sm text-[var(--color-muted)]">
-            Every session you completed, with volume tracking.
-          </p>
-        </div>
-        <Button
-          variant="primary"
-          onClick={() => {
-            setEditing(null);
-            setModal(true);
-          }}
-        >
-          <Plus size={16} /> Log session
-        </Button>
-      </header>
-
-      <Card className="p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="inline-flex items-center gap-2 font-semibold">
-            <TrendingUp size={18} /> Weekly volume
-          </h2>
-          <div className="flex gap-4 text-xs text-[var(--color-muted)]">
-            <span>{weekTotals.sessions} sessions</span>
-            <span>{weekTotals.minutes} min</span>
-            <span>{weekTotals.volume.toLocaleString()} kg lifted</span>
-          </div>
-        </div>
-        {isLoading ? (
-          <Skeleton className="h-56 w-full" />
-        ) : (
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#262631" vertical={false} />
-                <XAxis dataKey="day" stroke="#9aa0ae" fontSize={12} tickLine={false} />
-                <YAxis stroke="#9aa0ae" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    background: '#17171f',
-                    border: '1px solid #262631',
-                    borderRadius: 12,
-                    color: '#f4f4f6',
-                  }}
-                  formatter={(value) => [`${Number(value ?? 0).toLocaleString()} kg`, 'Volume']}
-                />
-                <Bar dataKey="volume" fill="#7c5cff" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </Card>
+    <div className="space-y-6">
+      <PageHeader
+        title="Workout log"
+        subtitle="Every session you have completed, with weekly volume."
+        actions={
+          <Button variant="primary" icon={<Plus size={18} />} onClick={() => openNew()}>
+            Log session
+          </Button>
+        }
+        mobileActions={
+          <IconButton label="Log session" onClick={() => openNew()}>
+            <Plus size={24} />
+          </IconButton>
+        }
+      />
 
       {isLoading ? (
-        <div className="space-y-3">
+        <StatGrid columns={4}>
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full" />
+            <SkeletonTile key={i} />
+          ))}
+        </StatGrid>
+      ) : (
+        <StatGrid columns={4}>
+          <StatTile
+            label="Sessions this week"
+            value={formatStat(week.sessions)}
+            icon={<Dumbbell size={18} />}
+            tone="brand"
+            delta={delta(week.sessions, lastWeek.sessions)}
+            spark={compact ? undefined : chartData.map((d) => d.sessions)}
+          />
+          <StatTile
+            label="Time this week"
+            value={formatStat(week.minutes)}
+            unit="min"
+            icon={<Clock size={18} />}
+            delta={delta(week.minutes, lastWeek.minutes)}
+            spark={compact ? undefined : chartData.map((d) => d.minutes)}
+          />
+          <StatTile
+            label="Lifted this week"
+            value={formatStat(week.volume, { compact: week.volume >= 10_000 })}
+            unit="kg"
+            icon={<Activity size={18} />}
+            delta={delta(week.volume, lastWeek.volume)}
+            spark={compact ? undefined : chartData.map((d) => d.volume)}
+          />
+          <StatTile
+            label="Streak"
+            value={formatStat(streak)}
+            unit={streak === 1 ? 'day' : 'days'}
+            icon={<Zap size={18} filled={streak > 0} />}
+            tone={streak > 0 ? 'accent' : 'neutral'}
+            hint={
+              streak > 0
+                ? 'Train today to keep it going'
+                : daysSince == null
+                  ? 'Log a session to start one'
+                  : daysSince === 0
+                    ? 'Starts with today’s session'
+                    : `Last session ${plural(daysSince, 'day')} ago`
+            }
+          />
+        </StatGrid>
+      )}
+
+      <WeekChart data={chartData} metric={metric} onMetric={setMetric} loading={isLoading} />
+
+      {isLoading ? (
+        <div className="space-y-3" aria-hidden="true">
+          <Skeleton className="h-4 w-24" />
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="card space-y-3 p-4">
+              <Skeleton className="h-5 w-1/2" />
+              <Skeleton className="h-3 w-1/3" />
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            </div>
           ))}
         </div>
       ) : isError ? (
-        <ErrorState message={errMsg(error, 'Could not load sessions')} onRetry={() => refetch()} />
+        <ErrorState error={error} title="Could not load your sessions" onRetry={() => refetch()} />
       ) : logs.length === 0 ? (
         <EmptyState
-          icon={<Dumbbell size={28} />}
-          title="No sessions logged"
-          description="Log your first training session to start building your history."
-          action={
-            <Button variant="primary" onClick={() => setModal(true)}>
-              <Plus size={16} /> Log session
-            </Button>
-          }
+          title="No sessions yet"
+          message="Log your first session and your weekly volume, time and streak start building here."
+          action={{ label: 'Log session', onClick: () => openNew(), icon: <Plus size={18} /> }}
+          secondaryAction={{ label: 'Start from a workout', to: '/workouts', variant: 'secondary' }}
         />
       ) : (
-        <ul className="space-y-3">
-          {logs.map((log) => {
-            const d = parseDate(log.date);
-            return (
-              <li key={log._id} className="card space-y-2 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="font-semibold">{log.name || 'Workout'}</p>
-                    <p className="text-xs text-[var(--color-muted)]">
-                      {d ? format(d, 'EEE, d MMM yyyy · HH:mm') : 'Unknown date'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {log.type && <Badge>{log.type}</Badge>}
-                    <button
-                      type="button"
-                      aria-label="Edit session"
-                      className="btn btn-ghost px-2"
-                      onClick={() => {
-                        setEditing(log);
-                        setModal(true);
-                      }}
-                    >
-                      <Edit size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Delete session"
-                      className="btn btn-ghost px-2"
-                      onClick={() => setPendingDelete(log)}
-                    >
-                      <Trash size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-4 text-xs text-[var(--color-muted)]">
-                  {log.duration ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Clock size={12} /> {log.duration} min
-                    </span>
-                  ) : null}
-                  {log.caloriesBurned ? <span>{log.caloriesBurned} cal</span> : null}
-                  <span>{sessionVolume(log).toLocaleString()} kg volume</span>
-                  <span>{log.exercises?.length ?? 0} exercises</span>
-                </div>
-
-                <ul className="grid gap-1 sm:grid-cols-2">
-                  {(log.exercises ?? []).map((ex, i) => (
-                    <li
-                      key={`${log._id}-${i}`}
-                      className="rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-xs"
-                    >
-                      <span className="font-medium">{ex.name}</span>{' '}
-                      <span className="text-[var(--color-muted)]">
-                        {[
-                          ex.sets ? `${ex.sets}×${ex.reps ?? 0}` : null,
-                          ex.weight ? `${ex.weight} kg` : null,
-                          ex.duration ? `${ex.duration} min` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-
-                {log.notes && <p className="text-sm text-[var(--color-muted)]">{log.notes}</p>}
-              </li>
-            );
-          })}
-        </ul>
+        <div className="space-y-6">
+          {groups.map((g) => (
+            <section key={g.key} aria-labelledby={`day-${g.key}`} className="space-y-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 id={`day-${g.key}`} className="type-label text-text-2">
+                  {g.label}
+                </h2>
+                <span className="text-xs text-text-3">{plural(g.items.length, 'session')}</span>
+              </div>
+              <div className="space-y-3">
+                {g.items.map((log) => (
+                  <SessionCard
+                    key={log._id}
+                    log={log}
+                    onEdit={(l) => {
+                      setSeed(null);
+                      setEditing(l);
+                      setModal(true);
+                    }}
+                    onRepeat={(l) => openNew({ key: `repeat:${l._id}:${Date.now()}`, value: seedFromLog(l) })}
+                    onDelete={setPendingDelete}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+          {data?.hasNextPage ? (
+            <p className="text-center text-xs text-text-3">Showing your latest {formatStat(logs.length)} of {formatStat(data.total)} sessions.</p>
+          ) : null}
+        </div>
       )}
 
       <LogModal
         open={modal}
         editing={editing}
+        seed={seed?.value}
+        seedKey={seed?.key}
         onClose={() => {
           setModal(false);
           setEditing(null);
+          setSeed(null);
         }}
       />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
-        title="Delete session"
-        message="This workout log will be permanently removed."
+        title="Delete session?"
+        message={`${pendingDelete?.name || 'This session'} will be removed from your log and your weekly totals.`}
         confirmLabel="Delete"
+        destructive
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => pendingDelete && remove.mutate(pendingDelete)}

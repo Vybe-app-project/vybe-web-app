@@ -2,22 +2,26 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, errMsg } from '../lib/api';
 import { isEmail, useCountdown } from '../lib/hooks';
-import { Button, Input, Card } from './ui';
-import { Check } from './icons';
+import { Button, Callout, Input } from './ui';
+import { ArrowLeft, Mail } from './icons';
+import { AuthShell } from './Login';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | undefined>();
   const [cooldown, startCooldown] = useCountdown();
+
+  const trimmed = email.trim().toLowerCase();
 
   async function submit(e?: FormEvent) {
     e?.preventDefault();
     setError(null);
+    setFieldError(undefined);
 
-    const trimmed = email.trim().toLowerCase();
-    if (!isEmail(trimmed)) return setError('Enter a valid email address.');
+    if (!isEmail(trimmed)) return setFieldError('Enter a valid email address.');
 
     setBusy(true);
     try {
@@ -31,86 +35,94 @@ export default function ForgotPassword() {
     }
   }
 
-  return (
-    <div className="min-h-full flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="text-3xl font-black tracking-tight bg-gradient-to-br from-[var(--color-brand)] to-[var(--color-brand-2)] bg-clip-text text-transparent">
-            Vybe
+  const backLink = (
+    <Link
+      to="/login"
+      className="inline-flex min-h-11 items-center gap-1.5 rounded-sm text-sm font-semibold text-text-2 hover:text-text-1"
+    >
+      <ArrowLeft size={18} />
+      Back to sign in
+    </Link>
+  );
+
+  if (sent) {
+    return (
+      <AuthShell
+        title="Check your inbox"
+        subtitle={
+          <>
+            If an account exists for <span className="font-semibold text-text-1">{trimmed}</span>, a reset link is on its way.
+            It expires shortly, so use it soon.
+          </>
+        }
+        headline="Back in a minute."
+        tagline="Reset links are single-use and expire quickly, which is how it should be."
+        footer={backLink}
+      >
+        <div className="flex items-start gap-3 rounded-md bg-surface-2 p-4">
+          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-text">
+            <Mail size={20} />
+          </span>
+          <div className="text-sm text-text-2">
+            <p className="font-semibold text-text-1">Did not get it?</p>
+            <p className="mt-0.5">Check spam, or make sure you typed the email your account uses.</p>
           </div>
         </div>
 
-        <Card className="p-6">
-          <h1 className="text-lg font-bold mb-1">Reset your password</h1>
-          <p className="text-sm text-[var(--color-muted)] mb-5">
-            Enter the email on your account and we&apos;ll send a reset link.
-          </p>
+        {error ? <Callout tone="danger" className="mt-4">{error}</Callout> : null}
 
-          {sent ? (
-            <div className="space-y-4">
-              <div className="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3">
-                <Check className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                <div className="text-sm">
-                  <p className="font-semibold">Check your inbox</p>
-                  <p className="text-[var(--color-muted)] mt-1">
-                    If an account exists for {email.trim().toLowerCase()}, a reset link is on
-                    its way. The link expires shortly, so use it soon.
-                  </p>
-                </div>
-              </div>
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          <Button variant="secondary" block onClick={() => void submit()} disabled={busy || cooldown > 0} loading={busy} className="tabular">
+            {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend email'}
+          </Button>
+          <Button
+            variant="ghost"
+            block
+            onClick={() => {
+              setSent(false);
+              setError(null);
+            }}
+          >
+            Use a different email
+          </Button>
+        </div>
+      </AuthShell>
+    );
+  }
 
-              <Button
-                variant="ghost"
-                className="w-full"
-                onClick={() => submit()}
-                disabled={busy || cooldown > 0}
-                loading={busy}
-              >
-                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend email'}
-              </Button>
+  return (
+    <AuthShell
+      title="Reset your password"
+      subtitle="Enter the email on your account and we will send a reset link."
+      headline="Back in a minute."
+      tagline="Reset links are single-use and expire quickly, which is how it should be."
+      footer={backLink}
+    >
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        <Input
+          id="fp-email"
+          label="Email"
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          autoCapitalize="none"
+          placeholder="you@example.com"
+          value={email}
+          error={fieldError}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (fieldError) setFieldError(undefined);
+          }}
+          disabled={busy}
+          autoFocus
+        />
 
-              {error && (
-                <p role="alert" className="text-sm text-red-400">
-                  {error}
-                </p>
-              )}
-            </div>
-          ) : (
-            <form onSubmit={submit} className="space-y-4" noValidate>
-              <div>
-                <label htmlFor="fp-email" className="block text-xs font-semibold mb-1.5">
-                  Email
-                </label>
-                <Input
-                  id="fp-email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={busy}
-                />
-              </div>
+        {error ? <Callout tone="danger">{error}</Callout> : null}
 
-              {error && (
-                <p role="alert" className="text-sm text-red-400">
-                  {error}
-                </p>
-              )}
-
-              <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={busy}>
-                Send reset link
-              </Button>
-            </form>
-          )}
-
-          <div className="mt-5 text-center text-sm">
-            <Link to="/login" className="text-[var(--color-muted)] hover:text-white">
-              Back to sign in
-            </Link>
-          </div>
-        </Card>
-      </div>
-    </div>
+        <Button type="submit" variant="primary" size="lg" block loading={busy}>
+          Send reset link
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

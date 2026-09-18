@@ -5,15 +5,20 @@ import { format } from 'date-fns';
 import { adminApi, ORIGIN_BASE, errMsg } from '../../lib/api';
 import {
   Badge,
-  Button,
   Card,
   CardHeader,
   EmptyState,
   ErrorState,
+  IconButton,
   Skeleton,
+  SkeletonTile,
+  StatGrid,
+  StatTile,
   cx,
+  humanize,
 } from '../../components/ui';
-import { Server, Refresh, Check, X, Alert, BarChart } from '../../components/icons';
+import { Server, Refresh, Check, X, Alert, BarChart, Zap } from '../../components/icons';
+import { AdminPageHeader } from './AdminLayout';
 
 /* --------------------------------------------------------------- types */
 
@@ -23,6 +28,7 @@ type Ready = {
   database?: 'connected' | 'disconnected';
   providers?: Record<string, unknown>;
 };
+type Capabilities = { success?: boolean; authenticated?: boolean; capabilities?: Record<string, unknown> };
 type PerfEntry = {
   count?: number;
   avgTime?: number;
@@ -40,6 +46,57 @@ const POLL_MS = 10_000;
  * which also means a 401 here must not bounce the admin session.
  */
 const originApi = axios.create({ baseURL: ORIGIN_BASE || '/', timeout: 8000 });
+
+/**
+ * The provider capability booleans the API derives from its environment
+ * (services/providerCapabilities.js). Grouped so an operator can read which
+ * integrations are configured at a glance; unknown keys fall into "Other".
+ */
+const CAPABILITY_GROUPS: Array<{
+  title: string;
+  items: Array<{ key: string; label: string; description: string }>;
+}> = [
+  {
+    title: 'Sign-in',
+    items: [
+      { key: 'emailAuth', label: 'Email and password', description: 'JWT secret present; sessions can be issued.' },
+      { key: 'oauth', label: 'Social sign-in', description: 'At least one OAuth provider is configured.' },
+      { key: 'googleOAuth', label: 'Google', description: 'Google client ID (web, or iOS plus web).' },
+      { key: 'appleOAuth', label: 'Apple', description: 'Apple client ID.' },
+    ],
+  },
+  {
+    title: 'Messaging',
+    items: [
+      { key: 'emailDelivery', label: 'Outbound email', description: 'SMTP host, sender and credentials complete.' },
+      { key: 'push', label: 'Push notifications', description: 'Firebase service account loads.' },
+    ],
+  },
+  {
+    title: 'Media storage',
+    items: [
+      { key: 'storage', label: 'Uploads', description: 'A storage driver is ready.' },
+      { key: 'localStorage', label: 'Local disk', description: 'Local driver with a signing secret.' },
+      { key: 's3Storage', label: 'Amazon S3', description: 'Bucket, region and a credential source.' },
+    ],
+  },
+  {
+    title: 'Live',
+    items: [
+      { key: 'livestreamRelay', label: 'Livestream relay', description: 'Livestream config enabled.' },
+      { key: 'turnRelay', label: 'TURN relay', description: 'WebRTC relay for streams behind NAT.' },
+    ],
+  },
+  {
+    title: 'Data providers',
+    items: [
+      { key: 'googlePlaces', label: 'Gym search', description: 'Places lookup available by any route.' },
+      { key: 'googlePlacesProvider', label: 'Google Places key', description: 'Paid Places or Maps API key.' },
+      { key: 'googlePlacesFallback', label: 'OpenStreetMap fallback', description: 'OSM user agent, or a non-production build.' },
+      { key: 'usda', label: 'USDA food database', description: 'FoodData Central API key for nutrition lookups.' },
+    ],
+  },
+];
 
 function humanizeUptime(seconds?: number): string {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
@@ -63,38 +120,18 @@ function ms(v?: number): string {
 
 function StatusPill({ ok, label }: { ok: boolean | null; label: string }) {
   return (
-    <span
-      className={cx(
-        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold',
-        ok === null
-          ? 'border-slate-700 bg-slate-800/60 text-slate-400'
-          : ok
-            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-            : 'border-red-500/40 bg-red-500/10 text-red-300',
-      )}
-    >
-      {ok === null ? <Alert size={12} /> : ok ? <Check size={12} /> : <X size={12} />}
+    <span className="admin-status" data-state={ok === null ? 'unknown' : ok ? 'ok' : 'bad'}>
+      {ok === null ? <Alert size={14} /> : ok ? <Check size={14} /> : <X size={14} />}
       {label}
     </span>
   );
 }
 
-function StatTile({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-3">
-      <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">{label}</p>
-      <p className="mt-1 font-mono text-lg font-bold text-slate-100 tabular-nums">{value}</p>
-      {sub ? <p className="mt-0.5 text-[11px] text-slate-500">{sub}</p> : null}
-    </div>
-  );
+/** Latency reads as plain numerals until it crosses the warning thresholds. */
+function Latency({ value }: { value: number }) {
+  if (value > 1000) return <Badge tone="danger" className="tabular">{ms(value)}</Badge>;
+  if (value > 300) return <Badge tone="warning" className="tabular">{ms(value)}</Badge>;
+  return <span className="tabular">{ms(value)}</span>;
 }
 
 /* ---------------------------------------------------------------- page */
@@ -126,6 +163,14 @@ export default function AdminSystem() {
     refetchIntervalInBackground: false,
     retry: false,
     staleTime: 0,
+  });
+
+  // Public endpoint; read through the admin client so the request carries the
+  // same origin/base as everything else in the console.
+  const caps = useQuery<Capabilities>({
+    queryKey: ['system', 'capabilities'],
+    queryFn: async () => (await adminApi.get('/capabilities')).data ?? {},
+    staleTime: 60_000,
   });
 
   const perf = useQuery<PerfResponse>({
@@ -171,102 +216,112 @@ export default function AdminSystem() {
     };
   }, [rows]);
 
-  const providers = ready.data?.providers;
+  const capabilities = useMemo(() => {
+    const raw = caps.data?.capabilities;
+    return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  }, [caps.data]);
+
+  const knownKeys = useMemo(
+    () => new Set(CAPABILITY_GROUPS.flatMap((g) => g.items.map((i) => i.key))),
+    [],
+  );
+  const otherCapabilities = useMemo(
+    () => (capabilities ? Object.keys(capabilities).filter((k) => !knownKeys.has(k)) : []),
+    [capabilities, knownKeys],
+  );
+  const capSummary = useMemo(() => {
+    if (!capabilities) return null;
+    const values = Object.values(capabilities);
+    return { on: values.filter((v) => v === true).length, total: values.length };
+  }, [capabilities]);
+
+  const requiredProviders = ready.data?.providers;
+  const anyFetching = health.isFetching || ready.isFetching || perf.isFetching || caps.isFetching;
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-50">System</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Liveness and readiness are polled every 10 seconds directly from the API origin.
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<Refresh size={14} />}
-          loading={health.isFetching || ready.isFetching || perf.isFetching}
-          onClick={() => {
-            void health.refetch();
-            void ready.refetch();
-            void perf.refetch();
-          }}
-        >
-          Refresh now
-        </Button>
-      </div>
+      <AdminPageHeader
+        title="System"
+        subtitle="Liveness and readiness are polled every 10 seconds from the API origin; provider capabilities come from the API's own environment check."
+        actions={
+          <IconButton
+            label="Refresh now"
+            variant="secondary"
+            disabled={anyFetching}
+            onClick={() => {
+              void health.refetch();
+              void ready.refetch();
+              void perf.refetch();
+              void caps.refetch();
+            }}
+          >
+            <Refresh size={18} className={cx(anyFetching && 'animate-spin')} />
+          </IconButton>
+        }
+      />
 
       {/* Status */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="border-slate-800 bg-slate-950/60">
-          <CardHeader title="Liveness" subtitle="GET /health" />
+        <Card>
+          <CardHeader title="Liveness" subtitle={<span className="admin-code">GET /health</span>} />
           {health.isLoading ? (
-            <Skeleton className="h-8 w-32" />
+            <Skeleton className="h-7 w-32 rounded-full" />
           ) : (
             <>
               <StatusPill ok={liveOk} label={liveOk ? 'Healthy' : liveOk === null ? 'Unknown' : 'Unreachable'} />
-              <p className="mt-3 font-mono text-[11px] text-slate-500">
+              <p className="tabular mt-3 text-xs text-text-2">
                 {health.isError
                   ? errMsg(health.error, 'The API did not respond.')
                   : health.data?.timestamp
-                    ? `Reported ${format(new Date(health.data.timestamp), 'HH:mm:ss')}`
-                    : '—'}
+                    ? `Reported at ${format(new Date(health.data.timestamp), 'HH:mm:ss')}`
+                    : 'No timestamp reported'}
               </p>
             </>
           )}
         </Card>
 
-        <Card className="border-slate-800 bg-slate-950/60">
-          <CardHeader title="Readiness" subtitle="GET /ready" />
+        <Card>
+          <CardHeader title="Readiness" subtitle={<span className="admin-code">GET /ready</span>} />
           {ready.isLoading ? (
-            <Skeleton className="h-8 w-32" />
+            <Skeleton className="h-7 w-32 rounded-full" />
           ) : (
             <>
               <div className="flex flex-wrap gap-2">
-                <StatusPill
-                  ok={readyOk}
-                  label={readyOk ? 'Ready' : readyOk === null ? 'Unknown' : 'Not ready'}
-                />
+                <StatusPill ok={readyOk} label={readyOk ? 'Ready' : readyOk === null ? 'Unknown' : 'Not ready'} />
                 <StatusPill
                   ok={dbConnected}
-                  label={
-                    dbConnected
-                      ? 'DB connected'
-                      : dbConnected === null
-                        ? 'DB unknown'
-                        : 'DB disconnected'
-                  }
+                  label={dbConnected ? 'Database connected' : dbConnected === null ? 'Database unknown' : 'Database disconnected'}
                 />
               </div>
-              {providers && Object.keys(providers).length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {Object.entries(providers).map(([name, state]) => (
-                    <Badge key={name} tone={state ? 'success' : 'danger'}>
-                      {name}
-                    </Badge>
-                  ))}
+              {requiredProviders && Object.keys(requiredProviders).length > 0 ? (
+                <div className="mt-3">
+                  <p className="type-label text-text-2">Required providers</p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {Object.entries(requiredProviders).map(([name, state]) => (
+                      <Badge key={name} tone={state ? 'success' : 'danger'} dot>
+                        {humanize(name)}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
-              ) : null}
+              ) : (
+                <p className="mt-3 text-xs text-text-2">No providers are marked required for readiness.</p>
+              )}
               {ready.isError && !ready.data ? (
-                <p className="mt-3 font-mono text-[11px] text-red-400">
-                  {errMsg(ready.error, 'Readiness probe failed.')}
-                </p>
+                <p className="mt-3 text-xs text-danger">{errMsg(ready.error, 'Readiness probe failed.')}</p>
               ) : null}
             </>
           )}
         </Card>
 
-        <Card className="border-slate-800 bg-slate-950/60">
-          <CardHeader title="Process uptime" subtitle="Since last restart" />
+        <Card>
+          <CardHeader title="Process uptime" subtitle="Since the last restart" />
           {health.isLoading ? (
-            <Skeleton className="h-8 w-40" />
+            <Skeleton className="h-9 w-40" />
           ) : (
             <>
-              <p className="font-mono text-2xl font-bold text-slate-100">
-                {humanizeUptime(health.data?.uptime)}
-              </p>
-              <p className="mt-1 text-[11px] text-slate-500">
+              <p className="type-stat text-2xl text-text-1">{humanizeUptime(health.data?.uptime)}</p>
+              <p className="tabular mt-1 text-xs text-text-2">
                 {typeof health.data?.uptime === 'number'
                   ? `${Math.round(health.data.uptime).toLocaleString()} seconds`
                   : 'Uptime not reported'}
@@ -276,110 +331,171 @@ export default function AdminSystem() {
         </Card>
       </div>
 
-      {/* Aggregate request stats */}
-      <Card className="border-slate-800 bg-slate-950/60">
+      {/* Provider capabilities */}
+      <Card>
         <CardHeader
-          title="Request throughput"
-          subtitle="Aggregated from the in-process performance cache"
+          title="Provider capabilities"
+          subtitle={<span className="admin-code">GET /api/capabilities</span>}
+          action={
+            capSummary ? (
+              <Badge tone={capSummary.on === capSummary.total ? 'success' : 'neutral'}>
+                <span className="tabular">{capSummary.on} of {capSummary.total}</span> configured
+              </Badge>
+            ) : null
+          }
         />
-        {perf.isLoading ? (
-          <div className="grid gap-3 sm:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full rounded-xl" />
+        {caps.isLoading ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 w-full" />
             ))}
           </div>
+        ) : caps.isError ? (
+          <ErrorState
+            error={caps.error}
+            retry={() => void caps.refetch()}
+            title="Could not read capabilities"
+            className="py-6"
+          />
+        ) : !capabilities || Object.keys(capabilities).length === 0 ? (
+          <EmptyState
+            variant="no-results"
+            icon={<Zap size={24} />}
+            title="No capability report"
+            message="This API build does not expose provider capabilities."
+            size="sm"
+          />
+        ) : (
+          <div className="space-y-5">
+            {CAPABILITY_GROUPS.map((group) => {
+              const items = group.items.filter((i) => i.key in capabilities);
+              if (items.length === 0) return null;
+              return (
+                <section key={group.title} aria-label={group.title}>
+                  <h4 className="type-label mb-2 text-text-2">{group.title}</h4>
+                  <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {items.map((item) => {
+                      const on = capabilities[item.key] === true;
+                      return (
+                        <li key={item.key} className="admin-cap" data-on={on ? 'true' : 'false'}>
+                          <span className="admin-cap-dot" aria-hidden="true" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-text-1">
+                              {item.label}
+                              <span className="sr-only">: {on ? 'configured' : 'not configured'}</span>
+                            </p>
+                            <p className="truncate text-xs text-text-2" title={item.description}>{item.description}</p>
+                          </div>
+                          <span className={cx('shrink-0 text-xs font-semibold', on ? 'text-brand-text' : 'text-text-3')} aria-hidden="true">
+                            {on ? 'On' : 'Off'}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              );
+            })}
+            {otherCapabilities.length > 0 ? (
+              <section aria-label="Other">
+                <h4 className="type-label mb-2 text-text-2">Other</h4>
+                <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {otherCapabilities.map((key) => {
+                    const on = capabilities[key] === true;
+                    return (
+                      <li key={key} className="admin-cap" data-on={on ? 'true' : 'false'}>
+                        <span className="admin-cap-dot" aria-hidden="true" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-text-1">{humanize(key)}</p>
+                          <p className="admin-code truncate text-text-3">{key}</p>
+                        </div>
+                        <span className={cx('shrink-0 text-xs font-semibold', on ? 'text-brand-text' : 'text-text-3')}>
+                          {on ? 'On' : 'Off'}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ) : null}
+          </div>
+        )}
+      </Card>
+
+      {/* Aggregate request stats */}
+      <Card>
+        <CardHeader title="Request throughput" subtitle="Aggregated from the in-process performance cache" />
+        {perf.isLoading ? (
+          <StatGrid>
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonTile key={i} />)}
+          </StatGrid>
         ) : perf.isError ? (
           <ErrorState
             error={perf.error}
             retry={() => void perf.refetch()}
             title="Could not load performance stats"
-            className="py-8"
+            className="py-6"
           />
         ) : !totals ? (
           <EmptyState
-            icon={<BarChart size={22} />}
+            variant="no-results"
+            icon={<BarChart size={24} />}
             title="No samples recorded"
-            message="The performance cache is empty — it fills as requests are served after a restart."
-            className="py-10"
+            message="The performance cache is empty. It fills as requests are served after a restart."
+            size="sm"
           />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatGrid>
             <StatTile label="Requests sampled" value={totals.requests.toLocaleString()} />
-            <StatTile label="Avg latency" value={ms(totals.avg)} sub="Across all tracked routes" />
-            <StatTile
-              label="Worst case"
-              value={ms(totals.slowestMax)}
-              sub={totals.slowestKey}
-            />
+            <StatTile label="Average latency" value={ms(totals.avg)} hint="Across all tracked routes" />
+            <StatTile label="Worst case" value={ms(totals.slowestMax)} hint={totals.slowestKey} tone={totals.slowestMax > 1000 ? 'accent' : 'neutral'} />
             <StatTile label="Tracked routes" value={String(totals.endpoints)} />
-          </div>
+          </StatGrid>
         )}
       </Card>
 
       {/* Per-route table */}
-      <Card padded={false} className="overflow-hidden border-slate-800 bg-slate-950/60">
-        <div className="border-b border-slate-800 px-4 py-3">
-          <h3 className="text-sm font-bold text-slate-100">Latency by route</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Sorted by request volume. Refreshes every 30 seconds.
-          </p>
+      <Card padded={false} className="overflow-hidden">
+        <div className="border-b border-line px-4 py-3">
+          <h3 className="text-md font-semibold text-text-1">Latency by route</h3>
+          <p className="mt-0.5 text-xs text-text-2">Sorted by request volume. Refreshes every 30 seconds.</p>
         </div>
 
         {perf.isLoading ? (
-          <div className="space-y-3 p-4">
+          <div className="space-y-3 p-4" aria-busy="true">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-3 w-full" />
             ))}
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
-            icon={<Server size={22} />}
+            variant="no-results"
+            icon={<Server size={24} />}
             title="No route samples"
             message="Performance data appears once the API has served instrumented requests."
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="admin-table min-w-[720px]">
               <thead>
-                <tr className="border-b border-slate-800 font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                  <th className="px-4 py-3 font-semibold">Route</th>
-                  <th className="px-4 py-3 text-right font-semibold">Requests</th>
-                  <th className="px-4 py-3 text-right font-semibold">Avg</th>
-                  <th className="px-4 py-3 text-right font-semibold">Min</th>
-                  <th className="px-4 py-3 text-right font-semibold">Max</th>
-                  <th className="px-4 py-3 text-right font-semibold">Total</th>
+                <tr>
+                  <th scope="col">Route</th>
+                  <th scope="col" className="num">Requests</th>
+                  <th scope="col" className="num">Average</th>
+                  <th scope="col" className="num">Min</th>
+                  <th scope="col" className="num">Max</th>
+                  <th scope="col" className="num">Total</th>
                 </tr>
               </thead>
-              <tbody className={cx('divide-y divide-slate-800/70', perf.isFetching && 'opacity-60')}>
+              <tbody className={cx(perf.isFetching && 'admin-fetching')}>
                 {rows.map((r) => (
-                  <tr key={r.key} className="transition-colors hover:bg-slate-900/40">
-                    <td className="px-4 py-2.5 font-mono text-[12px] break-all text-slate-200">
-                      {r.key}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-mono text-[12px] text-slate-300 tabular-nums">
-                      {r.count.toLocaleString()}
-                    </td>
-                    <td
-                      className={cx(
-                        'px-4 py-2.5 text-right font-mono text-[12px] tabular-nums',
-                        r.avgTime > 1000
-                          ? 'text-red-300'
-                          : r.avgTime > 300
-                            ? 'text-amber-300'
-                            : 'text-emerald-300',
-                      )}
-                    >
-                      {ms(r.avgTime)}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-mono text-[12px] text-slate-500 tabular-nums">
-                      {ms(r.minTime)}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-mono text-[12px] text-slate-400 tabular-nums">
-                      {ms(r.maxTime)}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-mono text-[12px] text-slate-500 tabular-nums">
-                      {ms(r.totalTime)}
-                    </td>
+                  <tr key={r.key}>
+                    <td className="admin-code text-text-1">{r.key}</td>
+                    <td className="num">{r.count.toLocaleString()}</td>
+                    <td className="num"><Latency value={r.avgTime} /></td>
+                    <td className="num text-text-2">{ms(r.minTime)}</td>
+                    <td className="num text-text-2">{ms(r.maxTime)}</td>
+                    <td className="num text-text-2">{ms(r.totalTime)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -388,8 +504,8 @@ export default function AdminSystem() {
         )}
       </Card>
 
-      <p className="text-center font-mono text-[11px] text-slate-600">
-        Origin: {ORIGIN_BASE || window.location.origin}
+      <p className="text-center text-xs text-text-2">
+        API origin <span className="admin-code">{ORIGIN_BASE || window.location.origin}</span>
       </p>
     </div>
   );

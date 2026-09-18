@@ -1,20 +1,27 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format } from 'date-fns';
 import { adminApi, errMsg } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import {
+  Avatar,
   Badge,
   Button,
+  Callout,
   Card,
+  CardHeader,
   ConfirmDialog,
   EmptyState,
   ErrorState,
   Input,
   Modal,
+  Select,
   Skeleton,
+  cx,
   useToast,
 } from '../../components/ui';
 import { Shield, Plus, Trash, Edit, Lock, Users, Eye } from '../../components/icons';
+import { AdminPageHeader } from './AdminLayout';
 
 type Admin = {
   _id: string;
@@ -26,7 +33,12 @@ type Admin = {
   lastLogin?: string;
 };
 
-const ROLES = ['ADMIN', 'SUPER_ADMIN'] as const;
+const ROLE_OPTIONS = [
+  { value: 'ADMIN', label: 'Admin', description: 'Moderation, support and content tools.' },
+  { value: 'SUPER_ADMIN', label: 'Super admin', description: 'Everything, plus staff accounts and the audit log.' },
+];
+
+const roleLabel = (r?: string) => (r === 'SUPER_ADMIN' ? 'Super admin' : r === 'ADMIN' ? 'Admin' : r ? r.replace(/_/g, ' ') : '—');
 
 /** Mirrors the server's strongPassword validator so we fail before the request. */
 function passwordProblems(pw: string): string[] {
@@ -38,6 +50,8 @@ function passwordProblems(pw: string): string[] {
   if (!/[^A-Za-z0-9]/.test(pw)) problems.push('a symbol');
   return problems;
 }
+
+const fmtDate = (iso?: string) => (iso ? format(new Date(iso), 'MMM d, yyyy HH:mm') : '—');
 
 export default function AdminAdmins() {
   const qc = useQueryClient();
@@ -59,9 +73,7 @@ export default function AdminAdmins() {
     queryKey: ['admin', 'admins'],
     queryFn: async () => {
       const { data } = await adminApi.get('/admins');
-      const raw = Array.isArray(data)
-        ? data
-        : data?.data?.admins ?? data?.admins ?? [];
+      const raw = Array.isArray(data) ? data : data?.data?.admins ?? data?.admins ?? [];
       return Array.isArray(raw) ? raw : [];
     },
   });
@@ -78,7 +90,8 @@ export default function AdminAdmins() {
     },
   });
 
-  const isSuperAdmin = (currentAdmin as Admin | null)?.role === 'SUPER_ADMIN';
+  const me = currentAdmin as Admin | null;
+  const isSuperAdmin = me?.role === 'SUPER_ADMIN';
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'admins'] });
 
@@ -152,7 +165,7 @@ export default function AdminAdmins() {
       // A successful change bumps the account's session version, which
       // invalidates EVERY existing bearer token including the one that made
       // this request. Staying on the page would only produce 401s.
-      toast.success('Password changed — sign in again');
+      toast.success('Password changed. Sign in again to continue.');
       setPwForm({ currentPassword: '', newPassword: '', confirm: '' });
       setTimeout(() => adminLogout(), 1200);
     },
@@ -161,130 +174,123 @@ export default function AdminAdmins() {
 
   const pwIssues = pwForm.newPassword ? passwordProblems(pwForm.newPassword) : [];
   const pwMismatch = Boolean(pwForm.confirm) && pwForm.newPassword !== pwForm.confirm;
+  const editUnchanged =
+    !!editing &&
+    editForm.fullName.trim() === (editing.fullName ?? '') &&
+    editForm.email.trim() === (editing.email ?? '') &&
+    editForm.role === (editing.role ?? 'ADMIN');
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold">Administrators</h1>
-          <p className="text-sm text-[var(--color-muted)] mt-1">
-            Manage staff accounts and your own password.
-          </p>
-        </div>
-        {isSuperAdmin && (
-          <Button icon={<Plus />} onClick={() => setAddOpen(true)}>Add admin</Button>
-        )}
-      </div>
+      <AdminPageHeader
+        title="Administrators"
+        subtitle="Staff accounts and your own password."
+        actions={
+          isSuperAdmin ? (
+            <Button variant="primary" icon={<Plus size={18} />} onClick={() => setAddOpen(true)}>
+              Add admin
+            </Button>
+          ) : undefined
+        }
+      />
 
-      {!isSuperAdmin && (
-        <Card className="p-4 flex items-start gap-3">
-          <Shield />
-          <p className="text-sm text-[var(--color-muted)]">
-            Listing and managing other administrators requires a{' '}
-            <span className="text-[#e8e8ee]">SUPER_ADMIN</span> role. You can still
-            change your own password below.
-          </p>
-        </Card>
-      )}
+      {!isSuperAdmin ? (
+        <Callout tone="info" icon={<Shield size={20} className="text-text-2" />} title="Super admin only">
+          Listing and managing other administrators needs the super admin role. You can still change
+          your own password below.
+        </Callout>
+      ) : null}
 
-      {isSuperAdmin && (
-        <>
-          {list.isError && (
+      {isSuperAdmin ? (
+        <Card padded={false} className="overflow-hidden">
+          {list.isError ? (
             <ErrorState
               title="Could not load administrators"
               error={list.error}
               retry={() => { void list.refetch(); }}
             />
-          )}
-
-          {list.isLoading && (
-            <div className="space-y-2">
+          ) : list.isLoading ? (
+            <div className="space-y-3 p-4" aria-busy="true" aria-label="Loading administrators">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full" />
+                <div key={i} className="flex items-center gap-3">
+                  <Skeleton className="h-9 w-9 rounded-full" />
+                  <Skeleton className="h-3 flex-1" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
               ))}
             </div>
-          )}
-
-          {!list.isLoading && !list.isError && admins.length === 0 && (
+          ) : admins.length === 0 ? (
             <EmptyState
-              icon={<Users />}
-              title="No administrators"
-              message="Add a staff account to get started."
+              icon={<Users size={24} />}
+              title="No administrators yet"
+              message="Add a staff account so someone besides you can run the console."
+              action={{ label: 'Add admin', onClick: () => setAddOpen(true), icon: <Plus size={18} /> }}
             />
-          )}
-
-          {admins.length > 0 && (
-            <Card className="overflow-hidden">
-              <ul className="divide-y divide-[var(--color-line)]">
-                {admins.map((a) => {
-                  const isSelf = a._id === (currentAdmin as Admin | null)?._id;
-                  return (
-                    <li key={a._id} className="p-4 flex flex-wrap items-center gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium truncate">
-                            {a.fullName || 'Unnamed'}
-                          </span>
-                          {a.role === 'SUPER_ADMIN' && <Badge tone="brand">Super admin</Badge>}
-                          {isSelf && <Badge tone="neutral">You</Badge>}
-                        </div>
-                        <div className="text-sm text-[var(--color-muted)] truncate">
-                          {a.email}
-                        </div>
+          ) : (
+            <ul className="divide-y divide-line">
+              {admins.map((a) => {
+                const isSelf = a._id === me?._id;
+                const name = a.fullName || 'Unnamed';
+                return (
+                  <li key={a._id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    <Avatar name={a.fullName || a.email} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-semibold text-text-1">{name}</span>
+                        <Badge tone={a.role === 'SUPER_ADMIN' ? 'warning' : 'neutral'} size="sm">
+                          {roleLabel(a.role)}
+                        </Badge>
+                        {isSelf ? <Badge tone="info" size="sm">You</Badge> : null}
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={<Eye />}
-                          onClick={() => setViewingId(a._id)}
-                        >
-                          View
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={<Edit />}
-                          onClick={() => {
-                            setEditing(a);
-                            setEditForm({
-                              fullName: a.fullName ?? '',
-                              email: a.email ?? '',
-                              role: a.role ?? 'ADMIN',
-                            });
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={<Trash />}
-                          disabled={isSelf}
-                          title={isSelf ? 'You cannot delete your own account' : undefined}
-                          onClick={() => setDeleting(a)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Card>
+                      <div className="truncate text-xs text-text-2">{a.email}</div>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" icon={<Eye size={16} />} onClick={() => setViewingId(a._id)} aria-label={`View ${name}`}>
+                        View
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Edit size={16} />}
+                        aria-label={`Edit ${name}`}
+                        onClick={() => {
+                          setEditing(a);
+                          setEditForm({
+                            fullName: a.fullName ?? '',
+                            email: a.email ?? '',
+                            role: a.role ?? 'ADMIN',
+                          });
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        icon={<Trash size={16} />}
+                        disabled={isSelf}
+                        title={isSelf ? 'You cannot remove your own account' : undefined}
+                        aria-label={`Remove ${name}`}
+                        onClick={() => setDeleting(a)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-        </>
-      )}
+        </Card>
+      ) : null}
 
-      <Card className="p-4">
-        <h2 className="font-semibold flex items-center gap-2 mb-1">
-          <Lock /> Change my password
-        </h2>
-        <p className="text-sm text-[var(--color-muted)] mb-4">
-          Changing your password signs out every active session, including this one.
-        </p>
+      <Card>
+        <CardHeader
+          title={<span className="inline-flex items-center gap-2"><Lock size={18} className="text-text-2" /> Change my password</span>}
+          subtitle="Changing your password signs out every active session, including this one."
+        />
         <form
-          className="grid gap-3 sm:max-w-md"
+          className="grid gap-4 sm:max-w-md"
           onSubmit={(e) => {
             e.preventDefault();
             changePassword.mutate();
@@ -303,7 +309,8 @@ export default function AdminAdmins() {
             autoComplete="new-password"
             value={pwForm.newPassword}
             onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })}
-            error={pwIssues.length > 0 ? `Must include ${pwIssues.join(', ')}` : undefined}
+            hint="At least 12 characters with upper and lower case, a number and a symbol."
+            error={pwIssues.length > 0 ? `Still needs ${pwIssues.join(', ')}.` : undefined}
           />
           <Input
             type="password"
@@ -311,18 +318,14 @@ export default function AdminAdmins() {
             autoComplete="new-password"
             value={pwForm.confirm}
             onChange={(e) => setPwForm({ ...pwForm, confirm: e.target.value })}
-            error={pwMismatch ? 'Passwords do not match' : undefined}
+            error={pwMismatch ? 'Passwords do not match.' : undefined}
           />
           <div>
             <Button
               type="submit"
+              variant="primary"
               loading={changePassword.isPending}
-              disabled={
-                !pwForm.currentPassword
-                || pwIssues.length > 0
-                || pwMismatch
-                || !pwForm.confirm
-              }
+              disabled={!pwForm.currentPassword || pwIssues.length > 0 || pwMismatch || !pwForm.confirm}
             >
               Change password
             </Button>
@@ -330,9 +333,31 @@ export default function AdminAdmins() {
         </form>
       </Card>
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add administrator">
+      <Modal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Add administrator"
+        description="They sign in with this temporary password and should change it on first use."
+        footer={
+          <>
+            <Button variant="secondary" type="button" onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="admin-add-form"
+              variant="primary"
+              loading={add.isPending}
+              disabled={!form.fullName.trim() || !form.email.trim() || passwordProblems(form.password).length > 0}
+            >
+              Create account
+            </Button>
+          </>
+        }
+      >
         <form
-          className="grid gap-3"
+          id="admin-add-form"
+          className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             add.mutate();
@@ -340,12 +365,15 @@ export default function AdminAdmins() {
         >
           <Input
             label="Full name"
+            autoComplete="off"
             value={form.fullName}
             onChange={(e) => setForm({ ...form, fullName: e.target.value })}
           />
           <Input
             type="email"
             label="Email"
+            autoComplete="off"
+            inputMode="email"
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
@@ -355,38 +383,19 @@ export default function AdminAdmins() {
             autoComplete="new-password"
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
+            hint="At least 12 characters with upper and lower case, a number and a symbol."
             error={
               form.password && passwordProblems(form.password).length > 0
-                ? `Must include ${passwordProblems(form.password).join(', ')}`
+                ? `Still needs ${passwordProblems(form.password).join(', ')}.`
                 : undefined
             }
           />
-          <label className="text-sm">
-            <span className="block mb-1 font-medium">Role</span>
-            <select
-              className="input-base"
-              value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
-            >
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </label>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" type="button" onClick={() => setAddOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              loading={add.isPending}
-              disabled={
-                !form.fullName.trim()
-                || !form.email.trim()
-                || passwordProblems(form.password).length > 0
-              }
-            >
-              Create
-            </Button>
-          </div>
+          <Select
+            label="Role"
+            options={ROLE_OPTIONS}
+            value={form.role}
+            onChange={(role) => setForm({ ...form, role })}
+          />
         </form>
       </Modal>
 
@@ -394,9 +403,20 @@ export default function AdminAdmins() {
         open={Boolean(editing)}
         onClose={() => setEditing(null)}
         title={`Edit ${editing?.fullName || 'administrator'}`}
+        footer={
+          <>
+            <Button variant="secondary" type="button" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="admin-edit-form" variant="primary" loading={update.isPending} disabled={editUnchanged}>
+              Save changes
+            </Button>
+          </>
+        }
       >
         <form
-          className="grid gap-3"
+          id="admin-edit-form"
+          className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             update.mutate();
@@ -410,49 +430,41 @@ export default function AdminAdmins() {
           <Input
             type="email"
             label="Email"
+            inputMode="email"
             value={editForm.email}
             onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
           />
-          <label className="text-sm">
-            <span className="block mb-1 font-medium">Role</span>
-            <select
-              className="input-base"
-              value={editForm.role}
-              onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-            >
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </label>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" type="button" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={update.isPending}>Save changes</Button>
-          </div>
+          <Select
+            label="Role"
+            options={ROLE_OPTIONS}
+            value={editForm.role}
+            onChange={(role) => setEditForm({ ...editForm, role })}
+          />
         </form>
       </Modal>
 
       <ConfirmDialog
         open={Boolean(deleting)}
         title="Remove administrator"
-        message={`${deleting?.email ?? 'This account'} will lose all administrative access immediately.`}
-        confirmLabel="Remove"
+        message={
+          <>
+            <strong className="text-text-1">{deleting?.email ?? 'This account'}</strong> loses all
+            console access immediately. This is recorded in the audit log.
+          </>
+        }
+        confirmLabel="Remove access"
         destructive
         loading={remove.isPending}
         onCancel={() => setDeleting(null)}
         onConfirm={() => deleting && remove.mutate(deleting._id)}
       />
 
-      <Modal
-        open={Boolean(viewingId)}
-        onClose={() => setViewingId(null)}
-        title="Administrator details"
-      >
+      <Modal open={Boolean(viewingId)} onClose={() => setViewingId(null)} title="Administrator details">
         {detail.isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="h-4 w-56" />
-            <Skeleton className="h-4 w-32" />
+          <div className="grid gap-2 sm:grid-cols-2" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-14 w-full" />
+            ))}
           </div>
         ) : detail.isError ? (
           <ErrorState
@@ -462,32 +474,19 @@ export default function AdminAdmins() {
           />
         ) : (
           <dl className="grid gap-2 sm:grid-cols-2">
-            {([
-              ['Full name', detail.data?.fullName || '—'],
-              ['Email', detail.data?.email || '—'],
-              ['Role', detail.data?.role ? detail.data.role.replace(/_/g, ' ') : '—'],
-              ['Admin ID', detail.data?._id || '—'],
+            {(
               [
-                'Created',
-                detail.data?.createdAt
-                  ? new Date(detail.data.createdAt).toLocaleString()
-                  : '—',
-              ],
-              [
-                'Last updated',
-                detail.data?.updatedAt
-                  ? new Date(detail.data.updatedAt).toLocaleString()
-                  : '—',
-              ],
-            ] as Array<[string, string]>).map(([label, value]) => (
-              <div
-                key={label}
-                className="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2"
-              >
-                <dt className="text-[11px] font-semibold tracking-wide text-[var(--color-muted)] uppercase">
-                  {label}
-                </dt>
-                <dd className="mt-1 text-sm break-all text-[#e8e8ee]">{value}</dd>
+                ['Full name', detail.data?.fullName || '—', false],
+                ['Email', detail.data?.email || '—', false],
+                ['Role', roleLabel(detail.data?.role), false],
+                ['Admin ID', detail.data?._id || '—', true],
+                ['Created', fmtDate(detail.data?.createdAt), false],
+                ['Last updated', fmtDate(detail.data?.updatedAt), false],
+              ] as Array<[string, string, boolean]>
+            ).map(([label, value, mono]) => (
+              <div key={label} className="admin-kv">
+                <dt>{label}</dt>
+                <dd className={cx(mono && 'admin-code')}>{value}</dd>
               </div>
             ))}
           </dl>

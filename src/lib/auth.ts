@@ -1,15 +1,22 @@
 import { create } from 'zustand';
 import { api, tokenStore, adminApi } from './api';
 
+/**
+ * Field names follow the backend `User` model: the photo is `avatar`
+ * (there is no `profilePicture` virtual), the cover is `coverPicture`.
+ */
 export type User = {
   _id: string;
   username: string;
   fullName?: string;
   email?: string;
-  profilePicture?: string;
+  avatar?: string;
+  coverPicture?: string;
   bio?: string;
   isVerified?: boolean;
   isTrainer?: boolean;
+  isCoach?: boolean;
+  isPremium?: boolean;
   followersCount?: number;
   followingCount?: number;
   [k: string]: any;

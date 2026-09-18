@@ -1,17 +1,43 @@
 {
+  "id": "/",
   "name": "Vybe — Social Fitness",
   "short_name": "Vybe",
-  "description": "Train, track, and share your fitness journey.",
+  "description": "Train together. Track workouts, meals and progress, and share the wins.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#07070c",
-  "theme_color": "#0b0b12",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#071A2A",
+  "theme_color": "#04101B",
   "categories": ["health", "fitness", "social"],
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Log workout",
+      "short_name": "Workout",
+      "description": "Log a session or start one from your library",
+      "url": "/workouts?log=1",
+      "icons": [{ "src": "/icon-shortcut-workout.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Log meal",
+      "short_name": "Meal",
+      "description": "Add food and check your macros",
+      "url": "/meals?log=1",
+      "icons": [{ "src": "/icon-shortcut-meal.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Inbox",
+      "short_name": "Inbox",
+      "description": "Messages and notifications",
+      "url": "/messages",
+      "icons": [{ "src": "/icon-shortcut-inbox.png", "sizes": "192x192", "type": "image/png" }]
+    }
   ]
 }

@@ -2,8 +2,10 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, errMsg } from '../lib/api';
 import { passwordRules, isPasswordValid } from '../lib/hooks';
-import { Button, Input, Card, ErrorState } from './ui';
-import { Check, X } from './icons';
+import { Button, Callout, EmptyState } from './ui';
+import { ArrowLeft, Lock } from './icons';
+import { AuthShell, PasswordField } from './Login';
+import { PasswordRules } from './Register';
 
 export default function ResetPassword() {
   const [params] = useSearchParams();
@@ -18,12 +20,12 @@ export default function ResetPassword() {
 
   const rules = passwordRules(password);
   const tokenLooksValid = /^[a-fA-F0-9]{64}$/.test(token);
+  const mismatch = confirm.length > 0 && confirm !== password;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!isPasswordValid(password))
-      return setError('Your password does not meet all requirements yet.');
+    if (!isPasswordValid(password)) return setError('Your password does not meet all requirements yet.');
     if (password !== confirm) return setError('Passwords do not match.');
 
     setBusy(true);
@@ -37,117 +39,82 @@ export default function ResetPassword() {
     }
   }
 
+  const backLink = (
+    <Link
+      to="/login"
+      className="inline-flex min-h-11 items-center gap-1.5 rounded-sm text-sm font-semibold text-text-2 hover:text-text-1"
+    >
+      <ArrowLeft size={18} />
+      Back to sign in
+    </Link>
+  );
+
+  if (!tokenLooksValid) {
+    return (
+      <AuthShell
+        title="This link is not valid"
+        headline="Let’s try that again."
+        tagline="Reset links are single-use and expire quickly, which is how it should be."
+        footer={backLink}
+      >
+        <EmptyState
+          variant="error"
+          icon={<Lock size={26} />}
+          title="Reset link is missing or malformed"
+          message="Request a new link and open it from the same device within a few minutes."
+          action={{ label: 'Request a new link', to: '/forgot-password' }}
+          size="sm"
+          className="rounded-lg bg-surface-2"
+        />
+      </AuthShell>
+    );
+  }
+
   return (
-    <div className="min-h-full flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="text-3xl font-black tracking-tight bg-gradient-to-br from-[var(--color-brand)] to-[var(--color-brand-2)] bg-clip-text text-transparent">
-            Vybe
-          </div>
+    <AuthShell
+      title="Choose a new password"
+      subtitle="Every other device will be signed out and will need the new password."
+      headline="Let’s try that again."
+      tagline="Reset links are single-use and expire quickly, which is how it should be."
+      footer={backLink}
+    >
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        <div>
+          <PasswordField
+            id="rp-password"
+            label="New password"
+            autoComplete="new-password"
+            placeholder="Create a strong password"
+            value={password}
+            visible={show}
+            onVisibleChange={setShow}
+            onChange={(e) => setPassword(e.target.value.slice(0, 128))}
+            disabled={busy}
+            aria-describedby="rp-password-rules"
+            autoFocus
+          />
+          <PasswordRules rules={rules} id="rp-password-rules" />
         </div>
 
-        <Card className="p-6">
-          {!tokenLooksValid ? (
-            <ErrorState
-              title="Reset link is not valid"
-              message="This password reset link is missing or malformed. Request a new one to continue."
-              action={
-                <Link to="/forgot-password">
-                  <Button variant="primary">Request a new link</Button>
-                </Link>
-              }
-            />
-          ) : (
-            <>
-              <h1 className="text-lg font-bold mb-1">Choose a new password</h1>
-              <p className="text-sm text-[var(--color-muted)] mb-5">
-                Signing in elsewhere will require the new password.
-              </p>
+        <PasswordField
+          id="rp-confirm"
+          label="Confirm new password"
+          autoComplete="new-password"
+          placeholder="Repeat your password"
+          value={confirm}
+          visible={show}
+          onVisibleChange={setShow}
+          error={mismatch ? 'Passwords do not match.' : undefined}
+          onChange={(e) => setConfirm(e.target.value.slice(0, 128))}
+          disabled={busy}
+        />
 
-              <form onSubmit={submit} className="space-y-4" noValidate>
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label htmlFor="rp-password" className="block text-xs font-semibold">
-                      New password
-                    </label>
-                    <button
-                      type="button"
-                      className="text-xs text-[var(--color-muted)] hover:text-white"
-                      onClick={() => setShow((v) => !v)}
-                    >
-                      {show ? 'Hide' : 'Show'}
-                    </button>
-                  </div>
-                  <Input
-                    id="rp-password"
-                    type={show ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value.slice(0, 128))}
-                    disabled={busy}
-                  />
-                  <ul className="mt-2 space-y-1">
-                    {rules.map((rule) => (
-                      <li
-                        key={rule.id}
-                        className={`flex items-center gap-2 text-xs ${
-                          rule.ok ? 'text-emerald-400' : 'text-[var(--color-muted)]'
-                        }`}
-                      >
-                        {rule.ok ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : (
-                          <X className="w-3.5 h-3.5" />
-                        )}
-                        {rule.label}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+        {error ? <Callout tone="danger">{error}</Callout> : null}
 
-                <div>
-                  <label htmlFor="rp-confirm" className="block text-xs font-semibold mb-1.5">
-                    Confirm new password
-                  </label>
-                  <Input
-                    id="rp-confirm"
-                    type={show ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value.slice(0, 128))}
-                    disabled={busy}
-                  />
-                  {confirm.length > 0 && confirm !== password && (
-                    <p className="mt-1.5 text-xs text-red-400">Passwords do not match.</p>
-                  )}
-                </div>
-
-                {error && (
-                  <p role="alert" className="text-sm text-red-400">
-                    {error}
-                  </p>
-                )}
-
-                <Button
-                  type="submit"
-                  variant="primary"
-                  className="w-full"
-                  loading={busy}
-                  disabled={busy}
-                >
-                  Update password
-                </Button>
-              </form>
-            </>
-          )}
-
-          <div className="mt-5 text-center text-sm">
-            <Link to="/login" className="text-[var(--color-muted)] hover:text-white">
-              Back to sign in
-            </Link>
-          </div>
-        </Card>
-      </div>
-    </div>
+        <Button type="submit" variant="primary" size="lg" block loading={busy}>
+          Update password
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

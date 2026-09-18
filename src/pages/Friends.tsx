@@ -1,31 +1,29 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
-import { Link } from 'react-router-dom';
-import { api, errMsg, mediaUrl } from '../lib/api';
+import { api, errMsg } from '../lib/api';
+import { displayName, useDebounced, type PublicUser } from '../lib/hooks';
 import {
   Avatar,
   Badge,
   Button,
+  ButtonLink,
+  Card,
   ConfirmDialog,
   EmptyState,
   ErrorState,
-  Input,
-  Skeleton,
-  Spinner,
+  IconButton,
+  Menu,
+  PageHeader,
+  SearchField,
+  SkeletonRow,
   Tabs,
+  cx,
   useToast,
 } from './ui';
-import { Check, Users, X } from './icons';
-
-type PublicUser = {
-  _id: string;
-  username?: string;
-  fullName?: string;
-  avatar?: string;
-  bio?: string;
-  isVerified?: boolean;
-};
+import { Check, Compass, MessageCircle, User, UserPlus, Users, X } from './icons';
+import { ROW_LINK, UserBadges } from './UserRow';
 
 type FriendRequest = {
   _id: string;
@@ -40,6 +38,10 @@ type FollowRequest = {
   createdAt?: string;
 };
 
+type TabKey = 'friends' | 'pending' | 'sent' | 'follows';
+const TAB_KEYS: TabKey[] = ['friends', 'pending', 'sent', 'follows'];
+const isTab = (v: string | null): v is TabKey => !!v && (TAB_KEYS as string[]).includes(v);
+
 const ago = (iso?: string) => {
   if (!iso) return '';
   const d = new Date(iso);
@@ -51,75 +53,83 @@ const ago = (iso?: string) => {
   }
 };
 
-function PersonRow({
-  user,
-  meta,
-  actions,
-}: {
-  user?: PublicUser;
-  meta?: string;
-  actions?: React.ReactNode;
-}) {
+/* ------------------------------------------------------------------ rows */
+
+function PersonRow({ user, meta, actions }: { user?: PublicUser; meta?: string; actions?: ReactNode }) {
   if (!user) return null;
+  const name = displayName(user);
+  const href = `/u/${user._id}`;
   return (
-    <li className="flex items-center gap-3 rounded-xl px-3 py-3 hover:bg-[var(--color-surface-2)]">
-      <Avatar src={mediaUrl(user.avatar)} name={user.fullName || user.username} size={44} />
+    <li className="flex min-h-16 items-center gap-3 px-3 py-2.5 transition-colors dur-1 hover:bg-surface-2 sm:px-4">
+      <Link to={href} viewTransition className="shrink-0 rounded-full" aria-label={`Open ${name}’s profile`}>
+        <Avatar src={user.avatar} name={name} size={44} />
+      </Link>
       <div className="min-w-0 flex-1">
-        <Link
-          to={`/u/${user.username || user._id}`}
-          className="flex items-center gap-2 truncate text-sm font-medium hover:underline"
-        >
-          {user.fullName || user.username || 'Member'}
-          {user.isVerified && <Badge>Verified</Badge>}
-        </Link>
-        <p className="truncate text-xs text-[var(--color-muted)]">
-          @{user.username}
-          {meta ? ` · ${meta}` : ''}
-        </p>
+        <div className="flex min-w-0 items-center gap-x-2">
+          <Link to={href} viewTransition className={ROW_LINK}>
+            {name}
+          </Link>
+          <UserBadges user={user} compact />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-2">
+          <span className="truncate">@{user.username}</span>
+          {meta ? <span className="shrink-0 text-text-3">{meta}</span> : null}
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2">{actions}</div>
+      <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
     </li>
   );
 }
 
 function ListShell({
   query,
-  emptyTitle,
-  emptyDescription,
-  children,
   count,
+  empty,
+  children,
 }: {
-  query: { isLoading: boolean; isError: boolean; error: unknown; refetch: () => void };
-  emptyTitle: string;
-  emptyDescription: string;
-  children: React.ReactNode;
+  query: { isLoading: boolean; isError: boolean; error: unknown; refetch: () => unknown };
   count: number;
+  empty: ReactNode;
+  children: ReactNode;
 }) {
   if (query.isLoading) {
     return (
-      <div className="space-y-2 p-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-16 w-full" />
+      <div className="space-y-1 p-3" aria-busy="true">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <SkeletonRow key={i} className="px-1" />
         ))}
       </div>
     );
   }
   if (query.isError) {
-    return <ErrorState message={errMsg(query.error)} onRetry={() => query.refetch()} />;
+    return <ErrorState error={query.error} onRetry={() => query.refetch()} />;
   }
-  if (count === 0) {
-    return <EmptyState icon={<Users />} title={emptyTitle} description={emptyDescription} />;
-  }
-  return <ul className="divide-y divide-[var(--color-line)]">{children}</ul>;
+  if (count === 0) return <>{empty}</>;
+  return <ul className="divide-y divide-line">{children}</ul>;
 }
+
+/* ------------------------------------------------------------------ page */
 
 export default function Friends() {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState('friends');
-  const [search, setSearch] = useState('');
+  const [params, setParams] = useSearchParams();
+  const tabParam = params.get('tab');
+  const tab: TabKey = isTab(tabParam) ? tabParam : 'friends';
+  const setTab = (next: string) =>
+    setParams(
+      (prev) => {
+        if (next === 'friends') prev.delete('tab');
+        else prev.set('tab', next);
+        return prev;
+      },
+      { replace: true },
+    );
+
+  const [filter, setFilter] = useState('');
+  const [peopleQuery, setPeopleQuery] = useState('');
+  const debouncedPeople = useDebounced(peopleQuery.trim(), 300);
   const [removeTarget, setRemoveTarget] = useState<PublicUser | null>(null);
-  const [inviteId, setInviteId] = useState('');
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['friends'] });
@@ -158,16 +168,24 @@ export default function Friends() {
     },
   });
 
+  const people = useQuery({
+    queryKey: ['people-search', debouncedPeople],
+    enabled: debouncedPeople.length >= 2,
+    queryFn: async () => {
+      const { data } = await api.get('/users/all/search', { params: { q: debouncedPeople } });
+      return (data.users || []) as PublicUser[];
+    },
+  });
+
   const sendRequest = useMutation({
     mutationFn: async (receiverId: string) => {
       await api.post('/friends/send', { receiverId });
     },
     onSuccess: () => {
       toast.success('Friend request sent');
-      setInviteId('');
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not send the request')),
+    onError: (e) => toast.error(errMsg(e, 'Could not send the request.')),
   });
 
   const acceptFriend = useMutation({
@@ -178,7 +196,7 @@ export default function Friends() {
       toast.success('Friend request accepted');
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not accept the request')),
+    onError: (e) => toast.error(errMsg(e, 'Could not accept the request.')),
   });
 
   const declineFriend = useMutation({
@@ -189,7 +207,7 @@ export default function Friends() {
       toast.success('Request removed');
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not remove the request')),
+    onError: (e) => toast.error(errMsg(e, 'Could not remove the request.')),
   });
 
   const removeFriend = useMutation({
@@ -202,7 +220,7 @@ export default function Friends() {
       invalidate();
     },
     onError: (e) => {
-      toast.error(errMsg(e, 'Could not remove this friend'));
+      toast.error(errMsg(e, 'Could not remove this friend.'));
       setRemoveTarget(null);
     },
   });
@@ -212,10 +230,10 @@ export default function Friends() {
       await api.post(`/users/follow-requests/${requestId}/accept`);
     },
     onSuccess: () => {
-      toast.success('Follow request accepted');
+      toast.success('Follow request approved');
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not accept the follow request')),
+    onError: (e) => toast.error(errMsg(e, 'Could not approve the follow request.')),
   });
 
   const rejectFollow = useMutation({
@@ -223,196 +241,317 @@ export default function Friends() {
       await api.delete(`/users/follow-requests/${requestId}`);
     },
     onSuccess: () => {
-      toast.success('Follow request rejected');
+      toast.success('Follow request declined');
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not reject the follow request')),
+    onError: (e) => toast.error(errMsg(e, 'Could not decline the follow request.')),
   });
 
   const visibleFriends = useMemo(() => {
     const list = friends.data || [];
-    const q = search.trim().toLowerCase();
+    const q = filter.trim().toLowerCase();
     if (!q) return list;
-    return list.filter((u) =>
-      `${u.fullName || ''} ${u.username || ''}`.toLowerCase().includes(q),
-    );
-  }, [friends.data, search]);
+    return list.filter((u) => `${u.fullName || ''} ${u.username || ''}`.toLowerCase().includes(q));
+  }, [friends.data, filter]);
+
+  /** Relationship lookup for the people-search results. */
+  const relationship = useMemo(() => {
+    const map = new Map<string, { status: 'friends' | 'requested' | 'incoming'; requestId?: string }>();
+    for (const u of friends.data || []) map.set(String(u._id), { status: 'friends' });
+    for (const r of sent.data || []) if (r.receiver?._id) map.set(String(r.receiver._id), { status: 'requested', requestId: r._id });
+    for (const r of pending.data || []) if (r.sender?._id) map.set(String(r.sender._id), { status: 'incoming', requestId: r._id });
+    return map;
+  }, [friends.data, sent.data, pending.data]);
 
   const tabs = [
-    { value: 'friends', label: `Friends${friends.data ? ` (${friends.data.length})` : ''}` },
-    { value: 'pending', label: `Requests${pending.data?.length ? ` (${pending.data.length})` : ''}` },
-    { value: 'sent', label: `Sent${sent.data?.length ? ` (${sent.data.length})` : ''}` },
-    {
-      value: 'follows',
-      label: `Follow requests${followRequests.data?.length ? ` (${followRequests.data.length})` : ''}`,
-    },
+    { key: 'friends', label: 'Friends', count: friends.data?.length, icon: <Users size={16} /> },
+    { key: 'pending', label: 'Requests', count: pending.data?.length || undefined, icon: <UserPlus size={16} /> },
+    { key: 'sent', label: 'Sent', count: sent.data?.length || undefined },
+    { key: 'follows', label: 'Follow requests', count: followRequests.data?.length || undefined },
   ];
 
+  const searching = debouncedPeople.length >= 2;
+
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold">Friends</h1>
-        <p className="text-sm text-[var(--color-muted)]">
-          Manage your friendships, incoming requests and follow approvals.
-        </p>
-      </header>
+    <div className="mx-auto w-full max-w-[52rem] space-y-6">
+      <PageHeader
+        title="Friends"
+        subtitle="Your circle, plus the requests waiting on you."
+        actions={
+          <ButtonLink to="/discover" variant="secondary" icon={<Compass size={18} />}>
+            Explore people
+          </ButtonLink>
+        }
+        mobileActions={
+          <IconButton to="/discover" label="Explore people">
+            <Compass size={22} />
+          </IconButton>
+        }
+      />
 
-      <div className="card p-4">
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const id = inviteId.trim();
-            if (id) sendRequest.mutate(id);
-          }}
-        >
-          <Input
-            placeholder="Send a friend request by user ID"
-            value={inviteId}
-            onChange={(e) => setInviteId(e.target.value)}
-          />
-          <Button type="submit" disabled={!inviteId.trim() || sendRequest.isPending}>
-            {sendRequest.isPending ? <Spinner size={16} /> : 'Send'}
-          </Button>
-        </form>
-      </div>
-
-      <Tabs tabs={tabs} value={tab} onChange={setTab} />
-
-      <div className="card overflow-hidden">
-        {tab === 'friends' && (
-          <>
-            <div className="border-b border-[var(--color-line)] p-3">
-              <Input
-                placeholder="Search friends"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+      {/* Add a friend: search by name or username instead of pasting an ID. */}
+      <Card className="space-y-3">
+        <SearchField
+          label="Add a friend"
+          hint={searching ? undefined : 'Search by name or username.'}
+          placeholder="Search people"
+          value={peopleQuery}
+          onChange={(e) => setPeopleQuery(e.target.value)}
+          enterKeyHint="search"
+        />
+        {searching ? (
+          people.isLoading ? (
+            <div className="space-y-1" aria-busy="true">
+              <SkeletonRow />
+              <SkeletonRow />
             </div>
+          ) : people.isError ? (
+            <ErrorState error={people.error} title="Search failed" onRetry={() => people.refetch()} className="py-6" />
+          ) : !people.data?.length ? (
+            <EmptyState
+              variant="no-results"
+              size="sm"
+              title={`No one matches “${debouncedPeople}”`}
+              message="Check the spelling, or explore people who train near you."
+              action={{ label: 'Explore people', to: '/discover', variant: 'secondary' }}
+            />
+          ) : (
+            <ul className="-mx-4 divide-y divide-line border-t border-line sm:-mx-5">
+              {people.data.slice(0, 8).map((u) => {
+                const rel = relationship.get(String(u._id));
+                return (
+                  <PersonRow
+                    key={u._id}
+                    user={u}
+                    actions={
+                      rel?.status === 'friends' ? (
+                        <Badge tone="brand" className="h-10 px-3">
+                          <Check size={14} />
+                          Friends
+                        </Badge>
+                      ) : rel?.status === 'incoming' && rel.requestId ? (
+                        <Button
+                          variant="primary"
+                          icon={<Check size={16} />}
+                          loading={acceptFriend.isPending && acceptFriend.variables === rel.requestId}
+                          onClick={() => acceptFriend.mutate(rel.requestId!)}
+                        >
+                          Accept
+                        </Button>
+                      ) : rel?.status === 'requested' ? (
+                        <Button
+                          variant="secondary"
+                          title="Withdraw request"
+                          loading={declineFriend.isPending && declineFriend.variables === rel.requestId}
+                          onClick={() => rel.requestId && declineFriend.mutate(rel.requestId)}
+                        >
+                          Requested
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="primary"
+                          icon={<UserPlus size={16} />}
+                          loading={sendRequest.isPending && sendRequest.variables === u._id}
+                          onClick={() => sendRequest.mutate(u._id)}
+                        >
+                          Add
+                        </Button>
+                      )
+                    }
+                  />
+                );
+              })}
+            </ul>
+          )
+        ) : null}
+      </Card>
+
+      <section className="space-y-4" aria-label="Friends and requests">
+        <Tabs aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} />
+
+        <Card padded={false} className={cx('overflow-hidden', 'anim-fade-in')} key={tab}>
+          {tab === 'friends' && (
+            <>
+              {(friends.data?.length || 0) > 5 ? (
+                <div className="border-b border-line p-3 sm:p-4">
+                  <SearchField
+                    label="Filter friends"
+                    hideLabel
+                    placeholder="Filter by name"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  />
+                </div>
+              ) : null}
+              <ListShell
+                query={friends}
+                count={visibleFriends.length}
+                empty={
+                  filter.trim() ? (
+                    <EmptyState variant="no-results" size="sm" title="No friends match" message="Try a different name." />
+                  ) : (
+                    <EmptyState
+                      title="No friends yet"
+                      message="Search for people above, or explore who is training near you. Friends see each other’s private posts."
+                      action={{ label: 'Explore people', to: '/discover', icon: <Compass size={18} /> }}
+                    />
+                  )
+                }
+              >
+                {visibleFriends.map((u) => (
+                  <PersonRow
+                    key={u._id}
+                    user={u}
+                    actions={
+                      <>
+                        <IconButton to={`/messages?to=${u._id}`} label={`Message ${displayName(u)}`}>
+                          <MessageCircle size={20} />
+                        </IconButton>
+                        <Menu
+                          label={`More options for ${displayName(u)}`}
+                          items={[
+                            { label: 'View profile', icon: <User size={18} />, to: `/u/${u._id}` },
+                            { label: 'Remove friend', icon: <X size={18} />, danger: true, divider: true, onSelect: () => setRemoveTarget(u) },
+                          ]}
+                        />
+                      </>
+                    }
+                  />
+                ))}
+              </ListShell>
+            </>
+          )}
+
+          {tab === 'pending' && (
             <ListShell
-              query={friends}
-              count={visibleFriends.length}
-              emptyTitle="No friends yet"
-              emptyDescription="Send a request to start building your circle."
+              query={pending}
+              count={pending.data?.length || 0}
+              empty={
+                <EmptyState
+                  variant="no-results"
+                  icon={<UserPlus size={26} />}
+                  title="No requests waiting"
+                  message="When someone asks to be your friend, you can accept or decline it here."
+                />
+              }
             >
-              {visibleFriends.map((u) => (
+              {(pending.data || []).map((r) => (
                 <PersonRow
-                  key={u._id}
-                  user={u}
+                  key={r._id}
+                  user={r.sender}
+                  meta={ago(r.createdAt)}
                   actions={
-                    <Button variant="ghost" onClick={() => setRemoveTarget(u)}>
-                      Remove
+                    <>
+                      <Button
+                        variant="primary"
+                        icon={<Check size={16} />}
+                        loading={acceptFriend.isPending && acceptFriend.variables === r._id}
+                        disabled={declineFriend.isPending}
+                        onClick={() => acceptFriend.mutate(r._id)}
+                      >
+                        Accept
+                      </Button>
+                      <IconButton
+                        label={`Decline ${displayName(r.sender)}`}
+                        disabled={acceptFriend.isPending || declineFriend.isPending}
+                        onClick={() => declineFriend.mutate(r._id)}
+                      >
+                        <X size={20} />
+                      </IconButton>
+                    </>
+                  }
+                />
+              ))}
+            </ListShell>
+          )}
+
+          {tab === 'sent' && (
+            <ListShell
+              query={sent}
+              count={sent.data?.length || 0}
+              empty={
+                <EmptyState
+                  variant="no-results"
+                  icon={<UserPlus size={26} />}
+                  title="Nothing pending"
+                  message="Requests you send stay here until they are answered."
+                  action={{ label: 'Explore people', to: '/discover', variant: 'secondary' }}
+                />
+              }
+            >
+              {(sent.data || []).map((r) => (
+                <PersonRow
+                  key={r._id}
+                  user={r.receiver}
+                  meta={`Sent ${ago(r.createdAt)}`}
+                  actions={
+                    <Button
+                      variant="secondary"
+                      loading={declineFriend.isPending && declineFriend.variables === r._id}
+                      onClick={() => declineFriend.mutate(r._id)}
+                    >
+                      Withdraw
                     </Button>
                   }
                 />
               ))}
             </ListShell>
-          </>
-        )}
+          )}
 
-        {tab === 'pending' && (
-          <ListShell
-            query={pending}
-            count={pending.data?.length || 0}
-            emptyTitle="No pending requests"
-            emptyDescription="Incoming friend requests will show up here."
-          >
-            {(pending.data || []).map((r) => (
-              <PersonRow
-                key={r._id}
-                user={r.sender}
-                meta={ago(r.createdAt)}
-                actions={
-                  <>
-                    <Button
-                      disabled={acceptFriend.isPending}
-                      onClick={() => acceptFriend.mutate(r._id)}
-                    >
-                      <Check /> Accept
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={declineFriend.isPending}
-                      onClick={() => declineFriend.mutate(r._id)}
-                    >
-                      <X /> Decline
-                    </Button>
-                  </>
-                }
-              />
-            ))}
-          </ListShell>
-        )}
-
-        {tab === 'sent' && (
-          <ListShell
-            query={sent}
-            count={sent.data?.length || 0}
-            emptyTitle="No sent requests"
-            emptyDescription="Requests you send stay here until answered."
-          >
-            {(sent.data || []).map((r) => (
-              <PersonRow
-                key={r._id}
-                user={r.receiver}
-                meta={`sent ${ago(r.createdAt)}`}
-                actions={
-                  <Button
-                    variant="ghost"
-                    disabled={declineFriend.isPending}
-                    onClick={() => declineFriend.mutate(r._id)}
-                  >
-                    Cancel
-                  </Button>
-                }
-              />
-            ))}
-          </ListShell>
-        )}
-
-        {tab === 'follows' && (
-          <ListShell
-            query={followRequests}
-            count={followRequests.data?.length || 0}
-            emptyTitle="No follow requests"
-            emptyDescription="People asking to follow your private profile appear here."
-          >
-            {(followRequests.data || []).map((r) => (
-              <PersonRow
-                key={r._id}
-                user={r.requester}
-                meta={ago(r.createdAt)}
-                actions={
-                  <>
-                    <Button
-                      disabled={acceptFollow.isPending}
-                      onClick={() => acceptFollow.mutate(r._id)}
-                    >
-                      <Check /> Accept
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={rejectFollow.isPending}
-                      onClick={() => rejectFollow.mutate(r._id)}
-                    >
-                      <X /> Reject
-                    </Button>
-                  </>
-                }
-              />
-            ))}
-          </ListShell>
-        )}
-      </div>
+          {tab === 'follows' && (
+            <ListShell
+              query={followRequests}
+              count={followRequests.data?.length || 0}
+              empty={
+                <EmptyState
+                  variant="no-results"
+                  icon={<Users size={26} />}
+                  title="No follow requests"
+                  message="When your profile is private, people asking to follow you appear here for approval."
+                  action={{ label: 'Privacy settings', to: '/settings', variant: 'secondary' }}
+                />
+              }
+            >
+              {(followRequests.data || []).map((r) => (
+                <PersonRow
+                  key={r._id}
+                  user={r.requester}
+                  meta={ago(r.createdAt)}
+                  actions={
+                    <>
+                      <Button
+                        variant="primary"
+                        icon={<Check size={16} />}
+                        loading={acceptFollow.isPending && acceptFollow.variables === r._id}
+                        disabled={rejectFollow.isPending}
+                        onClick={() => acceptFollow.mutate(r._id)}
+                      >
+                        Approve
+                      </Button>
+                      <IconButton
+                        label={`Decline ${displayName(r.requester)}`}
+                        disabled={acceptFollow.isPending || rejectFollow.isPending}
+                        onClick={() => rejectFollow.mutate(r._id)}
+                      >
+                        <X size={20} />
+                      </IconButton>
+                    </>
+                  }
+                />
+              ))}
+            </ListShell>
+          )}
+        </Card>
+      </section>
 
       <ConfirmDialog
         open={Boolean(removeTarget)}
-        title="Remove friend"
-        description={`${removeTarget?.fullName || removeTarget?.username || 'This person'} will be removed from your friends.`}
-        confirmLabel="Remove"
+        title={`Remove ${displayName(removeTarget)} as a friend?`}
+        message="You can send a new request later. They will not be notified."
+        confirmLabel="Remove friend"
         destructive
         loading={removeFriend.isPending}
-        onClose={() => setRemoveTarget(null)}
+        onCancel={() => setRemoveTarget(null)}
         onConfirm={() => removeTarget && removeFriend.mutate(removeTarget._id)}
       />
     </div>

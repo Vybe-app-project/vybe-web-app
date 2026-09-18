@@ -6,6 +6,7 @@ import {
   Avatar,
   Badge,
   Button,
+  Callout,
   Card,
   EmptyState,
   ErrorState,
@@ -14,17 +15,11 @@ import {
   Tabs,
   Textarea,
   cx,
+  humanize,
   useToast,
 } from '../../components/ui';
-import {
-  Award,
-  Check,
-  X,
-  Mail,
-  Download,
-  ChevronLeft,
-  ChevronRight,
-} from '../../components/icons';
+import { Award, Check, X, Mail, ExternalLink } from '../../components/icons';
+import { AdminPageHeader, Pager } from './AdminLayout';
 
 type ApplicationStatus = 'pending' | 'approved' | 'rejected';
 
@@ -60,6 +55,15 @@ const TABS = [
 
 const LIMIT = 25;
 
+const STATUS_TONE: Record<string, 'success' | 'danger' | 'warning' | 'neutral'> = {
+  approved: 'success',
+  rejected: 'danger',
+  pending: 'warning',
+};
+
+/** Only http(s) credential links are rendered as anchors; anything else is shown as text. */
+const isHttpUrl = (u: string) => /^https?:\/\//i.test(u);
+
 function DecisionModal({
   application,
   decision,
@@ -84,8 +88,8 @@ function DecisionModal({
     onSuccess: () => {
       success(
         decision === 'approve'
-          ? `Approved ${application.username ? `@${application.username}` : 'the applicant'} as a trainer.`
-          : 'Application rejected.',
+          ? `Approved ${application.username ? `@${application.username}` : 'the applicant'} as a trainer`
+          : 'Application rejected',
       );
       void qc.invalidateQueries({ queryKey: ['admin', 'trainer-applications'] });
       onClose();
@@ -102,14 +106,14 @@ function DecisionModal({
       title={approving ? 'Approve trainer application' : 'Reject trainer application'}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
+          <Button variant="secondary" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
           <Button
-            variant={approving ? 'primary' : 'ghost'}
+            variant={approving ? 'primary' : 'danger'}
+            icon={approving ? <Check size={16} /> : <X size={16} />}
             loading={mutation.isPending}
             onClick={() => { setError(null); mutation.mutate(); }}
-            className={approving ? undefined : 'border-red-500/40 bg-red-500/15 text-red-300'}
           >
             {approving ? 'Approve' : 'Reject'}
           </Button>
@@ -120,17 +124,17 @@ function DecisionModal({
         <div className="flex items-center gap-3">
           <Avatar src={application.avatar} name={application.fullName || application.username} size="md" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-bold text-slate-100">
+            <p className="truncate text-md font-semibold text-text-1">
               {application.fullName || application.username || 'Applicant'}
             </p>
-            <p className="truncate font-mono text-[12px] text-slate-500">{application.email || '—'}</p>
+            <p className="truncate text-xs text-text-2">{application.email || 'No email on file'}</p>
           </div>
         </div>
 
-        <p className="text-[13px] leading-relaxed text-slate-400">
+        <p className="text-sm leading-relaxed text-text-2">
           {approving
             ? 'Approving grants the trainer badge and unlocks coaching features on this account.'
-            : 'Rejecting closes the application. The applicant may reapply later.'}
+            : 'Rejecting closes the application. The applicant can apply again later.'}
         </p>
 
         <Textarea
@@ -139,16 +143,11 @@ function DecisionModal({
           onChange={(e) => setNote(e.target.value)}
           maxLength={1000}
           rows={3}
-          placeholder="Shared context for the audit trail…"
+          placeholder="Shared context for the audit trail"
           hint={`${note.length}/1000`}
-          className="border-slate-800 bg-slate-900/70 text-slate-100"
         />
 
-        {error ? (
-          <p role="alert" className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-            {error}
-          </p>
-        ) : null}
+        {error ? <Callout tone="danger">{error}</Callout> : null}
       </div>
     </Modal>
   );
@@ -183,28 +182,31 @@ export default function AdminTrainers() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-50">Trainer applications</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Verify credentials before granting coaching privileges.
-          </p>
-        </div>
-        <Badge tone="neutral">{total.toLocaleString()} applications</Badge>
-      </div>
+      <AdminPageHeader
+        title="Trainer applications"
+        subtitle="Verify credentials before granting coaching privileges."
+        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> applications</Badge>}
+      />
 
-      <Tabs tabs={TABS} active={status} onChange={(k) => { setStatus(k); setPage(1); }} />
+      <Tabs
+        aria-label="Application status"
+        tabs={TABS}
+        active={status}
+        onChange={(k) => { setStatus(k); setPage(1); }}
+      />
 
       {query.isError ? (
-        <ErrorState
-          error={query.error}
-          retry={() => void query.refetch()}
-          title="Could not load applications"
-        />
+        <Card>
+          <ErrorState
+            error={query.error}
+            retry={() => void query.refetch()}
+            title="Could not load applications"
+          />
+        </Card>
       ) : query.isLoading ? (
-        <div className="space-y-3">
+        <div className="space-y-3" aria-busy="true" aria-label="Loading applications">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="border-slate-800 bg-slate-950/60">
+            <Card key={i}>
               <div className="flex items-center gap-3">
                 <Skeleton className="h-10 w-10 rounded-full" />
                 <Skeleton className="h-3 flex-1" />
@@ -214,57 +216,56 @@ export default function AdminTrainers() {
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <Card className="border-slate-800 bg-slate-950/60">
+        <Card>
           <EmptyState
-            icon={<Award size={22} />}
-            title={status === 'pending' ? 'No pending applications' : 'Nothing here'}
+            variant={status === 'pending' ? 'first-run' : 'no-results'}
+            icon={status === 'pending' ? <Award size={24} /> : undefined}
+            title={status === 'pending' ? 'No applications waiting' : `No ${status} applications`}
             message={
               status === 'pending'
-                ? 'New trainer applications will appear here for review.'
-                : `No ${status} applications.`
+                ? 'New trainer applications appear here for review as members submit them.'
+                : 'Decisions you record show up under their status tab.'
+            }
+            action={
+              status !== 'pending'
+                ? { label: 'Show pending', onClick: () => { setStatus('pending'); setPage(1); }, variant: 'secondary' }
+                : undefined
             }
           />
         </Card>
       ) : (
-        <div className={cx('space-y-3', query.isFetching && 'opacity-60')}>
+        <div className={cx('space-y-3', query.isFetching && 'admin-fetching')}>
           {rows.map((row) => {
             const app = row.application ?? {};
             const fields = Array.isArray(app.fields) ? app.fields : [];
             const credentials = Array.isArray(app.credentialUrls) ? app.credentialUrls : [];
             const isPending = app.status === 'pending';
+            const name = row.fullName || row.username || 'Applicant';
             return (
-              <Card key={row._id} className="border-slate-800 bg-slate-950/60">
+              <Card key={row._id}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
                     <Avatar src={row.avatar} name={row.fullName || row.username} size="md" />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-slate-100">
-                        {row.fullName || row.username || 'Applicant'}
+                      <p className="truncate text-md font-semibold text-text-1">{name}</p>
+                      <p className="truncate text-xs text-text-2">
+                        {row.username ? `@${row.username}` : 'No username'}
                       </p>
-                      <p className="truncate text-[12px] text-slate-500">
-                        {row.username ? `@${row.username}` : ''}
-                      </p>
-                      <a
-                        href={row.email ? `mailto:${row.email}` : undefined}
-                        className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[11px] break-all text-slate-500 hover:text-slate-300"
-                      >
-                        <Mail size={11} /> {row.email || '—'}
-                      </a>
+                      {row.email ? (
+                        <a
+                          href={`mailto:${row.email}`}
+                          className="mt-0.5 inline-flex min-h-6 items-center gap-1.5 text-xs break-all text-text-2 underline decoration-line-strong underline-offset-3 hover:text-text-1 hover:decoration-current"
+                        >
+                          <Mail size={14} /> {row.email}
+                        </a>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {row.isVerified ? <Badge tone="success">Verified</Badge> : null}
-                    {row.isTrainer ? <Badge tone="brand">Trainer</Badge> : null}
-                    <Badge
-                      tone={
-                        app.status === 'approved'
-                          ? 'success'
-                          : app.status === 'rejected'
-                            ? 'danger'
-                            : 'warning'
-                      }
-                    >
-                      {app.status ?? 'none'}
+                    {row.isTrainer ? <Badge tone="info">Trainer</Badge> : null}
+                    <Badge tone={STATUS_TONE[app.status ?? ''] ?? 'neutral'} dot>
+                      {app.status ? humanize(app.status) : 'No application'}
                     </Badge>
                   </div>
                 </div>
@@ -272,37 +273,37 @@ export default function AdminTrainers() {
                 {fields.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {fields.map((f) => (
-                      <Badge key={f} tone="info">{f}</Badge>
+                      <Badge key={f} tone="neutral">{humanize(f)}</Badge>
                     ))}
                   </div>
                 ) : null}
 
                 {app.experienceSummary ? (
-                  <p className="mt-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2.5 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-300">
+                  <p className="prose-measure mt-3 rounded-sm border border-line bg-surface-2 px-3 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-text-1">
                     {app.experienceSummary}
                   </p>
                 ) : (
-                  <p className="mt-3 text-[12px] text-slate-600 italic">
-                    No experience summary provided.
-                  </p>
+                  <p className="mt-3 text-xs text-text-3 italic">No experience summary provided.</p>
                 )}
 
                 {credentials.length > 0 ? (
                   <div className="mt-3">
-                    <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                      Credentials
-                    </p>
+                    <p className="type-label text-text-2">Credentials</p>
                     <ul className="mt-1.5 space-y-1">
                       {credentials.map((url, i) => (
                         <li key={`${url}-${i}`}>
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            className="inline-flex items-center gap-1.5 font-mono text-[12px] break-all text-cyan-300 hover:underline"
-                          >
-                            <Download size={12} /> {url}
-                          </a>
+                          {isHttpUrl(url) ? (
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="inline-flex min-h-6 items-center gap-1.5 text-xs break-all text-brand-text underline decoration-line-strong underline-offset-3 hover:decoration-current"
+                            >
+                              <ExternalLink size={14} className="shrink-0" /> {url}
+                            </a>
+                          ) : (
+                            <span className="admin-code text-text-2">{url}</span>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -310,26 +311,21 @@ export default function AdminTrainers() {
                 ) : null}
 
                 {app.decisionNote ? (
-                  <p className="mt-3 text-[12px] text-slate-500 italic">
-                    Decision note: “{app.decisionNote}”
-                  </p>
+                  <p className="mt-3 text-xs text-text-2 italic">Decision note: “{app.decisionNote}”</p>
                 ) : null}
 
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-3">
-                  <p className="font-mono text-[11px] text-slate-500">
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+                  <p className="tabular text-xs text-text-2">
                     {app.submittedAt
                       ? `Submitted ${format(new Date(app.submittedAt), 'MMM d, yyyy')}`
                       : 'Submission date unknown'}
-                    {app.reviewedAt
-                      ? ` · reviewed ${format(new Date(app.reviewedAt), 'MMM d, yyyy')}`
-                      : ''}
+                    {app.reviewedAt ? `, reviewed ${format(new Date(app.reviewedAt), 'MMM d, yyyy')}` : ''}
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
-                      variant="ghost"
-                      icon={<X size={14} />}
-                      className="border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                      variant="danger"
+                      icon={<X size={16} />}
                       onClick={() => setTarget({ application: row, decision: 'reject' })}
                       disabled={!isPending && app.status === 'rejected'}
                     >
@@ -338,7 +334,7 @@ export default function AdminTrainers() {
                     <Button
                       size="sm"
                       variant="primary"
-                      icon={<Check size={14} />}
+                      icon={<Check size={16} />}
                       onClick={() => setTarget({ application: row, decision: 'approve' })}
                       disabled={!isPending && app.status === 'approved'}
                     >
@@ -353,30 +349,16 @@ export default function AdminTrainers() {
       )}
 
       {rows.length > 0 ? (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-slate-500">
-            Page {page} of {totalPages} · {total.toLocaleString()} applications
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<ChevronLeft size={14} />}
-              disabled={page <= 1 || query.isFetching}
-              onClick={() => setPage((n) => Math.max(1, n - 1))}
-            >
-              Prev
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={page >= totalPages || query.isFetching}
-              onClick={() => setPage((n) => Math.min(totalPages, n + 1))}
-            >
-              Next <ChevronRight size={14} />
-            </Button>
-          </div>
-        </div>
+        <Pager
+          page={page}
+          totalPages={totalPages}
+          canPrev={page > 1}
+          canNext={page < totalPages}
+          busy={query.isFetching}
+          onPrev={() => setPage((n) => Math.max(1, n - 1))}
+          onNext={() => setPage((n) => Math.min(totalPages, n + 1))}
+          label={`${total.toLocaleString()} applications`}
+        />
       ) : null}
 
       {target ? (

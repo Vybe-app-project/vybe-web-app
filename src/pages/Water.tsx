@@ -1,17 +1,29 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isValid, parseISO } from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import {
+  Badge,
   Button,
+  Callout,
   Card,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
+  Modal,
+  PageHeader,
+  Ring,
+  Section,
   Skeleton,
+  StatTile,
+  Tabs,
+  cx,
+  formatStat,
   useToast,
-} from '../components/ui';
-import { Droplet, Plus, Trash, Clock } from '../components/icons';
+} from './ui';
+import { CheckCircle, Droplet, Plus, Trash } from './icons';
 
 /* ------------------------------------------------------------------ types */
 
@@ -43,60 +55,149 @@ const toOunces = (amount: number, unit: WaterUnit) => {
   return amount;
 };
 
-const QUICK_ADDS: { amount: number; unit: WaterUnit; label: string }[] = [
-  { amount: 8, unit: 'oz', label: 'Glass · 8 oz' },
-  { amount: 16, unit: 'oz', label: 'Bottle · 16 oz' },
-  { amount: 500, unit: 'ml', label: 'Large · 500 ml' },
-  { amount: 1, unit: 'cups', label: 'Cup' },
+const roundOz = (oz: number) => Math.round(oz * 10) / 10;
+
+const QUICK_ADDS: { amount: number; unit: WaterUnit; label: string; detail: string }[] = [
+  { amount: 8, unit: 'oz', label: 'Glass', detail: '8 oz' },
+  { amount: 16, unit: 'oz', label: 'Bottle', detail: '16 oz' },
+  { amount: 500, unit: 'ml', label: 'Large bottle', detail: '500 ml' },
+  { amount: 1, unit: 'cups', label: 'Cup', detail: '1 cup' },
 ];
 
-/* --------------------------------------------------------- hydration ring */
+const UNIT_TABS: { key: WaterUnit; label: string }[] = [
+  { key: 'oz', label: 'oz' },
+  { key: 'ml', label: 'ml' },
+  { key: 'cups', label: 'cups' },
+];
 
-function HydrationGauge({ total, goal }: { total: number; goal: number }) {
-  const size = 200;
-  const stroke = 16;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const ratio = goal > 0 ? Math.min(total / goal, 1) : 0;
-  const pct = Math.round(ratio * 100);
+const UNIT_DEFAULTS: Record<WaterUnit, { value: string; step: string; placeholder: string }> = {
+  oz: { value: '12', step: '0.5', placeholder: '12' },
+  ml: { value: '350', step: '10', placeholder: '350' },
+  cups: { value: '1', step: '0.5', placeholder: '1' },
+};
+
+const validate = (amount: number, unit: WaterUnit): string | null => {
+  if (!Number.isFinite(amount) || amount <= 0) return 'Enter an amount greater than zero.';
+  if (toOunces(amount, unit) > MAX_OUNCES_PER_LOG) return `One log can be at most ${MAX_OUNCES_PER_LOG} oz (about 3.8 L). Split larger amounts.`;
+  return null;
+};
+
+const queryKey = ['water', 'today'];
+
+/* -------------------------------------------------------------- log modal */
+
+function LogWaterModal({
+  open,
+  onClose,
+  onSubmit,
+  pending,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (payload: { amount: number; unit: WaterUnit }) => Promise<unknown>;
+  pending: boolean;
+}) {
+  const [unit, setUnit] = useState<WaterUnit>('oz');
+  const [amount, setAmount] = useState(UNIT_DEFAULTS.oz.value);
+  const [error, setError] = useState<string | null>(null);
+  const [wasOpen, setWasOpen] = useState(false);
+
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setUnit('oz');
+      setAmount(UNIT_DEFAULTS.oz.value);
+      setError(null);
+    }
+  }
+
+  const changeUnit = (next: WaterUnit) => {
+    setUnit(next);
+    setAmount(UNIT_DEFAULTS[next].value);
+    setError(null);
+  };
+
+  const parsed = Number(amount);
+  const preview = Number.isFinite(parsed) && parsed > 0 ? roundOz(toOunces(parsed, unit)) : null;
+  const formId = 'water-log-form';
+
+  const submit = async () => {
+    const problem = validate(parsed, unit);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setError(null);
+    try {
+      await onSubmit({ amount: parsed, unit });
+      onClose();
+    } catch {
+      // The mutation surfaces its own toast; keep the sheet open so the user can retry.
+    }
+  };
 
   return (
-    <div className="relative mx-auto" style={{ width: size, height: size }}>
-      <svg width={size} height={size} role="img" aria-label={`Hydration ${pct}% of daily goal`}>
-        <defs>
-          <linearGradient id="waterGradient" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#22d3ee" />
-            <stop offset="100%" stopColor="#7c5cff" />
-          </linearGradient>
-        </defs>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="#262631"
-          strokeWidth={stroke}
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Log water"
+      description="Any amount, in the unit you drink in."
+      size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" loading={pending} icon={<Droplet size={18} />}>
+            Log water
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={formId}
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <Tabs variant="segmented" fill aria-label="Unit" tabs={UNIT_TABS} value={unit} onChange={(k) => changeUnit(k as WaterUnit)} />
+        <Input
+          label="Amount"
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step={UNIT_DEFAULTS[unit].step}
+          placeholder={UNIT_DEFAULTS[unit].placeholder}
+          value={amount}
+          autoFocus
+          error={error ?? undefined}
+          hint={error ? undefined : preview != null && unit !== 'oz' ? `About ${formatStat(preview)} oz` : `Up to ${MAX_OUNCES_PER_LOG} oz per log`}
+          trailing={<span className="text-xs font-semibold">{unit}</span>}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setError(null);
+          }}
         />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="url(#waterGradient)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - ratio)}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-          style={{ transition: 'stroke-dashoffset .8s cubic-bezier(.4,0,.2,1)' }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <Droplet size={26} />
-        <p className="mt-1 text-3xl font-bold">{Math.round(total)}</p>
-        <p className="text-xs text-[var(--color-muted)]">of {goal} oz · {pct}%</p>
-      </div>
-    </div>
+        <div className="flex flex-wrap gap-2">
+          {QUICK_ADDS.map((q) => (
+            <Button
+              key={q.label}
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setUnit(q.unit);
+                setAmount(String(q.amount));
+                setError(null);
+              }}
+            >
+              {q.label} {q.detail}
+            </Button>
+          ))}
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -105,10 +206,19 @@ function HydrationGauge({ total, goal }: { total: number; goal: number }) {
 export default function Water() {
   const qc = useQueryClient();
   const toast = useToast();
-  const [amount, setAmount] = useState('12');
-  const [unit, setUnit] = useState<WaterUnit>('oz');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [logOpen, setLogOpen] = useState(false);
 
-  const queryKey = ['water', 'today'];
+  // Deep link from the Log sheet and the PWA shortcut: /health/water?log=1
+  const wantsLog = searchParams.get('log') === '1';
+  useEffect(() => {
+    if (!wantsLog) return;
+    setLogOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('log');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsLog]);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
@@ -122,13 +232,8 @@ export default function Water() {
 
   const logWater = useMutation({
     mutationFn: async (payload: { amount: number; unit: WaterUnit }) => {
-      const ounces = toOunces(payload.amount, payload.unit);
-      if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
-        throw new Error('Enter a valid amount');
-      }
-      if (ounces > MAX_OUNCES_PER_LOG) {
-        throw new Error('A single log cannot exceed 128 oz');
-      }
+      const problem = validate(payload.amount, payload.unit);
+      if (problem) throw new Error(problem);
       const { data } = await api.post<{ data: WaterLog }>('/water/log', payload);
       return data.data;
     },
@@ -146,7 +251,7 @@ export default function Water() {
           ...previous,
           logs: [optimistic, ...previous.logs],
           count: previous.count + 1,
-          total: Math.round((previous.total + toOunces(payload.amount, payload.unit)) * 10) / 10,
+          total: roundOz(previous.total + toOunces(payload.amount, payload.unit)),
         });
       }
       return { previous };
@@ -155,7 +260,7 @@ export default function Water() {
       if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
       toast.error(errMsg(e, 'Could not log water'));
     },
-    onSuccess: () => toast.success('Water logged'),
+    onSuccess: (_d, payload) => toast.success(`${formatStat(payload.amount)} ${payload.unit} logged`),
     onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 
@@ -172,15 +277,14 @@ export default function Water() {
           ...previous,
           logs: previous.logs.filter((l) => l._id !== log._id),
           count: Math.max(0, previous.count - 1),
-          total:
-            Math.round(Math.max(0, previous.total - toOunces(log.amount, log.unit)) * 10) / 10,
+          total: roundOz(Math.max(0, previous.total - toOunces(log.amount, log.unit))),
         });
       }
       return { previous };
     },
     onError: (e, _v, ctx) => {
       if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
-      toast.error(errMsg(e, 'Could not delete log'));
+      toast.error(errMsg(e, 'Could not remove that log'));
     },
     onSuccess: () => toast.success('Log removed'),
     onSettled: () => qc.invalidateQueries({ queryKey }),
@@ -188,137 +292,144 @@ export default function Water() {
 
   const logs = useMemo(() => data?.logs ?? [], [data]);
   const total = data?.total ?? 0;
+  const remaining = Math.max(0, DAILY_GOAL_OZ - total);
+  const reached = total >= DAILY_GOAL_OZ && !isLoading;
+  const pct = Math.round(Math.min(1, total / DAILY_GOAL_OZ) * 100);
+  const lastLog = logs.find((l) => !l._id.startsWith('optimistic-')) ?? logs[0];
+  const lastLogTime = lastLog ? parseISO(lastLog.timestamp) : null;
+
+  const logButton = (
+    <Button variant="primary" icon={<Plus size={18} />} onClick={() => setLogOpen(true)}>
+      Log water
+    </Button>
+  );
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-5 p-4">
-      <header>
-        <h1 className="text-2xl font-bold">Hydration</h1>
-        <p className="text-sm text-[var(--color-muted)]">
-          Track every glass and hit your daily {DAILY_GOAL_OZ} oz target.
-        </p>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Hydration"
+        subtitle={`Every glass counts toward a ${DAILY_GOAL_OZ} oz daily goal.`}
+        actions={logButton}
+        mobileActions={
+          <IconButton label="Log water" variant="primary" onClick={() => setLogOpen(true)}>
+            <Plus size={22} />
+          </IconButton>
+        }
+      />
 
-      <Card className="space-y-4 p-5">
-        {isLoading ? (
-          <Skeleton className="mx-auto h-[200px] w-[200px] rounded-full" />
-        ) : isError ? (
-          <ErrorState
-            message={errMsg(error, 'Could not load hydration data')}
-            onRetry={() => refetch()}
-          />
-        ) : (
-          <>
-            <HydrationGauge total={total} goal={DAILY_GOAL_OZ} />
-            <p className="text-center text-sm text-[var(--color-muted)]">
-              {total >= DAILY_GOAL_OZ
-                ? 'Goal reached — nicely done.'
-                : `${Math.round(DAILY_GOAL_OZ - total)} oz to go · ${data?.count ?? 0} logs today`}
-            </p>
-          </>
-        )}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <Card className="flex flex-col items-center justify-center gap-4 text-center">
+          {isLoading ? (
+            <Skeleton className="h-[200px] w-[200px] rounded-full" />
+          ) : isError ? (
+            <ErrorState error={error} title="Could not load today’s hydration" retry={() => refetch()} />
+          ) : (
+            <>
+              <Ring value={total} max={DAILY_GOAL_OZ} size={200} stroke={14} color={reached ? 'brand' : 'protein'} label="Hydration">
+                <Droplet size={22} className={cx(reached ? 'text-brand' : 'text-info')} />
+                <span className="mt-1 text-3xl">{formatStat(Math.round(total))}</span>
+                <span className="text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">of {DAILY_GOAL_OZ} oz</span>
+              </Ring>
+              {reached ? (
+                <Badge tone="success" size="md">
+                  <CheckCircle size={14} /> Goal reached
+                </Badge>
+              ) : (
+                <p className="text-sm text-text-2">
+                  <span className="tabular font-semibold text-text-1">{formatStat(Math.round(remaining))} oz</span> to go
+                </p>
+              )}
+            </>
+          )}
+        </Card>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {QUICK_ADDS.map((quick) => (
-            <Button
-              key={quick.label}
-              variant="ghost"
-              disabled={logWater.isPending}
-              onClick={() => logWater.mutate({ amount: quick.amount, unit: quick.unit })}
-            >
-              <Droplet size={14} /> {quick.label}
-            </Button>
-          ))}
-        </div>
-
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            logWater.mutate({ amount: Number(amount), unit });
-          }}
-        >
-          <label className="min-w-24 flex-1 space-y-1">
-            <span className="text-xs text-[var(--color-muted)]">Amount</span>
-            <Input
-              type="number"
-              min={0}
-              step="0.5"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <StatTile loading={isLoading} label="Today" value={formatStat(pct)} unit="%" tone={reached ? 'brand' : 'neutral'} hint="of your daily goal" />
+            <StatTile loading={isLoading} label="Logs" value={formatStat(data?.count ?? 0)} hint={data?.count ? `${data.count === 1 ? 'entry' : 'entries'} so far today` : 'None yet today'} />
+            <StatTile
+              loading={isLoading}
+              label="Last drink"
+              value={lastLogTime && isValid(lastLogTime) ? format(lastLogTime, 'HH:mm') : '—'}
+              hint={lastLog ? `${formatStat(lastLog.amount)} ${lastLog.unit}` : 'Nothing logged yet'}
             />
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--color-muted)]">Unit</span>
-            <select
-              className="input-base"
-              value={unit}
-              onChange={(e) => setUnit(e.target.value as WaterUnit)}
-            >
-              <option value="oz">oz</option>
-              <option value="ml">ml</option>
-              <option value="cups">cups</option>
-            </select>
-          </label>
-          <Button type="submit" variant="primary" loading={logWater.isPending}>
-            <Plus size={16} /> Log
-          </Button>
-        </form>
-      </Card>
+          </div>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Today’s logs</h2>
+          <Card>
+            <p className="type-label mb-3 text-text-2">Quick add</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {QUICK_ADDS.map((quick) => (
+                <Button
+                  key={quick.label}
+                  variant="secondary"
+                  className="h-auto flex-col gap-0 py-2.5"
+                  disabled={logWater.isPending || isLoading || isError}
+                  onClick={() => logWater.mutate({ amount: quick.amount, unit: quick.unit })}
+                  aria-label={`Log ${quick.label.toLowerCase()}, ${quick.detail}`}
+                >
+                  <span className="text-sm font-semibold">{quick.label}</span>
+                  <span className="text-xs font-medium text-text-2">{quick.detail}</span>
+                </Button>
+              ))}
+            </div>
+            <Button variant="ghost" className="mt-2 w-full sm:w-auto" icon={<Plus size={16} />} onClick={() => setLogOpen(true)}>
+              Custom amount
+            </Button>
+          </Card>
+        </div>
+      </div>
+
+      <Section title="Today’s logs" description="Newest first. Totals are shown in ounces.">
         {isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-12 w-full" />
+              <Skeleton key={i} className="h-16 w-full rounded-lg" />
             ))}
           </div>
-        ) : logs.length === 0 ? (
+        ) : isError ? null : logs.length === 0 ? (
           <EmptyState
-            icon={<Droplet size={24} />}
-            title="Nothing logged yet"
-            description="Use a quick add above to record your first drink of the day."
+            title="Nothing logged yet today"
+            message="Tap a quick add or log a custom amount to record your first drink of the day."
+            action={{ label: 'Log water', onClick: () => setLogOpen(true), icon: <Droplet size={18} /> }}
           />
         ) : (
           <ul className="space-y-2">
             {logs.map((log) => {
               const ts = parseISO(log.timestamp);
               const pending = log._id.startsWith('optimistic-');
+              const oz = roundOz(toOunces(log.amount, log.unit));
               return (
-                <li
-                  key={log._id}
-                  className={`card flex items-center justify-between gap-3 p-3 ${
-                    pending ? 'opacity-60' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
+                <li key={log._id} className={cx('card flex items-center gap-3 p-3 pl-4 transition-opacity dur-2', pending && 'opacity-60')} aria-busy={pending || undefined}>
+                  <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-info-soft text-info">
                     <Droplet size={18} />
-                    <div>
-                      <p className="text-sm font-medium">
-                        {log.amount} {log.unit}
-                      </p>
-                      <p className="inline-flex items-center gap-1 text-xs text-[var(--color-muted)]">
-                        <Clock size={11} />
-                        {isValid(ts) ? format(ts, 'HH:mm') : '—'} ·{' '}
-                        {Math.round(toOunces(log.amount, log.unit) * 10) / 10} oz
-                      </p>
-                    </div>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="type-stat text-lg text-text-1">
+                      {formatStat(log.amount)}
+                      <span className="ml-1 text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">{log.unit}</span>
+                    </p>
+                    <p className="text-xs text-text-2">
+                      <time dateTime={isValid(ts) ? ts.toISOString() : undefined} className="tabular">
+                        {isValid(ts) ? format(ts, 'HH:mm') : 'Just now'}
+                      </time>
+                      {log.unit !== 'oz' ? <span className="ml-2 tabular text-text-3">{formatStat(oz)} oz</span> : null}
+                    </p>
                   </div>
-                  <button
-                    type="button"
-                    aria-label="Delete water log"
-                    className="btn btn-ghost px-2"
-                    disabled={pending || removeLog.isPending}
-                    onClick={() => removeLog.mutate(log)}
-                  >
-                    <Trash size={14} />
-                  </button>
+                  <IconButton label={`Remove ${formatStat(log.amount)} ${log.unit} log`} variant="danger" disabled={pending || removeLog.isPending} onClick={() => removeLog.mutate(log)}>
+                    <Trash size={18} />
+                  </IconButton>
                 </li>
               );
             })}
           </ul>
         )}
-      </section>
+      </Section>
+
+      <Callout tone="info">
+        Hydration is tracked from what you log here. The {DAILY_GOAL_OZ} oz goal is a general guideline, not personal medical advice.
+      </Callout>
+
+      <LogWaterModal open={logOpen} onClose={() => setLogOpen(false)} onSubmit={(payload) => logWater.mutateAsync(payload)} pending={logWater.isPending} />
     </div>
   );
 }

@@ -1,12 +1,7 @@
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
-import { api, errMsg, mediaUrl } from '../lib/api';
+import { useId, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   compactNumber,
@@ -18,17 +13,29 @@ import {
 } from '../lib/hooks';
 import {
   Avatar,
+  Badge,
   Button,
+  ButtonLink,
   Card,
   ConfirmDialog,
   EmptyState,
   ErrorState,
-  Skeleton,
+  IconButton,
+  Input,
+  Menu,
+  PageHeader,
+  SkeletonRow,
   Spinner,
+  cx,
+  formatStat,
+  prefersReducedMotion,
+  usePulse,
   useToast,
+  type MenuItem,
 } from './ui';
-import { Heart, Send, Trash } from './icons';
+import { ArrowLeft, Flag, Heart, Send, Trash } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
+import { useReportModal } from './Report';
 
 type CommentsPage = {
   comments: PostComment[];
@@ -37,18 +44,25 @@ type CommentsPage = {
   hasNextPage: boolean;
 };
 
+/* ------------------------------------------------------------------ */
+/* Comment row                                                         */
+/* ------------------------------------------------------------------ */
+
 function CommentRow({
   comment,
   postId,
   postAuthorId,
+  onReport,
 }: {
   comment: PostComment;
   postId: string;
   postAuthorId?: string;
+  onReport: (userId: string, label: string) => void;
 }) {
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const toast = useToast();
+  const heart = usePulse();
   const [confirm, setConfirm] = useState(false);
 
   const [liked, setLiked] = useState(
@@ -58,14 +72,12 @@ function CommentRow({
 
   const like = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post('/posts/comment/like', {
-        postId,
-        commentId: comment._id,
-      });
+      const { data } = await api.post('/posts/comment/like', { postId, commentId: comment._id });
       return data as { likes?: number; isLiked?: boolean };
     },
     onMutate: () => {
       const prev = { liked, likeCount };
+      if (!liked) heart.pulse();
       setLiked(!liked);
       setLikeCount((n) => n + (liked ? -1 : 1));
       return prev;
@@ -75,11 +87,11 @@ function CommentRow({
         setLiked(ctx.liked);
         setLikeCount(ctx.likeCount);
       }
-      toast.error(errMsg(e, 'Could not like this comment.'));
+      toast.error(e, 'Could not like this comment.');
     },
     onSuccess: (data) => {
-      if (typeof data.isLiked === 'boolean') setLiked(data.isLiked);
-      if (typeof data.likes === 'number') setLikeCount(data.likes);
+      if (typeof data?.isLiked === 'boolean') setLiked(data.isLiked);
+      if (typeof data?.likes === 'number') setLikeCount(data.likes);
     },
   });
 
@@ -94,84 +106,107 @@ function CommentRow({
       qc.invalidateQueries({ queryKey: ['post', postId] });
     },
     onError: (e) => {
-      toast.error(errMsg(e, 'Could not delete this comment.'));
+      toast.error(e, 'Could not delete this comment.');
       setConfirm(false);
     },
   });
 
   const author = comment.user;
-  const canDelete =
-    !!me &&
-    (String(author?._id) === String(me._id) || String(postAuthorId) === String(me._id));
-  const href = !author
-    ? '#'
-    : me && String(author._id) === String(me._id)
-      ? '/profile'
-      : `/u/${author._id}`;
+  const authorId = author?._id;
+  const isOwn = !!me && !!authorId && String(authorId) === String(me._id);
+  const canDelete = !!me && (isOwn || String(postAuthorId) === String(me._id));
+  const href = !authorId ? null : isOwn ? '/profile' : `/u/${authorId}`;
+  const name = displayName(author);
+  const handle = author?.username ? `@${author.username}` : name;
+
+  const items: MenuItem[] = [
+    ...(authorId && !isOwn
+      ? ([{ label: `Report ${handle}`, icon: <Flag size={18} />, onSelect: () => onReport(authorId, handle), danger: true }] satisfies MenuItem[])
+      : []),
+    ...(canDelete
+      ? ([{ label: 'Delete comment', icon: <Trash size={18} />, onSelect: () => setConfirm(true), danger: true, divider: !isOwn && !!authorId }] satisfies MenuItem[])
+      : []),
+  ];
+
+  const avatar = <Avatar src={author?.avatar} name={name} size="sm" />;
 
   return (
-    <div className="flex gap-3 py-3">
-      <Link to={href}>
-        <Avatar src={mediaUrl(author?.avatar)} name={displayName(author)} size={32} />
-      </Link>
+    <li className="flex gap-3 py-3">
+      {href ? (
+        <Link to={href} viewTransition aria-label={name} className="-m-1.5 shrink-0 self-start rounded-full p-1.5">
+          {avatar}
+        </Link>
+      ) : (
+        <span className="shrink-0">{avatar}</span>
+      )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <Link to={href} className="truncate text-sm font-semibold hover:underline">
-            {displayName(author)}
-          </Link>
-          <span className="text-xs text-[var(--color-muted)]">{timeAgo(comment.createdAt)}</span>
+        <div className="flex min-w-0 items-baseline gap-2">
+          {href ? (
+            <Link to={href} viewTransition className="truncate text-sm font-semibold text-text-1 hover:underline">
+              {name}
+            </Link>
+          ) : (
+            <span className="truncate text-sm font-semibold text-text-1">{name}</span>
+          )}
+          <time dateTime={comment.createdAt} className="tabular shrink-0 text-xs text-text-3">
+            {timeAgo(comment.createdAt)}
+          </time>
         </div>
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{comment.text}</p>
-        <div className="mt-1.5 flex items-center gap-3">
+        <p className="mt-0.5 whitespace-pre-wrap break-words text-base text-text-1">{comment.text}</p>
+        <div className="-mb-2 -ml-2 mt-0.5 flex items-center gap-0.5">
           <button
             type="button"
             onClick={() => like.mutate()}
             disabled={like.isPending}
             aria-pressed={liked}
-            className={`flex items-center gap-1 text-xs ${
-              liked ? 'text-[var(--color-accent)]' : 'text-[var(--color-muted)]'
-            }`}
+            aria-label={liked ? `Unlike comment (${likeCount})` : `Like comment (${likeCount})`}
+            className={cx(
+              'inline-flex h-11 min-w-11 items-center gap-1 rounded-sm px-2 text-xs font-semibold transition-colors dur-1',
+              liked ? 'text-danger hover:bg-danger-soft' : 'text-text-2 hover:bg-surface-2 hover:text-text-1',
+            )}
           >
-            <Heart className="h-3.5 w-3.5" filled={liked} />
-            {compactNumber(likeCount)}
+            <span className={cx('inline-flex', heart.className)}>
+              <Heart size={18} filled={liked} />
+            </span>
+            <span key={likeCount} className="tabular motion-count">
+              {compactNumber(likeCount)}
+            </span>
           </button>
-          {canDelete && (
-            <button
-              type="button"
-              onClick={() => setConfirm(true)}
-              className="flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-red-400"
-            >
-              <Trash className="h-3.5 w-3.5" />
-              Delete
-            </button>
-          )}
+          {items.length ? <Menu items={items} label={`Options for ${name}’s comment`} size={44} align="start" /> : null}
         </div>
       </div>
 
       <ConfirmDialog
         open={confirm}
-        title="Delete comment?"
-        message="This removes the comment permanently."
+        title="Delete this comment?"
+        message="It will be removed for everyone."
         confirmLabel="Delete"
         destructive
         loading={remove.isPending}
         onConfirm={() => remove.mutate()}
         onCancel={() => setConfirm(false)}
       />
-    </div>
+    </li>
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Page                                                                */
+/* ------------------------------------------------------------------ */
+
 export default function PostDetail() {
   const { postId = '' } = useParams();
-  const navigate = useNavigate();
+  const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const toast = useToast();
+  const composerId = useId();
   const [text, setText] = useState('');
+  const { report, reportModal } = useReportModal();
 
   const postQuery = useQuery({
     queryKey: ['post', postId],
     enabled: !!postId,
+    retry: (count, err) => (err as { response?: { status?: number } } | null)?.response?.status !== 404 && count < 2,
     queryFn: async () => {
       const { data } = await api.get(`/posts/${postId}`);
       return (data.post || data) as Post;
@@ -180,13 +215,12 @@ export default function PostDetail() {
 
   const commentsQuery = useInfiniteQuery({
     queryKey: ['post-comments', postId],
-    enabled: !!postId,
+    enabled: !!postId && !!postQuery.data,
     initialPageParam: 1,
     queryFn: async ({ pageParam }) => {
-      const { data } = await api.get(
-        `/posts/post/${postId}/comments/all/fetch/filter`,
-        { params: { page: pageParam, limit: 20 } },
-      );
+      const { data } = await api.get(`/posts/post/${postId}/comments/all/fetch/filter`, {
+        params: { page: pageParam, limit: 20 },
+      });
       return data as CommentsPage;
     },
     getNextPageParam: (last, all) => (last.hasNextPage ? all.length + 1 : undefined),
@@ -204,138 +238,161 @@ export default function PostDetail() {
       qc.invalidateQueries({ queryKey: ['post', postId] });
       qc.invalidateQueries({ queryKey: ['feed'] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not post your comment.')),
+    onError: (e) => toast.error(e, 'Could not post your comment.'),
   });
 
   const sentinelRef = useInfiniteScroll(() => {
-    if (commentsQuery.hasNextPage && !commentsQuery.isFetchingNextPage)
-      commentsQuery.fetchNextPage();
+    if (commentsQuery.hasNextPage && !commentsQuery.isFetchingNextPage) commentsQuery.fetchNextPage();
   }, !!commentsQuery.hasNextPage);
 
   const comments = commentsQuery.data?.pages.flatMap((p) => p.comments || []) ?? [];
   const total = commentsQuery.data?.pages[0]?.total ?? comments.length;
+  const notFound = (postQuery.error as { response?: { status?: number } } | null)?.response?.status === 404;
+
+  const focusComposer = () => {
+    const el = document.getElementById(composerId);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    el.focus({ preventScroll: true });
+  };
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => navigate(-1)}>
-          Back
-        </Button>
-        <Link to="/" className="text-sm text-[var(--color-muted)] hover:text-white">
-          Go to feed
-        </Link>
-      </div>
+    <div>
+      <PageHeader
+        title="Post"
+        back
+        actions={
+          <ButtonLink to="/" variant="ghost" icon={<ArrowLeft size={18} />}>
+            Back to feed
+          </ButtonLink>
+        }
+        mobileActions={<></>}
+      />
 
-      {postQuery.isLoading && <PostCardSkeleton />}
+      <div className="space-y-4">
+        {postQuery.isLoading ? <PostCardSkeleton /> : null}
 
-      {postQuery.isError && (
-        <ErrorState
-          title="Post unavailable"
-          message={errMsg(postQuery.error, 'This post may have been deleted or is private.')}
-          action={
-            <Button variant="primary" onClick={() => postQuery.refetch()}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {postQuery.data && (
-        <PostCard
-          post={postQuery.data}
-          hideComposer
-          invalidate={[['post', postId], ['feed']]}
-        />
-      )}
-
-      {postQuery.data && (
-        <Card className="p-4">
-          <h2 className="text-sm font-bold">
-            Comments {total > 0 && <span className="text-[var(--color-muted)]">({total})</span>}
-          </h2>
-
-          <form
-            className="mt-3 flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const value = text.trim();
-              if (!value) return;
-              addComment.mutate(value);
-            }}
-          >
-            <input
-              className="input-base"
-              placeholder="Add a comment…"
-              maxLength={1000}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              disabled={addComment.isPending}
+        {postQuery.isError ? (
+          notFound ? (
+            <EmptyState
+              variant="no-results"
+              title="This post isn’t available"
+              message="It may have been deleted, or its author made it private."
+              action={{ label: 'Back to feed', to: '/' }}
             />
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={!text.trim() || addComment.isPending}
-              loading={addComment.isPending}
-              aria-label="Post comment"
+          ) : (
+            <ErrorState error={postQuery.error} title="Couldn’t load this post" onRetry={() => postQuery.refetch()} />
+          )
+        ) : null}
+
+        {postQuery.data ? (
+          <PostCard
+            post={postQuery.data}
+            linkToDetail={false}
+            hideComposer
+            onComment={focusComposer}
+            invalidate={[['post', postId], ['feed']]}
+          />
+        ) : null}
+
+        {postQuery.data ? (
+          <Card>
+            <div className="flex items-center gap-2">
+              <h2 className="type-heading text-lg text-text-1">Comments</h2>
+              {total > 0 ? (
+                <Badge tone="neutral" className="tabular">
+                  {formatStat(total, { compact: true })}
+                </Badge>
+              ) : null}
+            </div>
+
+            <form
+              className="mt-4 flex items-start gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const value = text.trim();
+                if (!value) return;
+                addComment.mutate(value);
+              }}
             >
-              <Send className="h-4 w-4" />
-            </Button>
-          </form>
+              <Avatar src={me?.avatar} name={displayName(me)} size="sm" className="mt-1.5 hidden shrink-0 sm:inline-flex" />
+              <Input
+                id={composerId}
+                label="Add a comment"
+                hideLabel
+                placeholder="Add a comment…"
+                maxLength={1000}
+                autoComplete="off"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                disabled={addComment.isPending}
+              />
+              <IconButton
+                type="submit"
+                label="Post comment"
+                variant="primary"
+                size={48}
+                disabled={!text.trim() || addComment.isPending}
+                className="shrink-0"
+              >
+                {addComment.isPending ? <Spinner size={18} /> : <Send size={20} />}
+              </IconButton>
+            </form>
 
-          <div className="mt-2 divide-y divide-[var(--color-line)]">
-            {commentsQuery.isLoading &&
-              Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="flex gap-3 py-3">
-                  <Skeleton className="h-8 w-8 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-3 w-28" />
-                    <Skeleton className="h-3 w-3/4" />
-                  </div>
-                </div>
+            <ul className="mt-2 divide-y divide-line" aria-label="Comments" aria-busy={commentsQuery.isLoading || undefined}>
+              {commentsQuery.isLoading
+                ? Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} className="py-3" />)
+                : null}
+
+              {comments.map((comment) => (
+                <CommentRow
+                  key={comment._id}
+                  comment={comment}
+                  postId={postId}
+                  postAuthorId={postQuery.data?.author?._id}
+                  onReport={(userId, label) => report({ targetType: 'user', targetId: userId, targetLabel: label })}
+                />
               ))}
+            </ul>
 
-            {commentsQuery.isError && !commentsQuery.isLoading && (
+            {commentsQuery.isError && !commentsQuery.isLoading ? (
               <ErrorState
-                title="Comments failed to load"
-                message={errMsg(commentsQuery.error, 'Please try again.')}
+                error={commentsQuery.error}
+                title="Comments didn’t load"
+                className="py-8"
                 action={
-                  <Button variant="ghost" onClick={() => commentsQuery.refetch()}>
-                    Retry
+                  <Button variant="secondary" onClick={() => commentsQuery.refetch()}>
+                    Try again
                   </Button>
                 }
               />
-            )}
+            ) : null}
 
-            {!commentsQuery.isLoading && !commentsQuery.isError && comments.length === 0 && (
+            {!commentsQuery.isLoading && !commentsQuery.isError && comments.length === 0 ? (
               <EmptyState
+                size="sm"
                 title="No comments yet"
-                message="Be the first to say something supportive."
+                message="Be the first — say something supportive."
+                action={{ label: 'Write a comment', onClick: focusComposer, variant: 'secondary' }}
               />
-            )}
+            ) : null}
 
-            {comments.map((comment) => (
-              <CommentRow
-                key={comment._id}
-                comment={comment}
-                postId={postId}
-                postAuthorId={postQuery.data?.author?._id}
-              />
-            ))}
-          </div>
+            {commentsQuery.hasNextPage ? (
+              <div ref={sentinelRef} className="flex justify-center py-4">
+                {commentsQuery.isFetchingNextPage ? (
+                  <Spinner className="text-text-2" />
+                ) : (
+                  <Button variant="ghost" onClick={() => commentsQuery.fetchNextPage()}>
+                    Load more comments
+                  </Button>
+                )}
+              </div>
+            ) : null}
+          </Card>
+        ) : null}
+      </div>
 
-          {commentsQuery.hasNextPage && (
-            <div ref={sentinelRef} className="py-4 text-center">
-              {commentsQuery.isFetchingNextPage ? (
-                <Spinner />
-              ) : (
-                <Button variant="ghost" onClick={() => commentsQuery.fetchNextPage()}>
-                  Load more comments
-                </Button>
-              )}
-            </div>
-          )}
-        </Card>
-      )}
+      {reportModal}
     </div>
   );
 }

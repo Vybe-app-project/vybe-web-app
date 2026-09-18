@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE, api, errMsg, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -9,9 +9,11 @@ import {
   isPasswordValid,
   usernameError,
   useCountdown,
+  type PasswordRule,
 } from '../lib/hooks';
-import { Button, Input, Card } from './ui';
+import { Button, Callout, Input, cx } from './ui';
 import { Check, X } from './icons';
+import { AuthShell, LegalLine, PasswordField } from './Login';
 
 type Step = 1 | 2 | 3;
 
@@ -20,15 +22,72 @@ const registrationApi = axios.create({
   timeout: 30_000,
 });
 
-const STEP_LABELS: Record<Step, string> = {
-  1: 'Your email',
-  2: 'Verify code',
-  3: 'Create profile',
-};
+const STEPS: { n: Step; label: string }[] = [
+  { n: 1, label: 'Email' },
+  { n: 2, label: 'Verify' },
+  { n: 3, label: 'Profile' },
+];
+
+/** Three labelled dots; the current one is announced with `aria-current`. */
+function Steps({ step }: { step: Step }) {
+  return (
+    <ol className="flex items-center gap-2" aria-label={`Step ${step} of ${STEPS.length}`}>
+      {STEPS.map(({ n, label }, i) => {
+        const done = n < step;
+        const current = n === step;
+        return (
+          <li key={n} className={cx('flex items-center gap-2', i < STEPS.length - 1 && 'flex-1')} aria-current={current ? 'step' : undefined}>
+            <span
+              className={cx(
+                'tabular inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-bold transition-colors dur-2',
+                done || current ? 'bg-brand text-on-brand' : 'bg-surface-3 text-text-3',
+              )}
+              aria-hidden="true"
+            >
+              {done ? <Check size={14} strokeWidth={2.6} /> : n}
+            </span>
+            <span className={cx('text-xs font-semibold', current ? 'text-text-1' : 'text-text-3')}>
+              {label}
+            </span>
+            {i < STEPS.length - 1 ? <span className="mx-1 h-px flex-1 bg-line" aria-hidden="true" /> : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Live checklist under the password field. */
+export function PasswordRules({ rules, id }: { rules: PasswordRule[]; id?: string }) {
+  return (
+    <ul id={id} className="mt-2 grid gap-1 sm:grid-cols-2" aria-label="Password requirements">
+      {rules.map((rule) => (
+        <li
+          key={rule.id}
+          className={cx('flex items-center gap-1.5 text-xs transition-colors dur-1', rule.ok ? 'text-brand-text' : 'text-text-3')}
+        >
+          {rule.ok ? <Check size={14} strokeWidth={2.4} /> : <X size={14} />}
+          <span>{rule.label}</span>
+          <span className="sr-only">{rule.ok ? ' (met)' : ' (not met)'}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function safePath(p?: string | null): string | null {
+  if (!p || !p.startsWith('/') || p.startsWith('//') || p.startsWith('/login') || p.startsWith('/register')) return null;
+  return p;
+}
+
+type FromState = { from?: { pathname?: string; search?: string } } | null;
 
 export default function Register() {
   const navigate = useNavigate();
+  const location = useLocation();
   const setUser = useAuth((s) => s.setUser);
+  const from = (location.state as FromState)?.from;
+  const target = safePath(from?.pathname ? `${from.pathname}${from.search ?? ''}` : null) ?? '/';
 
   const [step, setStep] = useState<Step>(1);
   const [email, setEmail] = useState('');
@@ -48,6 +107,7 @@ export default function Register() {
 
   const rules = passwordRules(password);
   const trimmedEmail = email.trim().toLowerCase();
+  const uErr = username ? usernameError(username.trim()) : null;
 
   /* ---------------- step 1: send the OTP ---------------- */
   async function sendOtp(e?: FormEvent) {
@@ -89,7 +149,7 @@ export default function Register() {
       if (data?.token) {
         tokenStore.set(data.token);
         if (data.user) setUser(data.user);
-        navigate('/', { replace: true });
+        navigate(target, { replace: true });
         return;
       }
 
@@ -109,11 +169,10 @@ export default function Register() {
     e?.preventDefault();
     setError(null);
 
-    const uErr = usernameError(username.trim());
-    if (uErr) return setError(uErr);
+    const nameErr = usernameError(username.trim());
+    if (nameErr) return setError(nameErr);
     if (fullName.trim().length < 2) return setError('Enter your full name (2+ characters).');
-    if (!isPasswordValid(password))
-      return setError('Your password does not meet all requirements yet.');
+    if (!isPasswordValid(password)) return setError('Your password does not meet all requirements yet.');
     if (password !== confirm) return setError('Passwords do not match.');
 
     setBusy(true);
@@ -141,7 +200,7 @@ export default function Register() {
       if (!data?.token) throw new Error('Registration did not return a session token.');
       tokenStore.set(data.token);
       if (data.user) setUser(data.user);
-      navigate('/', { replace: true });
+      navigate(target, { replace: true });
     } catch (e2) {
       setError(errMsg(e2, 'Could not create your account.'));
     } finally {
@@ -149,235 +208,164 @@ export default function Register() {
     }
   }
 
+  const subtitle =
+    step === 1
+      ? 'Start with your email. We will send a code to verify it.'
+      : step === 2
+        ? 'Enter the code to confirm your email.'
+        : 'Pick a username and a strong password.';
+
   return (
-    <div className="min-h-full flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="text-3xl font-black tracking-tight bg-gradient-to-br from-[var(--color-brand)] to-[var(--color-brand-2)] bg-clip-text text-transparent">
-            Vybe
-          </div>
-          <p className="text-sm text-[var(--color-muted)] mt-2">Create your account</p>
-        </div>
+    <AuthShell
+      title="Create your account"
+      subtitle={subtitle}
+      headline="Train together."
+      tagline="Workouts, meals, gyms and friends in one place. Set up takes about a minute."
+      footer={<LegalLine />}
+    >
+      <Steps step={step} />
 
-        <Card className="p-6">
-          {/* progress */}
-          <div className="flex items-center gap-2 mb-5">
-            {([1, 2, 3] as Step[]).map((n) => (
-              <div key={n} className="flex-1">
-                <div
-                  className={`h-1 rounded-full ${
-                    n <= step
-                      ? 'bg-gradient-to-r from-[var(--color-brand)] to-[var(--color-brand-2)]'
-                      : 'bg-[var(--color-line)]'
-                  }`}
-                />
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-[var(--color-muted)] mb-4">
-            Step {step} of 3 — {STEP_LABELS[step]}
-          </p>
+      <div className="mt-6 space-y-4">
+        {info ? <Callout tone="brand">{info}</Callout> : null}
+        {error ? <Callout tone="danger">{error}</Callout> : null}
 
-          {info && (
-            <div
-              role="status"
-              className="mb-4 rounded-xl border border-[var(--color-brand)]/40 bg-[var(--color-brand)]/10 px-3 py-2 text-sm"
-            >
-              {info}
-            </div>
-          )}
-          {error && (
-            <p role="alert" className="mb-4 text-sm text-red-400">
-              {error}
-            </p>
-          )}
+        {step === 1 && (
+          <form onSubmit={sendOtp} className="space-y-4" noValidate>
+            <Input
+              id="reg-email"
+              label="Email"
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              autoCapitalize="none"
+              placeholder="you@example.com"
+              hint="We will email you a 6-digit verification code."
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={busy}
+              autoFocus
+            />
+            <Button type="submit" variant="primary" size="lg" block loading={busy}>
+              Send code
+            </Button>
+          </form>
+        )}
 
-          {step === 1 && (
-            <form onSubmit={sendOtp} className="space-y-4" noValidate>
-              <div>
-                <label htmlFor="reg-email" className="block text-xs font-semibold mb-1.5">
-                  Email
-                </label>
-                <Input
-                  id="reg-email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={busy}
-                />
-                <p className="mt-1.5 text-xs text-[var(--color-muted)]">
-                  We&apos;ll email you a 6-digit verification code.
-                </p>
-              </div>
-              <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={busy}>
-                Send code
-              </Button>
-            </form>
-          )}
-
-          {step === 2 && (
-            <form onSubmit={verifyOtp} className="space-y-4" noValidate>
-              <div>
-                <label htmlFor="reg-otp" className="block text-xs font-semibold mb-1.5">
-                  Verification code
-                </label>
-                <Input
-                  id="reg-otp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  placeholder="123456"
-                  className="tracking-[0.5em] text-center text-lg"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  disabled={busy}
-                />
-              </div>
+        {step === 2 && (
+          <form onSubmit={verifyOtp} className="space-y-4" noValidate>
+            <Input
+              id="reg-otp"
+              label="Verification code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]*"
+              maxLength={6}
+              placeholder="000000"
+              className="tabular text-center text-xl tracking-[0.4em]"
+              hint={`Sent to ${trimmedEmail}. Codes expire after a few minutes.`}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              disabled={busy}
+              autoFocus
+            />
+            <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={otp.length !== 6}>
+              Verify email
+            </Button>
+            <div className="flex items-center justify-between gap-2">
               <Button
-                type="submit"
-                variant="primary"
-                className="w-full"
-                loading={busy}
-                disabled={busy || otp.length !== 6}
-              >
-                Verify email
-              </Button>
-              <div className="flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  className="text-[var(--color-muted)] hover:text-white"
-                  onClick={() => {
-                    setStep(1);
-                    setOtp('');
-                    setError(null);
-                    setInfo(null);
-                  }}
-                  disabled={busy}
-                >
-                  Change email
-                </button>
-                <button
-                  type="button"
-                  className="text-[var(--color-brand-2)] disabled:text-[var(--color-muted)]"
-                  onClick={() => sendOtp()}
-                  disabled={busy || resendIn > 0}
-                >
-                  {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
-                </button>
-              </div>
-            </form>
-          )}
-
-          {step === 3 && (
-            <form onSubmit={register} className="space-y-4" noValidate>
-              <div>
-                <label htmlFor="reg-name" className="block text-xs font-semibold mb-1.5">
-                  Full name
-                </label>
-                <Input
-                  id="reg-name"
-                  autoComplete="name"
-                  placeholder="Alex Rivera"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="reg-username" className="block text-xs font-semibold mb-1.5">
-                  Username
-                </label>
-                <Input
-                  id="reg-username"
-                  autoComplete="username"
-                  placeholder="alex.rivera"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, ''))}
-                  disabled={busy}
-                />
-                <p className="mt-1.5 text-xs text-[var(--color-muted)]">
-                  3–30 characters. Letters, numbers, periods and underscores only.
-                </p>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label htmlFor="reg-password" className="block text-xs font-semibold">
-                    Password
-                  </label>
-                  <button
-                    type="button"
-                    className="text-xs text-[var(--color-muted)] hover:text-white"
-                    onClick={() => setShowPassword((v) => !v)}
-                  >
-                    {showPassword ? 'Hide' : 'Show'}
-                  </button>
-                </div>
-                <Input
-                  id="reg-password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  placeholder="Create a strong password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value.slice(0, 128))}
-                  disabled={busy}
-                />
-                <ul className="mt-2 space-y-1">
-                  {rules.map((rule) => (
-                    <li
-                      key={rule.id}
-                      className={`flex items-center gap-2 text-xs ${
-                        rule.ok ? 'text-emerald-400' : 'text-[var(--color-muted)]'
-                      }`}
-                    >
-                      {rule.ok ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
-                      {rule.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div>
-                <label htmlFor="reg-confirm" className="block text-xs font-semibold mb-1.5">
-                  Confirm password
-                </label>
-                <Input
-                  id="reg-confirm"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  placeholder="Repeat your password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value.slice(0, 128))}
-                  disabled={busy}
-                />
-                {confirm.length > 0 && confirm !== password && (
-                  <p className="mt-1.5 text-xs text-red-400">Passwords do not match.</p>
-                )}
-              </div>
-
-              <Button
-                type="submit"
-                variant="primary"
-                className="w-full"
-                loading={busy}
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setStep(1);
+                  setOtp('');
+                  setError(null);
+                  setInfo(null);
+                }}
                 disabled={busy}
               >
-                Create account
+                Change email
               </Button>
-            </form>
-          )}
+              <Button variant="link" size="sm" onClick={() => void sendOtp()} disabled={busy || resendIn > 0} className="tabular">
+                {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+              </Button>
+            </div>
+          </form>
+        )}
 
-          <div className="mt-5 text-center text-sm text-[var(--color-muted)]">
-            Already have an account?{' '}
-            <Link to="/login" className="font-semibold text-[var(--color-brand-2)]">
-              Sign in
-            </Link>
-          </div>
-        </Card>
+        {step === 3 && (
+          <form onSubmit={register} className="space-y-4" noValidate>
+            <Input
+              id="reg-name"
+              label="Full name"
+              autoComplete="name"
+              placeholder="Alex Rivera"
+              maxLength={100}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              disabled={busy}
+              autoFocus
+            />
+
+            <Input
+              id="reg-username"
+              label="Username"
+              autoComplete="username"
+              autoCapitalize="none"
+              placeholder="alex.rivera"
+              leading={<span className="text-sm font-semibold">@</span>}
+              hint={uErr ? undefined : '3–30 characters. Letters, numbers, periods and underscores.'}
+              error={uErr ?? undefined}
+              value={username}
+              onChange={(e) => setUsername(e.target.value.replace(/\s/g, ''))}
+              disabled={busy}
+            />
+
+            <div>
+              <PasswordField
+                id="reg-password"
+                label="Password"
+                autoComplete="new-password"
+                placeholder="Create a strong password"
+                value={password}
+                visible={showPassword}
+                onVisibleChange={setShowPassword}
+                onChange={(e) => setPassword(e.target.value.slice(0, 128))}
+                disabled={busy}
+                aria-describedby="reg-password-rules"
+              />
+              <PasswordRules rules={rules} id="reg-password-rules" />
+            </div>
+
+            <PasswordField
+              id="reg-confirm"
+              label="Confirm password"
+              autoComplete="new-password"
+              placeholder="Repeat your password"
+              value={confirm}
+              visible={showPassword}
+              onVisibleChange={setShowPassword}
+              error={confirm.length > 0 && confirm !== password ? 'Passwords do not match.' : undefined}
+              onChange={(e) => setConfirm(e.target.value.slice(0, 128))}
+              disabled={busy}
+            />
+
+            <Button type="submit" variant="primary" size="lg" block loading={busy}>
+              Create account
+            </Button>
+          </form>
+        )}
       </div>
-    </div>
+
+      <p className="mt-6 text-center text-sm text-text-2">
+        Already have an account?{' '}
+        <Link
+          to="/login"
+          state={location.state}
+          className="inline-flex min-h-11 items-center font-semibold text-brand-text underline-offset-2 hover:underline"
+        >
+          Sign in
+        </Link>
+      </p>
+    </AuthShell>
   );
 }

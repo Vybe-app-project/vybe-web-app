@@ -1,0 +1,277 @@
+/* ------------------------------------------------------------------ *
+ * Vybe staff console — the "ops" layer.
+ *
+ * The admin keeps a deliberately different register from the consumer app
+ * (audit H11): cooler graphite surfaces, a quiet amber accent in place of
+ * mint, denser tables, mono reserved for IDs, hashes and route keys. It is
+ * built on the same primitives and the same semantic token NAMES as
+ * src/styles.css, so every shared component (Button, Card, Modal, Toast,
+ * Badge, StatTile, chartTheme…) re-themes itself inside this scope with no
+ * admin-specific props.
+ *
+ * Scope: `.admin-console` is toggled on <html> while an admin route is
+ * mounted (see useAdminScope in pages/admin/AdminLayout.tsx) so portalled
+ * layers — dialogs, menus, toasts — inherit the same tokens.
+ *
+ * Contrast (WCAG AA, computed):
+ *   dark  text-2 #a3afc0 on surface-1 #111721  8.1:1 · text-3 #7a879b 4.9:1
+ *         brand-text #f2cf7f on surface-1 11.9:1 · on-brand on brand 9.2:1
+ *         control-border #66768c on surface-2 3.5:1
+ *   light text-2 #475569 on white 7.6:1 · text-3 #64748b 4.8:1
+ *         brand-text #6b4c05 on white 7.8:1 · on-brand on brand 6.2:1
+ *         control-border #6b7a8f on surface-2 3.8:1
+ * ------------------------------------------------------------------ */
+
+.admin-console {
+  /* ops primitives */
+  --ops-amber-200: #f6dc9a;
+  --ops-amber-300: #f2cf7f;
+  --ops-amber-500: #e0a92e;
+  --ops-amber-600: #c48f16;
+  --ops-amber-700: #9a6e0b;
+  --ops-amber-800: #6b4c05;
+  --ops-graphite-50: #f3f5f8;
+  --ops-graphite-100: #eaeef3;
+  --ops-graphite-200: #dfe5ec;
+  --ops-graphite-300: #b6c0cc;
+  --ops-graphite-500: #64748b;
+  --ops-graphite-600: #475569;
+  --ops-graphite-900: #0f172a;
+  --ops-graphite-950: #0b0f16;
+
+  /* semantic — light */
+  color-scheme: light;
+  accent-color: var(--ops-amber-600);
+  --bg: var(--ops-graphite-50);
+  --surface-1: #ffffff;
+  --surface-2: var(--ops-graphite-100);
+  --surface-3: var(--ops-graphite-200);
+  --line: #dde3ea;
+  --line-strong: var(--ops-graphite-300);
+  --control-border: #6b7a8f;
+  --text-1: var(--ops-graphite-900);
+  --text-2: var(--ops-graphite-600);
+  --text-3: var(--ops-graphite-500);
+  --brand: var(--ops-amber-600);
+  --brand-hover: var(--ops-amber-700);
+  --on-brand: var(--ops-graphite-900);
+  --brand-soft: #fbeccb;
+  --brand-text: var(--ops-amber-800);
+  --warning: var(--ops-amber-600);
+  --warning-soft: #fbeccb;
+  --warning-text: var(--ops-amber-800);
+  --focus: var(--ops-amber-600);
+  --scrim: rgba(15, 23, 42, 0.55);
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --shadow-2: 0 8px 24px -12px rgba(15, 23, 42, 0.18);
+  --shadow-3: 0 24px 48px -16px rgba(15, 23, 42, 0.24);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  /* the console has no bottom nav; shared utilities that pad for it collapse */
+  --nav-h: 0px;
+}
+
+.dark .admin-console,
+.dark.admin-console {
+  color-scheme: dark;
+  accent-color: var(--ops-amber-500);
+  --bg: var(--ops-graphite-950);
+  --surface-1: #111721;
+  --surface-2: #171f2b;
+  --surface-3: #202a38;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --control-border: #66768c;
+  --text-1: #e8edf4;
+  --text-2: #a3afc0;
+  --text-3: #7a879b;
+  --brand: var(--ops-amber-500);
+  --brand-hover: var(--ops-amber-300);
+  --on-brand: var(--ops-graphite-950);
+  --brand-soft: rgba(224, 169, 46, 0.16);
+  --brand-text: var(--ops-amber-300);
+  --warning: var(--ops-amber-500);
+  --warning-soft: rgba(224, 169, 46, 0.16);
+  --warning-text: var(--ops-amber-300);
+  --focus: var(--ops-amber-300);
+  --scrim: rgba(0, 0, 0, 0.65);
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 8px 24px -12px rgba(0, 0, 0, 0.7);
+  --shadow-3: 0 24px 48px -16px rgba(0, 0, 0, 0.8);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a3afc0' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* ------------------------------------------------------------------ shell */
+
+/* Faint blueprint grid behind the sign-in card: the one decorative device. */
+.admin-blueprint {
+  background-image:
+    linear-gradient(var(--line-strong) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-strong) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%);
+  opacity: 0.35;
+}
+
+/*
+ * The single permitted eyebrow (audit M1): the console's own signature under
+ * the mark. Mono, tracked, 12 px floor. Nothing else in the admin uses this.
+ */
+.admin-signature {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: max(12px, var(--text-2xs));
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Mono is for machine strings only: IDs, hashes, route keys, action codes. */
+.admin-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.25rem;
+  font-variant-numeric: tabular-nums lining-nums;
+  overflow-wrap: anywhere;
+}
+
+.admin-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-2);
+  transition: background-color var(--duration-1) var(--ease-out), color var(--duration-1) var(--ease-out);
+}
+.admin-nav-link:hover { background: var(--surface-2); color: var(--text-1); }
+.admin-nav-link[aria-current='page'] {
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+
+/* ------------------------------------------------------------------ data tables */
+
+.admin-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+  font-size: var(--text-sm);
+  line-height: 1.25rem;
+}
+.admin-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  font-size: max(12px, var(--text-2xs)); /* 12 px floor regardless of root size */
+  line-height: 1rem;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.admin-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  color: var(--text-1);
+}
+.admin-table tbody tr:last-child td { border-bottom: 0; }
+.admin-table tbody tr { transition: background-color var(--duration-1) var(--ease-out); }
+.admin-table tbody tr:hover td { background: color-mix(in oklab, var(--surface-2) 60%, transparent); }
+.admin-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Rows dim while a refetch is in flight so stale data is legible but obvious. */
+.admin-fetching {
+  opacity: 0.6;
+  transition: opacity var(--duration-2) var(--ease-out);
+}
+
+/* Key/value tile used in detail dialogs (audit entries, admin records). */
+.admin-kv {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.admin-kv dt { font-size: max(12px, var(--text-2xs)); line-height: 1rem; font-weight: 600; color: var(--text-2); }
+.admin-kv dd { margin: 4px 0 0; font-size: var(--text-sm); color: var(--text-1); overflow-wrap: anywhere; }
+
+.admin-pre {
+  max-height: 16rem;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Selectable option card (moderation actions). Colour by tone via data-tone. */
+.admin-option {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  transition: border-color var(--duration-1) var(--ease-out), background-color var(--duration-1) var(--ease-out);
+}
+.admin-option:hover { border-color: var(--line-strong); }
+.admin-option[aria-pressed='true'] { border-color: var(--brand); background: var(--brand-soft); }
+.admin-option[aria-pressed='true'][data-tone='danger'] { border-color: var(--danger); background: var(--danger-soft); }
+
+/* Health pill: neutral / ok / bad from data-state. */
+.admin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.admin-status[data-state='ok'] { border-color: transparent; background: var(--success-soft); color: var(--brand-text); }
+.dark .admin-status[data-state='ok'], .dark.admin-console .admin-status[data-state='ok'] { color: var(--success); }
+.admin-status[data-state='bad'] { border-color: transparent; background: var(--danger-soft); color: var(--danger); }
+
+/* Capability matrix cell (AdminSystem). */
+.admin-cap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.admin-cap[data-on='true'] .admin-cap-dot { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+.admin-cap[data-on='false'] .admin-cap-dot { background: var(--text-3); }
+.admin-cap-dot { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-nav-link, .admin-table tbody tr, .admin-fetching, .admin-option { transition: none; }
+}

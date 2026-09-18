@@ -1,17 +1,33 @@
+import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, errMsg, mediaUrl } from '../lib/api';
-import { compactNumber, timeAgo, type Post } from '../lib/hooks';
-import { Button, Card, EmptyState, ErrorState, Skeleton } from './ui';
-import PostCard, { PostCardSkeleton } from './PostCard';
+import { compactNumber as compactStat, timeAgo, type Post } from '../lib/hooks';
+import {
+  Badge,
+  Card,
+  CardMedia,
+  EmptyState,
+  ErrorState,
+  Skeleton,
+  SkeletonCard,
+  cx,
+  humanize,
+} from './ui';
+import { Dumbbell, Flame, Heart, Plate, Timer, Utensils, Image as ImageIcon } from './icons';
+import PostCard from './PostCard';
 
 export type ProfileTabKey = 'posts' | 'workouts' | 'meals';
 
-export const PROFILE_TABS: { key: ProfileTabKey; label: string }[] = [
-  { key: 'posts', label: 'Posts' },
-  { key: 'workouts', label: 'Workouts' },
-  { key: 'meals', label: 'Meals' },
+export const PROFILE_TABS: { key: ProfileTabKey; label: string; icon: ReactNode }[] = [
+  { key: 'posts', label: 'Posts', icon: <ImageIcon size={18} /> },
+  { key: 'workouts', label: 'Workouts', icon: <Dumbbell size={18} /> },
+  { key: 'meals', label: 'Meals', icon: <Utensils size={18} /> },
 ];
 
+export const isProfileTab = (v: string | null | undefined): v is ProfileTabKey =>
+  v === 'posts' || v === 'workouts' || v === 'meals';
+
+/** Shape of `GET /workouts/my` items (SocialWorkout). */
 type WorkoutItem = {
   _id: string;
   title?: string;
@@ -21,25 +37,49 @@ type WorkoutItem = {
   caloriesBurned?: number;
   createdAt?: string;
   likes?: string[];
-  coverImage?: string;
+  image?: { uri?: string } | string | null;
+  exercises?: unknown[];
 };
 
+/** Shape of `GET /meals/recent` and `GET /meals` items (Meal model). */
 type MealItem = {
   _id: string;
-  name?: string;
-  title?: string;
-  image?: string;
-  calories?: number;
-  protein?: number;
-  carbs?: number;
-  fat?: number;
+  food_name?: string;
+  image_url?: string;
+  meal_type?: string;
+  serving_size?: string;
+  nutrition?: { calories?: number; protein?: number; carbs?: number; fat?: number };
+  timestamp?: string;
   createdAt?: string;
   publishedAt?: string;
+  user?: { _id: string } | string;
 };
 
-/* ------------------------------------------------------------------ */
+type PanelProps = {
+  userId: string;
+  /** Viewing your own profile: empty states offer in-app actions. */
+  isOwn?: boolean;
+  /** First name used in empty-state copy for other people's profiles. */
+  name?: string;
+};
 
-export function ProfilePosts({ userId }: { userId: string }) {
+const firstName = (name?: string) => (name || 'This athlete').trim().split(/\s+/)[0];
+
+/** Inline metric: icon + value, separated by spacing rather than middle dots. */
+function Metric({ icon, children, className }: { icon: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <span className={cx('inline-flex items-center gap-1.5 text-xs font-medium text-text-2', className)}>
+      <span className="text-text-3" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="tabular">{children}</span>
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ posts */
+
+export function ProfilePosts({ userId, isOwn = false, name }: PanelProps) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['user-posts', userId],
     enabled: !!userId,
@@ -53,28 +93,37 @@ export function ProfilePosts({ userId }: { userId: string }) {
 
   if (isLoading)
     return (
-      <div className="space-y-4">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <PostCardSkeleton key={i} />
-        ))}
+      <div className="space-y-4" aria-busy="true" aria-label="Loading posts">
+        <SkeletonCard />
+        <SkeletonCard media={false} />
       </div>
     );
 
   if (isError)
     return (
       <ErrorState
+        error={error}
         title="Posts unavailable"
-        message={errMsg(error, 'This profile may be private, or the network failed.')}
-        action={
-          <Button variant="primary" onClick={() => refetch()}>
-            Try again
-          </Button>
-        }
+        message={errMsg(error, 'This profile may be private, or the network dropped.')}
+        onRetry={() => refetch()}
       />
     );
 
   if (!data?.length)
-    return <EmptyState title="No posts yet" message="Posts shared publicly will show up here." />;
+    return isOwn ? (
+      <EmptyState
+        title="No posts yet"
+        message="Share a session, a PR or a meal and it shows up here for people who follow you."
+        action={{ label: 'Create a post', to: '/?compose=1' }}
+      />
+    ) : (
+      <EmptyState
+        variant="no-results"
+        icon={<ImageIcon size={26} />}
+        title="No posts yet"
+        message={`${firstName(name)} hasn’t shared anything yet.`}
+      />
+    );
 
   return (
     <div className="space-y-4">
@@ -85,11 +134,78 @@ export function ProfilePosts({ userId }: { userId: string }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ workouts */
 
-export function ProfileWorkouts({ userId, isOwn }: { userId: string; isOwn: boolean }) {
+function workoutImage(w: WorkoutItem): string {
+  if (!w.image) return '';
+  if (typeof w.image === 'string') return w.image;
+  return w.image.uri || '';
+}
+
+function WorkoutTile({ workout }: { workout: WorkoutItem }) {
+  const img = workoutImage(workout);
+  const title = workout.title || 'Workout';
+  const exerciseCount = Array.isArray(workout.exercises) ? workout.exercises.length : 0;
+  return (
+    <Card to={`/workouts/${workout._id}`} linkLabel={`Open ${title}`} padded={false} className="flex gap-3 p-3">
+      <CardMedia className="h-16 w-16 shrink-0">
+        {img ? (
+          <img src={mediaUrl(img)} alt="" loading="lazy" className="h-full w-full object-cover" />
+        ) : (
+          <span className="grid h-full w-full place-items-center text-text-3">
+            <Dumbbell size={22} />
+          </span>
+        )}
+      </CardMedia>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-md font-semibold text-text-1">{title}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {workout.category ? <Badge tone="brand">{humanize(workout.category)}</Badge> : null}
+          {workout.level ? <Badge>{humanize(workout.level)}</Badge> : null}
+          {!workout.category && !workout.level ? <Badge>General</Badge> : null}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+          {workout.duration ? <Metric icon={<Timer size={14} />}>{workout.duration} min</Metric> : null}
+          {workout.caloriesBurned ? (
+            <Metric icon={<Flame size={14} />}>{compactStat(workout.caloriesBurned)} kcal</Metric>
+          ) : null}
+          {exerciseCount ? (
+            <Metric icon={<Dumbbell size={14} />}>
+              {exerciseCount} {exerciseCount === 1 ? 'exercise' : 'exercises'}
+            </Metric>
+          ) : null}
+          {workout.likes?.length ? <Metric icon={<Heart size={14} />}>{compactStat(workout.likes.length)}</Metric> : null}
+          {workout.createdAt ? (
+            <time dateTime={workout.createdAt} className="ml-auto text-xs text-text-3">
+              {timeAgo(workout.createdAt)}
+            </time>
+          ) : null}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function TileSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" aria-busy="true">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="card flex gap-3 p-3">
+          <Skeleton className="h-16 w-16 shrink-0 rounded-md" />
+          <div className="flex-1 space-y-2 py-1">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-3 w-1/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ProfileWorkouts({ userId, isOwn = false, name }: PanelProps) {
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['user-workouts', userId],
+    queryKey: ['user-workouts', userId, isOwn],
     enabled: !!userId,
     queryFn: async () => {
       const { data } = await api.get('/workouts/my', {
@@ -99,154 +215,151 @@ export function ProfileWorkouts({ userId, isOwn }: { userId: string; isOwn: bool
     },
   });
 
-  if (isLoading)
-    return (
-      <div className="grid gap-3 sm:grid-cols-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-28 w-full rounded-2xl" />
-        ))}
-      </div>
-    );
+  if (isLoading) return <TileSkeleton />;
 
   if (isError)
     return (
       <ErrorState
+        error={error}
         title="Workouts unavailable"
-        message={errMsg(error, 'Please try again in a moment.')}
-        action={
-          <Button variant="primary" onClick={() => refetch()}>
-            Try again
-          </Button>
-        }
+        message={errMsg(error, 'The workout list did not load.')}
+        onRetry={() => refetch()}
       />
     );
 
   if (!data?.length)
-    return (
+    return isOwn ? (
       <EmptyState
         title="No workouts yet"
-        message={
-          isOwn
-            ? 'Log a workout in the Vybe app and it will appear here.'
-            : 'This athlete has not shared any workouts.'
-        }
+        message="Build your first workout, or log a session you just finished and it lands here."
+        action={{ label: 'New workout', to: '/workouts?log=1', icon: <Dumbbell size={18} /> }}
+        secondaryAction={{ label: 'Browse the library', to: '/workouts' }}
+      />
+    ) : (
+      <EmptyState
+        variant="no-results"
+        icon={<Dumbbell size={26} />}
+        title="No workouts yet"
+        message={`${firstName(name)} hasn’t shared any workouts.`}
       />
     );
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {data.map((w) => (
-        <Card key={w._id} className="p-4">
-          <div className="flex items-start gap-3">
-            {w.coverImage && (
-              <img
-                src={mediaUrl(w.coverImage)}
-                alt=""
-                className="h-14 w-14 shrink-0 rounded-xl object-cover"
-              />
-            )}
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{w.title || 'Workout'}</p>
-              <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-                {[w.category, w.level].filter(Boolean).join(' · ') || 'General'}
-              </p>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">
-            {!!w.duration && <span>{w.duration} min</span>}
-            {!!w.caloriesBurned && <span>{compactNumber(w.caloriesBurned)} kcal</span>}
-            {!!w.likes?.length && <span>{compactNumber(w.likes.length)} likes</span>}
-            {w.createdAt && <span className="ml-auto">{timeAgo(w.createdAt)}</span>}
-          </div>
-        </Card>
+        <WorkoutTile key={w._id} workout={w} />
       ))}
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ meals */
 
-export function ProfileMeals({ userId, isOwn }: { userId: string; isOwn: boolean }) {
+function MealTile({ meal }: { meal: MealItem }) {
+  const title = meal.food_name || 'Meal';
+  const n = meal.nutrition || {};
+  const when = meal.publishedAt || meal.timestamp || meal.createdAt;
+  const hasNutrition = [n.calories, n.protein, n.carbs, n.fat].some((v) => typeof v === 'number' && v > 0);
+  return (
+    <Card to={`/meals/${meal._id}`} linkLabel={`Open ${title}`} padded={false} className="flex gap-3 p-3">
+      <CardMedia className="h-16 w-16 shrink-0">
+        {meal.image_url ? (
+          <img src={mediaUrl(meal.image_url)} alt="" loading="lazy" className="h-full w-full object-cover" />
+        ) : (
+          <span className="grid h-full w-full place-items-center text-text-3">
+            <Plate size={22} />
+          </span>
+        )}
+      </CardMedia>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-2">
+          <p className="truncate text-md font-semibold text-text-1">{title}</p>
+          {meal.meal_type ? <Badge className="shrink-0">{humanize(meal.meal_type)}</Badge> : null}
+        </div>
+        {hasNutrition ? (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+            {n.calories ? (
+              <Metric icon={<span className="block h-2 w-2 rounded-full bg-viz-kcal" />}>{Math.round(n.calories)} kcal</Metric>
+            ) : null}
+            {n.protein ? (
+              <Metric icon={<span className="block h-2 w-2 rounded-full bg-viz-protein" />}>{Math.round(n.protein)} g protein</Metric>
+            ) : null}
+            {n.carbs ? (
+              <Metric icon={<span className="block h-2 w-2 rounded-full bg-viz-carbs" />}>{Math.round(n.carbs)} g carbs</Metric>
+            ) : null}
+            {n.fat ? (
+              <Metric icon={<span className="block h-2 w-2 rounded-full bg-viz-fat" />}>{Math.round(n.fat)} g fat</Metric>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-text-3">Nutrition not recorded</p>
+        )}
+        <div className="mt-1.5 flex items-center gap-x-3 text-xs text-text-3">
+          {meal.serving_size ? <span className="truncate">{meal.serving_size}</span> : null}
+          {when ? (
+            <time dateTime={when} className="ml-auto shrink-0">
+              {timeAgo(when)}
+            </time>
+          ) : null}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+const ownerId = (m: MealItem) => (typeof m.user === 'string' ? m.user : m.user?._id) || '';
+
+export function ProfileMeals({ userId, isOwn = false, name }: PanelProps) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['user-meals', userId, isOwn],
     enabled: !!userId,
     queryFn: async () => {
-      // Own meals come from the personal log; public meals from the shared list.
-      const url = isOwn ? '/meals/recent' : '/meals';
-      const { data } = await api.get(url, { params: { page: 1, limit: 20 } });
-      const list = data.meals || data.data || [];
-      return (Array.isArray(list) ? list : []) as MealItem[];
+      // Own meals come from the personal log (a bare array); other people's
+      // public meals come from the shared feed envelope and are filtered here.
+      if (isOwn) {
+        const { data } = await api.get('/meals/recent');
+        const list = Array.isArray(data) ? data : data?.meals || data?.data || [];
+        return list as MealItem[];
+      }
+      const { data } = await api.get('/meals', { params: { page: 1, limit: 50 } });
+      const list: MealItem[] = Array.isArray(data) ? data : data?.meals || data?.data || [];
+      return list.filter((m) => String(ownerId(m)) === String(userId));
     },
   });
 
-  if (isLoading)
-    return (
-      <div className="grid gap-3 sm:grid-cols-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-24 w-full rounded-2xl" />
-        ))}
-      </div>
-    );
+  if (isLoading) return <TileSkeleton />;
 
   if (isError)
     return (
       <ErrorState
+        error={error}
         title="Meals unavailable"
-        message={errMsg(error, 'Please try again in a moment.')}
-        action={
-          <Button variant="primary" onClick={() => refetch()}>
-            Try again
-          </Button>
-        }
+        message={errMsg(error, 'The meal list did not load.')}
+        onRetry={() => refetch()}
       />
     );
 
-  const meals = isOwn
-    ? data || []
-    : (data || []).filter((m: any) => String(m.user?._id || m.user) === String(userId));
-
-  if (!meals.length)
-    return (
+  if (!data?.length)
+    return isOwn ? (
       <EmptyState
         title="No meals yet"
-        message={
-          isOwn
-            ? 'Log a meal in the Vybe app to build your nutrition history.'
-            : 'This athlete has not shared any meals.'
-        }
+        message="Log what you eat and your nutrition history builds up here, macros included."
+        action={{ label: 'Log a meal', to: '/meals?log=1', icon: <Utensils size={18} /> }}
+        secondaryAction={{ label: 'Meal templates', to: '/meals/templates' }}
+      />
+    ) : (
+      <EmptyState
+        variant="no-results"
+        icon={<Plate size={26} />}
+        title="No meals yet"
+        message={`${firstName(name)} hasn’t shared any meals.`}
       />
     );
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      {meals.map((m) => (
-        <Card key={m._id} className="flex items-center gap-3 p-3">
-          {m.image ? (
-            <img
-              src={mediaUrl(m.image)}
-              alt=""
-              className="h-14 w-14 shrink-0 rounded-xl object-cover"
-            />
-          ) : (
-            <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-[var(--color-surface-2)] text-lg">
-              🍽
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{m.name || m.title || 'Meal'}</p>
-            <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-              {[
-                m.calories != null && `${Math.round(m.calories)} kcal`,
-                m.protein != null && `${Math.round(m.protein)}g protein`,
-              ]
-                .filter(Boolean)
-                .join(' · ') || 'Nutrition not recorded'}
-            </p>
-            <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-              {timeAgo(m.publishedAt || m.createdAt)}
-            </p>
-          </div>
-        </Card>
+      {data.map((m) => (
+        <MealTile key={m._id} meal={m} />
       ))}
     </div>
   );

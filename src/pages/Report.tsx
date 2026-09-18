@@ -1,35 +1,34 @@
 import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
-import { Button, Modal, Spinner, Textarea, useToast } from './ui';
+import { Button, Modal, RadioGroup, Textarea, humanize, useToast } from './ui';
+import { Shield } from './icons';
 
-export const REPORT_TARGET_TYPES = [
-  'post',
-  'meal',
-  'workout',
-  'workout_plan',
-  'user',
-] as const;
+export const REPORT_TARGET_TYPES = ['post', 'meal', 'workout', 'workout_plan', 'user'] as const;
 
 export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number];
 
-export const REPORT_REASONS: { value: string; label: string }[] = [
-  { value: 'spam', label: 'Spam or scam' },
-  { value: 'harassment', label: 'Harassment or bullying' },
-  { value: 'hate_speech', label: 'Hate speech' },
+export const REPORT_REASONS: { value: string; label: string; description?: string }[] = [
+  { value: 'spam', label: 'Spam or scam', description: 'Unwanted promotion, fake offers or repetitive posting.' },
+  { value: 'harassment', label: 'Harassment or bullying', description: 'Targeting someone to intimidate or degrade them.' },
+  { value: 'hate_speech', label: 'Hate speech', description: 'Attacks on people for who they are.' },
   { value: 'violence', label: 'Violence or threats' },
   { value: 'sexual_content', label: 'Sexual content' },
-  { value: 'misinformation', label: 'Misinformation' },
-  { value: 'dangerous_activity', label: 'Dangerous activity' },
+  { value: 'misinformation', label: 'Misinformation', description: 'False health, nutrition or training claims.' },
+  { value: 'dangerous_activity', label: 'Dangerous activity', description: 'Encourages training or dieting that could cause harm.' },
   { value: 'copyright', label: 'Copyright infringement' },
   { value: 'impersonation', label: 'Impersonation' },
   { value: 'inappropriate_content', label: 'Inappropriate content' },
-  { value: 'other', label: 'Something else' },
+  { value: 'other', label: 'Something else', description: 'Tell us more below.' },
 ];
+
+const DETAIL_MAX = 1000;
+const DETAIL_ID = 'report-detail';
 
 /**
  * Reusable reporting dialog. Mount it anywhere content can be flagged and
- * control it with `open` / `onClose`.
+ * control it with `open` / `onClose`. Renders as a sheet on phones and a
+ * dialog on desktop.
  */
 export function ReportModal({
   open,
@@ -49,11 +48,13 @@ export function ReportModal({
   const toast = useToast();
   const [reason, setReason] = useState(REPORT_REASONS[0].value);
   const [detail, setDetail] = useState('');
+  const [detailError, setDetailError] = useState<string | undefined>();
 
   useEffect(() => {
     if (!open) {
       setReason(REPORT_REASONS[0].value);
       setDetail('');
+      setDetailError(undefined);
     }
   }, [open]);
 
@@ -65,54 +66,72 @@ export function ReportModal({
       return data;
     },
     onSuccess: () => {
-      toast.success('Report submitted. Thank you for keeping Vybe safe.');
+      toast.success('Report sent. Thanks for keeping Vybe safe.');
       onReported?.();
       onClose();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not submit the report')),
+    onError: (e) => toast.error(errMsg(e, 'Could not send the report. Try again in a moment.')),
   });
 
+  const what = (targetLabel || humanize(targetType)).toLowerCase();
+  const needsDetail = reason === 'other';
+
+  function send() {
+    if (needsDetail && detail.trim().length < 10) {
+      setDetailError('Add a few words so we know what to look at.');
+      document.getElementById(DETAIL_ID)?.focus();
+      return;
+    }
+    setDetailError(undefined);
+    submit.mutate();
+  }
+
   return (
-    <Modal open={open} onClose={onClose} title={`Report ${targetLabel || targetType}`}>
-      <div className="space-y-4">
-        <p className="text-sm text-[var(--color-muted)]">
-          Tell us what is wrong. Our moderation team reviews every report.
-        </p>
-
-        <label className="block space-y-1 text-xs text-[var(--color-muted)]">
-          Reason
-          <select
-            className="input-base"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          >
-            {REPORT_REASONS.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <Textarea
-          rows={4}
-          maxLength={1000}
-          placeholder="Add any details that will help us review this (optional)"
-          value={detail}
-          onChange={(e) => setDetail(e.target.value)}
-        />
-        <p className="text-right text-[11px] text-[var(--color-muted)]">
-          {detail.length}/1000
-        </p>
-
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="sm"
+      title={`Report ${what}`}
+      description="Tell us what is wrong. Our moderation team reviews every report."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={submit.isPending}>
             Cancel
           </Button>
-          <Button disabled={submit.isPending} onClick={() => submit.mutate()}>
-            {submit.isPending ? <Spinner size={16} /> : 'Submit report'}
+          <Button variant="primary" loading={submit.isPending} onClick={send} icon={<Shield size={18} />}>
+            Send report
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <RadioGroup
+          label="Reason"
+          name="report-reason"
+          value={reason}
+          onChange={(v) => {
+            setReason(v);
+            if (detailError) setDetailError(undefined);
+          }}
+          options={REPORT_REASONS.map((r) => ({ value: r.value, label: r.label, description: r.description }))}
+        />
+
+        <Textarea
+          id={DETAIL_ID}
+          label={needsDetail ? 'Details' : 'Details (optional)'}
+          rows={3}
+          autoGrow
+          maxRows={8}
+          maxLength={DETAIL_MAX}
+          placeholder="Anything that helps us review this faster."
+          value={detail}
+          error={detailError}
+          hint={detailError ? undefined : `${detail.length}/${DETAIL_MAX} characters`}
+          onChange={(e) => {
+            setDetail(e.target.value);
+            if (detailError) setDetailError(undefined);
+          }}
+        />
       </div>
     </Modal>
   );

@@ -25,7 +25,12 @@ import {
   EmptyState,
   ErrorState,
   Skeleton,
-  cx,
+  SkeletonTile,
+  StatGrid,
+  StatTile,
+  VIZ,
+  chartTheme,
+  formatStat,
 } from '../../components/ui';
 import {
   Users,
@@ -37,6 +42,7 @@ import {
   TrendingUp,
   BarChart as BarChartIcon,
 } from '../../components/icons';
+import { AdminPageHeader } from './AdminLayout';
 
 /* --------------------------------------------------------------- types */
 
@@ -70,27 +76,20 @@ type MoreAnalytics = {
   [k: string]: any;
 };
 
-const AXIS = { stroke: '#64748b', fontSize: 11 } as const;
-const GRID = '#1e293b';
-const PIE_COLORS = ['#7c5cff', '#22d3ee', '#f472b6', '#f59e0b', '#34d399', '#60a5fa'];
-
-const TOOLTIP_STYLE = {
-  background: '#0b0f1a',
-  border: '1px solid #1e293b',
-  borderRadius: 12,
-  fontSize: 12,
-  color: '#e2e8f0',
-} as const;
+/**
+ * Categorical set for the console, taken from the shared chart theme. The
+ * console accent is amber, so the sand (`carbs`) hue is skipped to keep the
+ * four content types distinguishable.
+ */
+const ADMIN_SERIES: string[] = [VIZ.brand, VIZ.protein, VIZ.alt, VIZ.fat];
+const seriesAt = (i: number) => ADMIN_SERIES[i % ADMIN_SERIES.length];
 
 /* ----------------------------------------------------------- utilities */
 
 const num = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : null;
 
-function fmtCount(v: number | null): string {
-  if (v === null) return '—';
-  return v.toLocaleString();
-}
+const fmtCount = (v: number | null): string => (v === null ? '—' : v.toLocaleString());
 
 /** Series come back in a few shapes across API versions; normalise defensively. */
 function toSeries(raw: unknown, valueKeys: string[]): Array<{ label: string; value: number }> {
@@ -121,39 +120,6 @@ function toSeries(raw: unknown, valueKeys: string[]): Array<{ label: string; val
 
 /* -------------------------------------------------------------- pieces */
 
-function KpiCard({
-  label,
-  value,
-  icon,
-  tone,
-  hint,
-}: {
-  label: string;
-  value: number | null;
-  icon: React.ReactNode;
-  tone: string;
-  hint?: string;
-}) {
-  return (
-    <Card className="border-slate-800 bg-slate-950/60">
-      <div className="flex items-start gap-3">
-        <div className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', tone)}>
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <p className="font-mono text-[10px] font-semibold tracking-[0.14em] text-slate-500 uppercase">
-            {label}
-          </p>
-          <p className="mt-1 text-2xl leading-none font-bold text-slate-50 tabular-nums">
-            {fmtCount(value)}
-          </p>
-          {hint ? <p className="mt-1 text-[11px] text-slate-500">{hint}</p> : null}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 function ChartCard({
   title,
   subtitle,
@@ -166,14 +132,15 @@ function ChartCard({
   empty: boolean;
 }) {
   return (
-    <Card className="border-slate-800 bg-slate-950/60">
+    <Card>
       <CardHeader title={title} subtitle={subtitle} />
       {empty ? (
         <EmptyState
-          icon={<BarChartIcon size={22} />}
-          title="No data yet"
-          message="This metric is not being reported by the API for the current window."
-          className="py-10"
+          variant="no-results"
+          icon={<BarChartIcon size={24} />}
+          title="No data for this window"
+          message="The analytics endpoint is not reporting this metric yet. It fills in as activity is recorded."
+          size="sm"
         />
       ) : (
         <div className="h-64 w-full">
@@ -186,21 +153,55 @@ function ChartCard({
   );
 }
 
+function GrowthChart({
+  data,
+  name,
+  color,
+  gradientId,
+}: {
+  data: Array<{ label: string; value: number }>;
+  name: string;
+  color: string;
+  gradientId: string;
+}) {
+  return (
+    <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={chartTheme.areaFill.start} />
+          <stop offset="100%" stopColor={color} stopOpacity={chartTheme.areaFill.end} />
+        </linearGradient>
+      </defs>
+      <CartesianGrid {...chartTheme.cartesianGrid} strokeDasharray="3 3" />
+      <XAxis dataKey="label" {...chartTheme.axisProps} />
+      <YAxis {...chartTheme.axisProps} allowDecimals={false} width={44} tickFormatter={(v: number) => formatStat(v, { compact: true })} />
+      <Tooltip {...chartTheme.tooltip} cursor={{ stroke: chartTheme.tooltip.cursor.stroke }} />
+      <Area
+        type="monotone"
+        dataKey="value"
+        name={name}
+        stroke={color}
+        strokeWidth={2}
+        fill={`url(#${gradientId})`}
+        animationDuration={chartTheme.animationDuration}
+      />
+    </AreaChart>
+  );
+}
+
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Card key={i} className="border-slate-800 bg-slate-950/60">
-            <Skeleton className="h-10 w-10 rounded-xl" />
-            <Skeleton className="mt-3 h-3 w-20" />
-            <Skeleton className="mt-2 h-6 w-16" />
-          </Card>
-        ))}
+    <div className="space-y-6" aria-busy="true" aria-label="Loading dashboard">
+      <div className="space-y-2">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-3 w-72" />
       </div>
+      <StatGrid>
+        {Array.from({ length: 8 }).map((_, i) => <SkeletonTile key={i} />)}
+      </StatGrid>
       <div className="grid gap-4 lg:grid-cols-2">
         {Array.from({ length: 2 }).map((_, i) => (
-          <Card key={i} className="border-slate-800 bg-slate-950/60">
+          <Card key={i}>
             <Skeleton className="h-4 w-40" />
             <Skeleton className="mt-4 h-56 w-full" />
           </Card>
@@ -253,9 +254,9 @@ export default function AdminDashboard() {
     const d7 = num(a.active7d);
     const d30 = num(a.active30d);
     const rows: Array<{ name: string; value: number }> = [];
-    if (d7 !== null) rows.push({ name: 'Active 7d', value: d7 });
-    if (d30 !== null) rows.push({ name: 'Active 30d', value: d30 });
-    if (total !== null) rows.push({ name: 'Total users', value: total });
+    if (d7 !== null) rows.push({ name: 'Active 7 days', value: d7 });
+    if (d30 !== null) rows.push({ name: 'Active 30 days', value: d30 });
+    if (total !== null) rows.push({ name: 'All users', value: total });
     return rows;
   }, [a]);
 
@@ -277,149 +278,63 @@ export default function AdminDashboard() {
   if (analytics.isLoading) return <DashboardSkeleton />;
   if (analytics.isError) {
     return (
-      <ErrorState
-        error={analytics.error}
-        retry={() => void analytics.refetch()}
-        title="Could not load analytics"
-      />
+      <div className="space-y-6">
+        <AdminPageHeader title="Dashboard" />
+        <Card>
+          <ErrorState
+            error={analytics.error}
+            retry={() => void analytics.refetch()}
+            title="Could not load analytics"
+          />
+        </Card>
+      </div>
     );
   }
 
+  const userCount = num(a.userCount);
+  const active30 = num(a.active30d);
+  const postCount = num(a.postCount);
   const retention =
-    num(a.userCount) && num(a.active30d)
-      ? `${Math.round(((a.active30d as number) / (a.userCount as number)) * 100)}% of all users`
-      : undefined;
+    userCount && active30 ? `${Math.round((active30 / userCount) * 100)}% of all users` : undefined;
+  const postsPerUser =
+    userCount && userCount > 0 && postCount !== null ? Math.round((postCount / userCount) * 100) / 100 : null;
+  const growthSpark = (s: Array<{ value: number }>) => (s.length > 1 ? s.slice(-12).map((d) => d.value) : undefined);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-slate-50">Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Platform-wide totals and engagement, refreshed from the analytics endpoints.
-        </p>
-      </div>
+      <AdminPageHeader
+        title="Dashboard"
+        subtitle="Platform-wide totals and engagement from the analytics endpoints. Counts refresh every minute."
+      />
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard
-          label="Users"
-          value={num(a.userCount)}
-          icon={<Users size={20} />}
-          tone="bg-violet-500/12 text-violet-300"
-        />
-        <KpiCard
-          label="Posts"
-          value={num(a.postCount)}
-          icon={<FileText size={20} />}
-          tone="bg-cyan-500/12 text-cyan-300"
-        />
-        <KpiCard
-          label="Workouts"
-          value={num(a.workoutCount)}
-          icon={<Dumbbell size={20} />}
-          tone="bg-emerald-500/12 text-emerald-300"
-        />
-        <KpiCard
-          label="Meals"
-          value={num(a.mealCount)}
-          icon={<Utensils size={20} />}
-          tone="bg-amber-500/12 text-amber-300"
-        />
-        <KpiCard
-          label="Gyms"
-          value={num(a.gymCount)}
-          icon={<MapPin size={20} />}
-          tone="bg-pink-500/12 text-pink-300"
-        />
-        <KpiCard
-          label="Active 7d"
-          value={num(a.active7d)}
-          icon={<Activity size={20} />}
-          tone="bg-sky-500/12 text-sky-300"
-        />
-        <KpiCard
-          label="Active 30d"
-          value={num(a.active30d)}
-          icon={<TrendingUp size={20} />}
-          tone="bg-indigo-500/12 text-indigo-300"
-          hint={retention}
-        />
-        <KpiCard
-          label="Posts / user"
-          value={
-            num(a.userCount) && (a.userCount as number) > 0 && num(a.postCount)
-              ? Math.round(((a.postCount as number) / (a.userCount as number)) * 100) / 100
-              : null
-          }
+      <StatGrid>
+        <StatTile label="Users" value={fmtCount(userCount)} icon={<Users size={20} />} spark={growthSpark(userGrowth)} tone="brand" />
+        <StatTile label="Posts" value={fmtCount(postCount)} icon={<FileText size={20} />} spark={growthSpark(postGrowth)} />
+        <StatTile label="Workouts" value={fmtCount(num(a.workoutCount))} icon={<Dumbbell size={20} />} />
+        <StatTile label="Meals" value={fmtCount(num(a.mealCount))} icon={<Utensils size={20} />} />
+        <StatTile label="Gyms" value={fmtCount(num(a.gymCount))} icon={<MapPin size={20} />} />
+        <StatTile label="Active, 7 days" value={fmtCount(num(a.active7d))} icon={<Activity size={20} />} />
+        <StatTile label="Active, 30 days" value={fmtCount(active30)} icon={<TrendingUp size={20} />} hint={retention} />
+        <StatTile
+          label="Posts per user"
+          value={postsPerUser === null ? '—' : formatStat(postsPerUser)}
           icon={<BarChartIcon size={20} />}
-          tone="bg-slate-500/12 text-slate-300"
         />
-      </div>
+      </StatGrid>
 
       {/* Time series */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard
-          title="User growth"
-          subtitle="New accounts over time"
-          empty={userGrowth.length === 0}
-        >
-          <AreaChart data={userGrowth} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
-            <defs>
-              <linearGradient id="gUsers" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#7c5cff" stopOpacity={0.55} />
-                <stop offset="100%" stopColor="#7c5cff" stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} />
-            <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#334155' }} />
-            <Area
-              type="monotone"
-              dataKey="value"
-              name="Users"
-              stroke="#7c5cff"
-              strokeWidth={2}
-              fill="url(#gUsers)"
-            />
-          </AreaChart>
+        <ChartCard title="User growth" subtitle="New accounts over time" empty={userGrowth.length === 0}>
+          <GrowthChart data={userGrowth} name="Users" color={seriesAt(0)} gradientId="admin-users-fill" />
         </ChartCard>
-
-        <ChartCard
-          title="Posts over time"
-          subtitle="Content published per period"
-          empty={postGrowth.length === 0}
-        >
-          <AreaChart data={postGrowth} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
-            <defs>
-              <linearGradient id="gPosts" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.55} />
-                <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} />
-            <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#334155' }} />
-            <Area
-              type="monotone"
-              dataKey="value"
-              name="Posts"
-              stroke="#22d3ee"
-              strokeWidth={2}
-              fill="url(#gPosts)"
-            />
-          </AreaChart>
+        <ChartCard title="Posts over time" subtitle="Content published per period" empty={postGrowth.length === 0}>
+          <GrowthChart data={postGrowth} name="Posts" color={seriesAt(1)} gradientId="admin-posts-fill" />
         </ChartCard>
       </div>
 
       {/* Breakdowns */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard
-          title="Content mix"
-          subtitle="Share of records by type"
-          empty={contentMix.length === 0}
-        >
+        <ChartCard title="Content mix" subtitle="Share of records by type" empty={contentMix.length === 0}>
           <PieChart>
             <Pie
               data={contentMix}
@@ -429,29 +344,30 @@ export default function AdminDashboard() {
               outerRadius={86}
               paddingAngle={3}
               stroke="none"
+              animationDuration={chartTheme.animationDuration}
             >
               {contentMix.map((_, i) => (
-                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                <Cell key={i} fill={seriesAt(i)} />
               ))}
             </Pie>
-            <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Legend
+              iconType="circle"
+              iconSize={8}
+              wrapperStyle={{ fontSize: chartTheme.fontSize, color: chartTheme.text }}
+            />
+            <Tooltip {...chartTheme.tooltip} />
           </PieChart>
         </ChartCard>
 
-        <ChartCard
-          title="Engagement"
-          subtitle="Recently active accounts vs. total"
-          empty={engagement.length === 0}
-        >
-          <BarChart data={engagement} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
-            <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="name" tick={AXIS} tickLine={false} axisLine={false} />
-            <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: '#1e293b55' }} />
-            <Bar dataKey="value" name="Accounts" radius={[6, 6, 0, 0]}>
+        <ChartCard title="Engagement" subtitle="Recently active accounts against the total" empty={engagement.length === 0}>
+          <BarChart data={engagement} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+            <CartesianGrid {...chartTheme.cartesianGrid} strokeDasharray="3 3" />
+            <XAxis dataKey="name" {...chartTheme.axisProps} />
+            <YAxis {...chartTheme.axisProps} allowDecimals={false} width={44} tickFormatter={(v: number) => formatStat(v, { compact: true })} />
+            <Tooltip {...chartTheme.tooltip} cursor={{ fill: chartTheme.tooltip.cursor.fill, opacity: chartTheme.tooltip.cursor.opacity }} />
+            <Bar dataKey="value" name="Accounts" radius={[6, 6, 0, 0]} animationDuration={chartTheme.animationDuration}>
               {engagement.map((_, i) => (
-                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                <Cell key={i} fill={seriesAt(i)} />
               ))}
             </Bar>
           </BarChart>
@@ -460,10 +376,10 @@ export default function AdminDashboard() {
 
       {/* Secondary analytics */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-slate-800 bg-slate-950/60">
+        <Card>
           <CardHeader title="Most active authors" subtitle="By published post count" />
           {more.isLoading ? (
-            <div className="space-y-3">
+            <div className="space-y-3" aria-busy="true">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <Skeleton className="h-8 w-8 rounded-full" />
@@ -476,47 +392,63 @@ export default function AdminDashboard() {
               error={more.error}
               retry={() => void more.refetch()}
               title="Could not load author stats"
-              className="py-8"
+              className="py-6"
             />
           ) : topAuthors.length === 0 ? (
-            <EmptyState icon={<Users size={22} />} title="No authors yet" className="py-10" />
+            <EmptyState
+              variant="no-results"
+              icon={<Users size={24} />}
+              title="No authors yet"
+              message="Members appear here once they publish a post."
+              size="sm"
+            />
           ) : (
-            <ul className="divide-y divide-slate-800/70">
+            <ol className="divide-y divide-line">
               {topAuthors.map((u, i) => (
-                <li key={`${u.email ?? u.name}-${i}`} className="flex items-center gap-3 py-2.5">
-                  <span className="w-5 shrink-0 text-center font-mono text-xs text-slate-600">
+                <li key={`${u.email ?? u.name}-${i}`} className="flex min-h-12 items-center gap-3 py-2">
+                  <span className="tabular w-5 shrink-0 text-center text-xs font-semibold text-text-3">
                     {i + 1}
                   </span>
                   <Avatar src={u.avatar} name={u.name} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-100">{u.name}</p>
-                    {u.email ? (
-                      <p className="truncate text-[11px] text-slate-500">{u.email}</p>
-                    ) : null}
+                    <p className="truncate text-sm font-semibold text-text-1">{u.name}</p>
+                    {u.email ? <p className="truncate text-xs text-text-2">{u.email}</p> : null}
                   </div>
-                  <Badge tone="info">{u.postCount.toLocaleString()} posts</Badge>
+                  <Badge tone="info">
+                    <span className="tabular">{u.postCount.toLocaleString()}</span> posts
+                  </Badge>
                 </li>
               ))}
-            </ul>
+            </ol>
           )}
         </Card>
 
-        <Card className="border-slate-800 bg-slate-950/60">
+        <Card>
           <CardHeader title="Trending posts" subtitle="Highest engagement in the last 7 days" />
           {more.isLoading ? (
-            <div className="space-y-3">
+            <div className="space-y-3" aria-busy="true">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
           ) : more.isError ? (
-            <p className="py-6 text-center text-sm text-slate-500">
-              {errMsg(more.error, 'Trending posts are unavailable.')}
-            </p>
+            <ErrorState
+              error={more.error}
+              retry={() => void more.refetch()}
+              title="Trending posts are unavailable"
+              message={errMsg(more.error, 'Try again in a moment.')}
+              className="py-6"
+            />
           ) : trending.length === 0 ? (
-            <EmptyState icon={<FileText size={22} />} title="Nothing trending" className="py-10" />
+            <EmptyState
+              variant="no-results"
+              icon={<FileText size={24} />}
+              title="Nothing trending this week"
+              message="Posts with the most likes and comments over the last 7 days show up here."
+              size="sm"
+            />
           ) : (
-            <ul className="divide-y divide-slate-800/70">
+            <ul className="divide-y divide-line">
               {trending.map((p, i) => {
                 const author =
                   p.author?.name || p.author?.fullName || p.author?.username || 'Unknown author';
@@ -526,21 +458,19 @@ export default function AdminDashboard() {
                   <li key={p._id ?? i} className="flex items-start gap-3 py-2.5">
                     <Avatar src={p.author?.avatar} name={author} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-slate-200">
-                        {p.content?.trim() || <span className="text-slate-500">Media post</span>}
+                      <p className="truncate text-sm text-text-1">
+                        {p.content?.trim() || <span className="text-text-3">Media post</span>}
                       </p>
-                      <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                      <p className="mt-0.5 truncate text-xs text-text-2">
                         {author}
-                        {p.category ? ` · ${p.category}` : ''}
-                        {p.createdAt
-                          ? ` · ${format(new Date(p.createdAt), 'MMM d, yyyy')}`
-                          : ''}
+                        {p.category ? `, ${p.category}` : ''}
+                        {p.createdAt ? ` — ${format(new Date(p.createdAt), 'MMM d, yyyy')}` : ''}
                       </p>
                     </div>
                     {likes !== null || comments !== null ? (
-                      <div className="shrink-0 text-right font-mono text-[11px] text-slate-500">
-                        {likes !== null ? <div>{likes} likes</div> : null}
-                        {comments !== null ? <div>{comments} comments</div> : null}
+                      <div className="tabular shrink-0 text-right text-xs text-text-2">
+                        {likes !== null ? <div>{likes.toLocaleString()} likes</div> : null}
+                        {comments !== null ? <div>{comments.toLocaleString()} comments</div> : null}
                       </div>
                     ) : null}
                   </li>

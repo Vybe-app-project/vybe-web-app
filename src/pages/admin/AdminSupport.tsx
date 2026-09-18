@@ -14,15 +14,8 @@ import {
   cx,
   useToast,
 } from '../../components/ui';
-import {
-  LifeBuoy,
-  Check,
-  Refresh,
-  Trash,
-  Mail,
-  ChevronLeft,
-  ChevronRight,
-} from '../../components/icons';
+import { LifeBuoy, Check, Refresh, Trash, Mail } from '../../components/icons';
+import { AdminPageHeader, Pager } from './AdminLayout';
 
 type SupportStatus = 'open' | 'resolved';
 
@@ -78,7 +71,7 @@ export default function AdminSupport() {
       return next;
     },
     onSuccess: (next) => {
-      success(next === 'resolved' ? 'Message marked resolved.' : 'Message reopened.');
+      success(next === 'resolved' ? 'Message marked resolved' : 'Message reopened');
       void qc.invalidateQueries({ queryKey: ['admin', 'support'] });
     },
     onError: (e) => toastError(e, 'Could not update this message.'),
@@ -89,7 +82,7 @@ export default function AdminSupport() {
       await adminApi.delete(`/admin/support/${id}`);
     },
     onSuccess: () => {
-      success('Support message deleted.');
+      success('Support message deleted');
       setPendingDelete(null);
       void qc.invalidateQueries({ queryKey: ['admin', 'support'] });
     },
@@ -103,95 +96,110 @@ export default function AdminSupport() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-50">Support inbox</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Contact-form submissions from members and visitors.
-          </p>
-        </div>
-        <Badge tone="neutral">{total.toLocaleString()} messages</Badge>
-      </div>
+      <AdminPageHeader
+        title="Support inbox"
+        subtitle="Contact-form submissions from members and visitors. Reply by email, then mark the thread resolved."
+        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> messages</Badge>}
+      />
 
-      <Tabs tabs={TABS} active={status} onChange={(k) => { setStatus(k); setPage(1); }} />
+      <Tabs
+        aria-label="Message status"
+        tabs={TABS}
+        active={status}
+        onChange={(k) => { setStatus(k); setPage(1); }}
+      />
 
       {query.isError ? (
-        <ErrorState
-          error={query.error}
-          retry={() => void query.refetch()}
-          title="Could not load support messages"
-        />
+        <Card>
+          <ErrorState
+            error={query.error}
+            retry={() => void query.refetch()}
+            title="Could not load support messages"
+          />
+        </Card>
       ) : query.isLoading ? (
-        <div className="space-y-3">
+        <div className="space-y-3" aria-busy="true" aria-label="Loading messages">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i} className="border-slate-800 bg-slate-950/60">
+            <Card key={i}>
               <Skeleton className="h-3 w-48" />
               <Skeleton className="mt-3 h-12 w-full" />
             </Card>
           ))}
         </div>
       ) : messages.length === 0 ? (
-        <Card className="border-slate-800 bg-slate-950/60">
+        <Card>
           <EmptyState
-            icon={<LifeBuoy size={22} />}
+            variant={status === 'open' ? 'first-run' : 'no-results'}
+            icon={status === 'open' ? <LifeBuoy size={24} /> : undefined}
             title={status === 'open' ? 'Inbox zero' : 'Nothing here'}
             message={
               status === 'open'
-                ? 'There are no open support messages right now.'
-                : `No messages with status “${status}”.`
+                ? 'No open support messages. New submissions from the contact form land here.'
+                : `No ${status === 'all' ? '' : status + ' '}messages yet.`
+            }
+            action={
+              status !== 'open'
+                ? { label: 'Show open', onClick: () => { setStatus('open'); setPage(1); }, variant: 'secondary' }
+                : undefined
             }
           />
         </Card>
       ) : (
-        <div className={cx('space-y-3', query.isFetching && 'opacity-60')}>
+        <div className={cx('space-y-3', query.isFetching && 'admin-fetching')}>
           {messages.map((m) => {
             const resolved = m.status === 'resolved';
             const busy =
               (setStatusMutation.isPending && setStatusMutation.variables?.id === m._id) ||
               (remove.isPending && pendingDelete?._id === m._id);
             return (
-              <Card key={m._id} className="border-slate-800 bg-slate-950/60">
+              <Card key={m._id}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-100">
+                    <p className="truncate text-md font-semibold text-text-1">
                       {m.fullName || 'Anonymous'}
                     </p>
-                    <a
-                      href={m.email ? `mailto:${m.email}` : undefined}
-                      className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[12px] break-all text-slate-500 hover:text-slate-300"
-                    >
-                      <Mail size={12} /> {m.email || '—'}
-                    </a>
+                    {m.email ? (
+                      <a
+                        href={`mailto:${m.email}`}
+                        className="mt-0.5 inline-flex min-h-6 items-center gap-1.5 text-xs break-all text-text-2 underline decoration-line-strong underline-offset-3 hover:text-text-1 hover:decoration-current"
+                      >
+                        <Mail size={14} /> {m.email}
+                      </a>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-text-3">No reply address</p>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone={resolved ? 'success' : 'warning'}>
+                    <Badge tone={resolved ? 'success' : 'warning'} dot>
                       {resolved ? 'Resolved' : 'Open'}
                     </Badge>
                     {m.userId ? <Badge tone="info">Member</Badge> : <Badge tone="neutral">Guest</Badge>}
                   </div>
                 </div>
 
-                <p className="mt-3 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-300">
-                  {m.message?.trim() || <span className="text-slate-600 italic">Empty message</span>}
+                <p className="prose-measure mt-3 text-sm leading-relaxed whitespace-pre-wrap text-text-1">
+                  {m.message?.trim() || <span className="text-text-3 italic">Empty message</span>}
                 </p>
 
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-3">
-                  <p className="font-mono text-[11px] text-slate-500">
-                    {m.createdAt
-                      ? `${format(new Date(m.createdAt), 'MMM d, yyyy HH:mm')} · ${formatDistanceToNow(
-                          new Date(m.createdAt),
-                          { addSuffix: true },
-                        )}`
-                      : '—'}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+                  <p className="tabular text-xs text-text-2">
+                    {m.createdAt ? (
+                      <>
+                        <time dateTime={m.createdAt}>{format(new Date(m.createdAt), 'MMM d, yyyy HH:mm')}</time>
+                        {' '}({formatDistanceToNow(new Date(m.createdAt), { addSuffix: true })})
+                      </>
+                    ) : (
+                      'Received date unknown'
+                    )}
                     {resolved && m.resolvedAt
-                      ? ` · resolved ${format(new Date(m.resolvedAt), 'MMM d, yyyy')}`
+                      ? `, resolved ${format(new Date(m.resolvedAt), 'MMM d, yyyy')}`
                       : ''}
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
-                      variant="ghost"
-                      icon={resolved ? <Refresh size={14} /> : <Check size={14} />}
+                      variant="secondary"
+                      icon={resolved ? <Refresh size={16} /> : <Check size={16} />}
                       disabled={busy}
                       onClick={() =>
                         setStatusMutation.mutate({
@@ -204,9 +212,8 @@ export default function AdminSupport() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
-                      icon={<Trash size={14} />}
-                      className="border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                      variant="danger"
+                      icon={<Trash size={16} />}
                       disabled={busy}
                       onClick={() => setPendingDelete(m)}
                     >
@@ -221,30 +228,16 @@ export default function AdminSupport() {
       )}
 
       {messages.length > 0 ? (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-slate-500">
-            Page {page} of {totalPages} · {total.toLocaleString()} messages
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<ChevronLeft size={14} />}
-              disabled={page <= 1 || query.isFetching}
-              onClick={() => setPage((n) => Math.max(1, n - 1))}
-            >
-              Prev
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={page >= totalPages || query.isFetching}
-              onClick={() => setPage((n) => Math.min(totalPages, n + 1))}
-            >
-              Next <ChevronRight size={14} />
-            </Button>
-          </div>
-        </div>
+        <Pager
+          page={page}
+          totalPages={totalPages}
+          canPrev={page > 1}
+          canNext={page < totalPages}
+          busy={query.isFetching}
+          onPrev={() => setPage((n) => Math.max(1, n - 1))}
+          onNext={() => setPage((n) => Math.min(totalPages, n + 1))}
+          label={`${total.toLocaleString()} messages`}
+        />
       ) : null}
 
       <ConfirmDialog
@@ -257,7 +250,7 @@ export default function AdminSupport() {
           pendingDelete ? (
             <>
               Permanently delete the message from{' '}
-              <strong className="text-slate-100">
+              <strong className="text-text-1">
                 {pendingDelete.fullName || pendingDelete.email || 'this sender'}
               </strong>
               ? This cannot be undone.

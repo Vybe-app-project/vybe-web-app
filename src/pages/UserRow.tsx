@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg, mediaUrl } from '../lib/api';
+import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { compactNumber, displayName, followerCount, type PublicUser } from '../lib/hooks';
-import { Avatar, Badge, Button, Card, Skeleton, useToast } from './ui';
+import { Avatar, Badge, Button, Card, SkeletonRow, Skeleton, useToast, type ButtonSize } from './ui';
+import { BadgeCheck, Check, UserPlus } from './icons';
 
 export type FollowState = 'none' | 'following' | 'requested';
 
@@ -14,19 +15,33 @@ function initialFollowState(user: PublicUser): FollowState {
   return 'none';
 }
 
+/**
+ * Follow / Following / Requested toggle. Primary when there is no
+ * relationship yet, quiet secondary once you follow (so "Following" never
+ * reads as a call to action).
+ */
 export function FollowButton({
   user,
   onChanged,
   className = '',
+  size = 'md',
+  block = false,
 }: {
   user: PublicUser;
   onChanged?: (state: FollowState) => void;
   className?: string;
+  size?: ButtonSize;
+  block?: boolean;
 }) {
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const toast = useToast();
-  const [state, setState] = useState<FollowState>(initialFollowState(user));
+  const [state, setState] = useState<FollowState>(() => initialFollowState(user));
+
+  // Keep in sync when the parent refetches the user (e.g. after accepting a request).
+  useEffect(() => {
+    setState(initialFollowState(user));
+  }, [user.followStatus, user.isFollowing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = useMutation({
     mutationFn: async () => {
@@ -58,59 +73,108 @@ export function FollowButton({
 
   if (me && String(me._id) === String(user._id)) return null;
 
+  const label = state === 'following' ? 'Following' : state === 'requested' ? 'Requested' : 'Follow';
+  const title =
+    state === 'following'
+      ? `Unfollow ${displayName(user)}`
+      : state === 'requested'
+        ? 'Withdraw follow request'
+        : `Follow ${displayName(user)}`;
+
   return (
     <Button
-      variant={state === 'following' ? 'ghost' : 'primary'}
+      variant={state === 'none' ? 'primary' : 'secondary'}
+      size={size}
+      block={block}
       className={className}
       onClick={() => toggle.mutate()}
       loading={toggle.isPending}
-      disabled={toggle.isPending}
+      aria-pressed={state !== 'none'}
+      title={title}
+      icon={state === 'following' ? <Check size={18} /> : state === 'none' ? <UserPlus size={18} /> : undefined}
     >
-      {state === 'following' ? 'Following' : state === 'requested' ? 'Requested' : 'Follow'}
+      {label}
     </Button>
   );
 }
 
-export default function UserRow({ user }: { user: PublicUser }) {
+/**
+ * Role badges shared by rows and profile headers. `compact` (list rows) keeps
+ * the name on one line: verified becomes the check glyph and only Coach stays
+ * as a small badge.
+ */
+export function UserBadges({ user, compact = false }: { user: PublicUser; compact?: boolean }) {
+  if (compact) {
+    return (
+      <>
+        {user.isVerified ? (
+          <span role="img" aria-label="Verified" title="Verified" className="inline-flex shrink-0 text-brand">
+            <BadgeCheck size={16} />
+          </span>
+        ) : null}
+        {user.isCoach || user.isTrainer ? (
+          <Badge tone="info" size="sm">
+            Coach
+          </Badge>
+        ) : null}
+      </>
+    );
+  }
+  return (
+    <>
+      {user.isVerified ? (
+        <Badge tone="brand">
+          <BadgeCheck size={12} />
+          Verified
+        </Badge>
+      ) : null}
+      {user.isCoach || user.isTrainer ? <Badge tone="info">Coach</Badge> : null}
+      {user.isPremium ? <Badge tone="accent">Premium</Badge> : null}
+    </>
+  );
+}
+
+/** Text link with a 44 px-tall hit area (pseudo-element, no visual change). */
+export const ROW_LINK = 'relative truncate text-md font-semibold text-text-1 hover:underline before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[""]';
+
+export default function UserRow({ user, trailing }: { user: PublicUser; trailing?: React.ReactNode }) {
   const me = useAuth((s) => s.user);
   const isMe = !!me && String(me._id) === String(user._id);
   const href = isMe ? '/profile' : `/u/${user._id}`;
+  const followers = followerCount(user);
 
   return (
-    <Card className="flex items-center gap-3 p-3">
-      <Link to={href}>
-        <Avatar src={mediaUrl(user.avatar)} name={displayName(user)} size={44} />
+    <Card padded={false} className="flex items-center gap-3 p-3">
+      <Link to={href} viewTransition className="shrink-0 rounded-full" aria-label={`Open ${displayName(user)}’s profile`}>
+        <Avatar src={user.avatar} name={displayName(user)} size={44} />
       </Link>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <Link to={href} className="truncate text-sm font-semibold hover:underline">
+        <div className="flex min-w-0 items-center gap-x-2">
+          <Link to={href} viewTransition className={ROW_LINK}>
             {displayName(user)}
           </Link>
-          {user.isVerified && <Badge variant="brand">Verified</Badge>}
-          {(user.isCoach || user.isTrainer) && <Badge>Coach</Badge>}
+          <UserBadges user={user} compact />
         </div>
-        <div className="truncate text-xs text-[var(--color-muted)]">
-          @{user.username}
-          {followerCount(user) > 0 && ` · ${compactNumber(followerCount(user))} followers`}
+        <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-2">
+          <span className="truncate">@{user.username}</span>
+          {followers > 0 ? (
+            <span className="tabular shrink-0">
+              {compactNumber(followers)} {followers === 1 ? 'follower' : 'followers'}
+            </span>
+          ) : null}
         </div>
-        {user.bio && (
-          <p className="mt-1 line-clamp-2 text-xs text-[var(--color-muted)]">{user.bio}</p>
-        )}
+        {user.bio ? <p className="mt-1 line-clamp-2 text-xs text-text-2">{user.bio}</p> : null}
       </div>
-      <FollowButton user={user} />
+      <div className="shrink-0">{trailing ?? <FollowButton user={user} size="sm" />}</div>
     </Card>
   );
 }
 
 export function UserRowSkeleton() {
   return (
-    <Card className="flex items-center gap-3 p-3">
-      <Skeleton className="h-11 w-11 rounded-full" />
-      <div className="flex-1 space-y-2">
-        <Skeleton className="h-3 w-32" />
-        <Skeleton className="h-3 w-20" />
-      </div>
-      <Skeleton className="h-8 w-20 rounded-xl" />
+    <Card padded={false} className="flex items-center gap-3 p-3" aria-hidden="true">
+      <SkeletonRow className="flex-1 py-0" />
+      <Skeleton className="h-10 w-20 rounded-sm" />
     </Card>
   );
 }

@@ -10,21 +10,16 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
+  Select,
   Skeleton,
   cx,
+  humanize,
   useToast,
 } from '../../components/ui';
-import {
-  FileText,
-  Trash,
-  Play,
-  Image as ImageIcon,
-  Search,
-  X,
-  ChevronLeft,
-  ChevronRight,
-} from '../../components/icons';
+import { FileText, Trash, Play, Image as ImageIcon, X, Search } from '../../components/icons';
+import { AdminPageHeader, Pager } from './AdminLayout';
 
 type Media = { type?: 'image' | 'video'; url?: string; thumbnail?: string };
 
@@ -53,7 +48,7 @@ type AdminPost = {
  * GET /admin/posts returns the full collection in one payload, so pagination
  * and filtering are applied client-side over the cached list.
  */
-const PAGE_SIZE_OPTIONS = [25, 50, 100];
+const PAGE_SIZE_OPTIONS = [25, 50, 100].map((n) => ({ value: String(n), label: `${n} rows` }));
 
 function Thumb({ media }: { media?: Media }) {
   const [broken, setBroken] = useState(false);
@@ -61,13 +56,13 @@ function Thumb({ media }: { media?: Media }) {
 
   if (!src || broken) {
     return (
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-900 text-slate-600">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-sm border border-line bg-surface-2 text-text-3">
         {media?.type === 'video' ? <Play size={16} /> : <ImageIcon size={16} />}
       </div>
     );
   }
   return (
-    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
+    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-sm border border-line bg-surface-2">
       <img
         src={mediaUrl(src)}
         alt=""
@@ -76,7 +71,7 @@ function Thumb({ media }: { media?: Media }) {
         className="h-full w-full object-cover"
       />
       {media?.type === 'video' ? (
-        <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-white">
+        <span className="absolute inset-0 flex items-center justify-center bg-scrim text-text-1">
           <Play size={14} />
         </span>
       ) : null}
@@ -115,7 +110,7 @@ export default function AdminPosts() {
       await adminApi.delete(`/admin/posts/${postId}`);
     },
     onSuccess: () => {
-      success('Post deleted.');
+      success('Post deleted');
       setPending(null);
       void qc.invalidateQueries({ queryKey: ['admin', 'posts'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'analytics'] });
@@ -147,60 +142,50 @@ export default function AdminPosts() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-50">Posts</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Review published content and take down posts that violate policy.
-          </p>
-        </div>
-        <Badge tone="neutral">{total.toLocaleString()} posts</Badge>
-      </div>
+      <AdminPageHeader
+        title="Posts"
+        subtitle="Review published content and take down posts that break policy."
+        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> posts</Badge>}
+      />
 
-      <Card className="border-slate-800 bg-slate-950/60">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[220px] flex-1">
-            <Search
-              size={16}
-              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-500"
-            />
+      <Card>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[240px] flex-1">
             <Input
+              label="Filter posts"
+              hideLabel
+              role="searchbox"
+              inputMode="search"
+              autoComplete="off"
+              leading={<Search size={18} />}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Filter by content, category or author"
-              aria-label="Filter posts"
-              className="border-slate-800 bg-slate-900/70 pl-9 text-slate-100"
+              placeholder="Filter by caption, category or author"
+              trailing={
+                searchInput ? (
+                  <IconButton label="Clear filter" size={40} onClick={() => setSearchInput('')}>
+                    <X size={18} />
+                  </IconButton>
+                ) : undefined
+              }
             />
-            {searchInput ? (
-              <button
-                type="button"
-                onClick={() => setSearchInput('')}
-                aria-label="Clear filter"
-                className="absolute top-1/2 right-2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 hover:text-slate-200"
-              >
-                <X size={15} />
-              </button>
-            ) : null}
           </div>
-          <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-            Rows
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
+          <div className="w-36">
+            <Select
+              label="Rows per page"
+              hideLabel
+              options={PAGE_SIZE_OPTIONS}
+              value={String(pageSize)}
+              onChange={(v) => {
+                setPageSize(Number(v));
                 setPage(1);
               }}
-              className="input-base w-auto border-slate-800 bg-slate-900/70 py-2 text-sm text-slate-100"
-            >
-              {PAGE_SIZE_OPTIONS.map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-          </label>
+            />
+          </div>
         </div>
       </Card>
 
-      <Card padded={false} className="overflow-hidden border-slate-800 bg-slate-950/60">
+      <Card padded={false} className="overflow-hidden">
         {query.isError ? (
           <ErrorState
             error={query.error}
@@ -208,10 +193,10 @@ export default function AdminPosts() {
             title="Could not load posts"
           />
         ) : query.isLoading ? (
-          <div className="space-y-3 p-4">
+          <div className="space-y-3 p-4" aria-busy="true" aria-label="Loading posts">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3">
-                <Skeleton className="h-12 w-12 rounded-lg" />
+                <Skeleton className="h-12 w-12 rounded-sm" />
                 <Skeleton className="h-3 flex-1" />
                 <Skeleton className="h-3 w-32" />
               </div>
@@ -219,90 +204,83 @@ export default function AdminPosts() {
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
-            icon={<FileText size={22} />}
+            variant={search ? 'no-results' : 'first-run'}
+            icon={search ? undefined : <FileText size={24} />}
             title={search ? 'No matching posts' : 'No posts yet'}
             message={
               search
-                ? `Nothing matched “${searchInput.trim()}”.`
-                : 'Published posts will appear here.'
+                ? `Nothing matched “${searchInput.trim()}”. Try a caption fragment, a category or an author.`
+                : 'Published posts appear here as members share them.'
             }
-            action={
-              search ? (
-                <Button variant="ghost" onClick={() => setSearchInput('')}>Clear filter</Button>
-              ) : undefined
-            }
+            action={search ? { label: 'Clear filter', onClick: () => setSearchInput(''), variant: 'secondary' } : undefined}
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-left text-sm">
+            <table className="admin-table min-w-[820px]">
               <thead>
-                <tr className="border-b border-slate-800 font-mono text-[10px] tracking-[0.12em] text-slate-500 uppercase">
-                  <th className="px-4 py-3 font-semibold">Media</th>
-                  <th className="px-4 py-3 font-semibold">Content</th>
-                  <th className="px-4 py-3 font-semibold">Author</th>
-                  <th className="px-4 py-3 font-semibold">Stats</th>
-                  <th className="px-4 py-3 font-semibold">Created</th>
-                  <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                <tr>
+                  <th scope="col">Media</th>
+                  <th scope="col">Content</th>
+                  <th scope="col">Author</th>
+                  <th scope="col">Engagement</th>
+                  <th scope="col">Created</th>
+                  <th scope="col" className="text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className={cx('divide-y divide-slate-800/70', query.isFetching && 'opacity-60')}>
+              <tbody className={cx(query.isFetching && 'admin-fetching')}>
                 {rows.map((p) => {
                   const medias = Array.isArray(p.medias) ? p.medias : [];
                   const authorName =
                     p.author?.name || p.author?.fullName || p.author?.username || 'Unknown';
+                  const likes = Array.isArray(p.likes) ? p.likes.length : 0;
+                  const comments = Array.isArray(p.comments) ? p.comments.length : 0;
                   return (
-                    <tr key={p._id} className="transition-colors hover:bg-slate-900/40">
-                      <td className="px-4 py-3">
+                    <tr key={p._id}>
+                      <td>
                         <div className="flex items-center gap-1.5">
                           <Thumb media={medias[0]} />
                           {medias.length > 1 ? (
-                            <span className="font-mono text-[11px] text-slate-500">
-                              +{medias.length - 1}
-                            </span>
+                            <span className="tabular text-xs text-text-2">+{medias.length - 1}</span>
                           ) : null}
                         </div>
                       </td>
-                      <td className="max-w-[320px] px-4 py-3">
-                        <p className="line-clamp-2 text-slate-200">
-                          {p.content?.trim() || (
-                            <span className="text-slate-600 italic">No caption</span>
-                          )}
+                      <td className="max-w-[320px]">
+                        <p className="line-clamp-2 text-text-1">
+                          {p.content?.trim() || <span className="text-text-3 italic">No caption</span>}
                         </p>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                          {p.category ? <Badge tone="info">{p.category}</Badge> : null}
+                          {p.category ? <Badge tone="info">{humanize(p.category)}</Badge> : null}
                           {p.isPublic === false ? <Badge tone="neutral">Private</Badge> : null}
                           {p.isDeleted ? <Badge tone="danger">Soft-deleted</Badge> : null}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td>
                         <div className="flex items-center gap-2.5">
                           <Avatar src={p.author?.avatar} name={authorName} size="sm" />
                           <div className="min-w-0">
-                            <p className="truncate font-semibold text-slate-100">{authorName}</p>
+                            <p className="truncate font-semibold text-text-1">{authorName}</p>
                             {p.author?.email ? (
-                              <p className="truncate text-[11px] text-slate-500">
-                                {p.author.email}
-                              </p>
+                              <p className="truncate text-xs text-text-2">{p.author.email}</p>
                             ) : null}
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 font-mono text-[11px] whitespace-nowrap text-slate-500">
-                        <div>{Array.isArray(p.likes) ? p.likes.length : 0} likes</div>
-                        <div>{Array.isArray(p.comments) ? p.comments.length : 0} comments</div>
-                        {typeof p.views === 'number' ? <div>{p.views} views</div> : null}
+                      <td className="tabular whitespace-nowrap text-xs text-text-2">
+                        <div>{likes.toLocaleString()} likes</div>
+                        <div>{comments.toLocaleString()} comments</div>
+                        {typeof p.views === 'number' ? <div>{p.views.toLocaleString()} views</div> : null}
                       </td>
-                      <td className="px-4 py-3 font-mono text-[12px] whitespace-nowrap text-slate-500">
+                      <td className="tabular whitespace-nowrap text-text-2">
                         {p.createdAt ? format(new Date(p.createdAt), 'MMM d, yyyy') : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="text-right">
                         <Button
                           size="sm"
-                          variant="ghost"
-                          icon={<Trash size={14} />}
-                          className="border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                          variant="danger"
+                          icon={<Trash size={16} />}
                           onClick={() => setPending(p)}
                           disabled={remove.isPending}
+                          aria-label={`Delete post by ${authorName}`}
                         >
                           Delete
                         </Button>
@@ -316,34 +294,16 @@ export default function AdminPosts() {
         )}
 
         {rows.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 px-4 py-3">
-            <p className="font-mono text-[11px] text-slate-500">
-              {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, total)} of{' '}
-              {total.toLocaleString()}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<ChevronLeft size={14} />}
-                disabled={safePage <= 1}
-                onClick={() => setPage((n) => Math.max(1, n - 1))}
-              >
-                Prev
-              </Button>
-              <span className="font-mono text-xs text-slate-400">
-                {safePage} / {totalPages}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={safePage >= totalPages}
-                onClick={() => setPage((n) => Math.min(totalPages, n + 1))}
-              >
-                Next <ChevronRight size={14} />
-              </Button>
-            </div>
-          </div>
+          <Pager
+            className="border-t border-line px-4 py-3"
+            page={safePage}
+            totalPages={totalPages}
+            canPrev={safePage > 1}
+            canNext={safePage < totalPages}
+            onPrev={() => setPage((n) => Math.max(1, n - 1))}
+            onNext={() => setPage((n) => Math.min(totalPages, n + 1))}
+            label={`${((safePage - 1) * pageSize + 1).toLocaleString()}–${Math.min(safePage * pageSize, total).toLocaleString()} of ${total.toLocaleString()}`}
+          />
         ) : null}
       </Card>
 
@@ -357,11 +317,9 @@ export default function AdminPosts() {
           pending ? (
             <>
               This permanently removes the post
-              {pending.content?.trim() ? (
-                <> “{pending.content.trim().slice(0, 120)}”</>
-              ) : null}{' '}
+              {pending.content?.trim() ? <> “{pending.content.trim().slice(0, 120)}”</> : null}{' '}
               by{' '}
-              <strong className="text-slate-100">
+              <strong className="text-text-1">
                 {pending.author?.name || pending.author?.username || 'this author'}
               </strong>
               . The action is recorded in the audit log.

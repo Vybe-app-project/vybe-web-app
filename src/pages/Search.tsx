@@ -1,26 +1,24 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg, mediaUrl } from '../lib/api';
-import {
-  compactNumber,
-  displayName,
-  useDebounced,
-  type Post,
-  type PublicUser,
-} from '../lib/hooks';
+import { api, errMsg } from '../lib/api';
+import { compactNumber, useDebounced, type Post, type PublicUser } from '../lib/hooks';
 import {
   Avatar,
   Button,
   Card,
+  Chip,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
+  PageHeader,
+  SegmentedControl,
   Skeleton,
-  Tabs,
+  cx,
   useToast,
 } from './ui';
-import { Search as SearchIcon, X } from './icons';
+import { Clock, Hash, Search as SearchIcon, X } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
 
@@ -56,19 +54,31 @@ const TYPE_TABS: { key: SearchType; label: string }[] = [
   { key: 'hashtags', label: 'Hashtags' },
 ];
 
+const isSearchType = (v: string | null): v is SearchType => !!v && TYPE_TABS.some((t) => t.key === v);
+
+const INPUT_ID = 'search-input';
+const searchInput = () => document.getElementById(INPUT_ID) as HTMLInputElement | null;
+
 function HashtagList({ hashtags }: { hashtags: HashtagResult[] }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <ul className="flex flex-wrap gap-2" aria-label="Hashtags">
       {hashtags.map((h) => (
-        <Link
-          key={h.hashtag}
-          to={`/search?q=${encodeURIComponent(`#${h.hashtag}`)}&type=posts`}
-          className="rounded-full border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-1.5 text-xs font-semibold hover:border-[var(--color-brand)]"
-        >
-          #{h.hashtag}
-          <span className="ml-1.5 text-[var(--color-muted)]">{compactNumber(h.count)}</span>
-        </Link>
+        <li key={h.hashtag}>
+          <Chip to={`/search?q=${encodeURIComponent(`#${h.hashtag}`)}&type=posts`} icon={<Hash size={14} />}>
+            {h.hashtag}
+            <span className="tabular ml-1.5 font-medium text-text-3">{compactNumber(h.count)}</span>
+          </Chip>
+        </li>
       ))}
+    </ul>
+  );
+}
+
+function SubHeading({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="mb-2 flex min-h-10 items-center justify-between gap-3">
+      <h2 className="type-heading text-md text-text-1">{children}</h2>
+      {action}
     </div>
   );
 }
@@ -79,7 +89,7 @@ export default function Search() {
   const toast = useToast();
 
   const urlQuery = params.get('q') || '';
-  const urlType = (params.get('type') as SearchType) || 'all';
+  const urlType: SearchType = isSearchType(params.get('type')) ? (params.get('type') as SearchType) : 'all';
 
   const [term, setTerm] = useState(urlQuery);
   const [type, setType] = useState<SearchType>(urlType);
@@ -154,6 +164,7 @@ export default function Search() {
   function runSearch(value: string, nextType: SearchType = type) {
     const trimmed = value.trim();
     setFocused(false);
+    searchInput()?.blur();
     if (!trimmed) {
       setParams({});
       return;
@@ -166,239 +177,242 @@ export default function Search() {
     runSearch(term);
   }
 
+  function clearAll() {
+    setTerm('');
+    setParams({});
+    searchInput()?.focus();
+  }
+
   const users = results.data?.results?.users || [];
   const posts = results.data?.results?.posts || [];
   const hashtags = results.data?.results?.hashtags || [];
-  const nothingFound =
-    results.isSuccess && !users.length && !posts.length && !hashtags.length;
+  const nothingFound = results.isSuccess && !users.length && !posts.length && !hashtags.length;
+  const showSuggestions = focused && debounced.length >= 2 && !!suggestions.data?.length;
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-      <form onSubmit={onSubmit} className="relative">
-        <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" />
-        <Input
-          className="!pl-9 !pr-9"
-          placeholder="Search people, posts and hashtags"
-          value={term}
-          aria-label="Search"
-          onChange={(e) => setTerm(e.target.value)}
-          onFocus={() => setFocused(true)}
-        />
-        {term && (
-          <button
-            type="button"
-            aria-label="Clear search"
-            onClick={() => {
-              setTerm('');
-              setParams({});
+    <>
+      <PageHeader title="Search" subtitle="People, posts and hashtags across Vybe." />
+      <div className="w-full max-w-form space-y-5">
+        <form onSubmit={onSubmit} role="search" className="relative">
+          <Input
+            id={INPUT_ID}
+            type="search"
+            inputMode="search"
+            autoComplete="off"
+            leading={<SearchIcon size={18} />}
+            label="Search"
+            hideLabel
+            placeholder="Search people, posts and hashtags"
+            value={term}
+            enterKeyHint="search"
+            aria-autocomplete="list"
+            aria-expanded={showSuggestions}
+            aria-controls="search-suggestions"
+            className={cx(!!term && 'pr-12')}
+            onChange={(e) => setTerm(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setTimeout(() => setFocused(false), 150)}
+            trailing={
+              term ? (
+                <IconButton size={40} label="Clear search" onClick={clearAll} className="text-text-2">
+                  <X size={20} />
+                </IconButton>
+              ) : undefined
+            }
+          />
+
+          {showSuggestions ? (
+            <Card padded={false} className="anim-pop-in absolute z-20 mt-2 w-full overflow-hidden p-1 shadow-2">
+              <ul id="search-suggestions" role="listbox" aria-label="Suggestions">
+                {suggestions.data!.map((s) => (
+                  <li key={`${s.type}-${s.id}`} role="option" aria-selected={false}>
+                    <button
+                      type="button"
+                      className="flex min-h-11 w-full items-center gap-3 rounded-sm px-3 py-2 text-left transition-colors dur-1 hover:bg-surface-2"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setTerm(s.text);
+                        runSearch(s.text, s.type === 'hashtag' ? 'posts' : 'users');
+                      }}
+                    >
+                      {s.type === 'user' ? (
+                        <Avatar src={s.avatar} name={s.text} size="sm" />
+                      ) : (
+                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-soft text-brand-text">
+                          <Hash size={16} />
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-text-1">{s.text}</span>
+                        {s.subtitle ? <span className="block truncate text-xs text-text-2">{s.subtitle}</span> : null}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+        </form>
+
+        {activeQuery ? (
+          <SegmentedControl
+            aria-label="Result type"
+            tabs={TYPE_TABS.map((t) => ({ key: t.key, label: t.label }))}
+            value={type}
+            onChange={(key) => {
+              const next = isSearchType(key) ? key : 'all';
+              setType(next);
+              setParams({ q: activeQuery, type: next });
             }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)] hover:text-white"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
+          />
+        ) : null}
 
-        {focused && debounced.length >= 2 && !!suggestions.data?.length && (
-          <Card className="absolute z-20 mt-2 w-full overflow-hidden p-1">
-            {suggestions.data.map((s) => (
-              <button
-                key={`${s.type}-${s.id}`}
-                type="button"
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-[var(--color-surface-2)]"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  const value = s.type === 'hashtag' ? s.text : s.text;
-                  setTerm(value);
-                  runSearch(value, s.type === 'hashtag' ? 'posts' : 'users');
-                }}
+        {/* ---------- landing state: recent + trending ---------- */}
+        {!activeQuery ? (
+          <div className="space-y-8">
+            <section aria-labelledby="recent-heading">
+              <SubHeading
+                action={
+                  recent.data?.length ? (
+                    <Button variant="ghost" size="sm" onClick={() => clearRecent.mutate()} loading={clearRecent.isPending}>
+                      Clear all
+                    </Button>
+                  ) : null
+                }
               >
-                {s.type === 'user' ? (
-                  <Avatar src={mediaUrl(s.avatar)} name={s.text} size={28} />
-                ) : (
-                  <span className="grid h-7 w-7 place-items-center rounded-full bg-[var(--color-surface-2)] text-xs">
-                    #
-                  </span>
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{s.text}</span>
-                  {s.subtitle && (
-                    <span className="block truncate text-xs text-[var(--color-muted)]">
-                      {s.subtitle}
-                    </span>
-                  )}
-                </span>
-              </button>
-            ))}
-          </Card>
-        )}
-      </form>
-
-      {activeQuery && (
-        <Tabs
-          tabs={TYPE_TABS.map((t) => ({ key: t.key, label: t.label }))}
-          value={type}
-          onChange={(key) => {
-            setType(key as SearchType);
-            setParams({ q: activeQuery, type: key as string });
-          }}
-        />
-      )}
-
-      {/* ---------- landing state: recent + trending ---------- */}
-      {!activeQuery && (
-        <div className="space-y-6">
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-bold">Recent searches</h2>
-              {!!recent.data?.length && (
-                <Button
-                  variant="ghost"
-                  onClick={() => clearRecent.mutate()}
-                  loading={clearRecent.isPending}
-                >
-                  Clear all
-                </Button>
+                <span id="recent-heading">Recent searches</span>
+              </SubHeading>
+              {recent.isLoading ? (
+                <div className="space-y-1">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-11 w-full rounded-sm" />
+                  ))}
+                </div>
+              ) : recent.isError ? (
+                <p className="text-sm text-text-2">{errMsg(recent.error, 'Recent searches are unavailable right now.')}</p>
+              ) : recent.data?.length ? (
+                <ul className="-mx-1">
+                  {recent.data.map((r) => (
+                    <li key={r._id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTerm(r.query);
+                          runSearch(r.query, isSearchType(r.type ?? null) ? (r.type as SearchType) : 'all');
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 rounded-sm px-3 py-2 text-left text-sm text-text-1 transition-colors dur-1 hover:bg-surface-2"
+                      >
+                        <Clock size={18} className="shrink-0 text-text-3" />
+                        <span className="truncate">{r.query}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="rounded-md bg-surface-2 px-4 py-3 text-sm text-text-2">
+                  Searches you run will show up here so you can jump back in.
+                </p>
               )}
-            </div>
-            {recent.isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-9 w-full rounded-xl" />
-                ))}
-              </div>
-            ) : recent.isError ? (
-              <p className="text-sm text-[var(--color-muted)]">
-                {errMsg(recent.error, 'Recent searches are unavailable right now.')}
-              </p>
-            ) : recent.data?.length ? (
-              <div className="space-y-1">
-                {recent.data.map((r) => (
-                  <button
-                    key={r._id}
-                    type="button"
-                    onClick={() => {
-                      setTerm(r.query);
-                      runSearch(r.query);
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm hover:bg-[var(--color-surface-2)]"
-                  >
-                    <SearchIcon className="h-4 w-4 text-[var(--color-muted)]" />
-                    <span className="truncate">{r.query}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                title="No recent searches"
-                message="Search for people, posts or hashtags to get started."
-              />
-            )}
-          </section>
-
-          <section>
-            <h2 className="mb-2 text-sm font-bold">Trending now</h2>
-            {trending.isLoading ? (
-              <div className="flex flex-wrap gap-2">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Skeleton key={i} className="h-8 w-24 rounded-full" />
-                ))}
-              </div>
-            ) : trending.isError ? (
-              <p className="text-sm text-[var(--color-muted)]">
-                {errMsg(trending.error, 'Trending content is unavailable right now.')}
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {trending.data?.hashtags?.length ? (
-                  <HashtagList
-                    hashtags={trending.data.hashtags.map((h) => ({
-                      hashtag: h._id,
-                      count: h.count,
-                    }))}
-                  />
-                ) : null}
-                {trending.data?.users?.length ? (
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-                      Popular athletes
-                    </h3>
-                    {trending.data.users.map((u) => (
-                      <UserRow key={u._id} user={u} />
-                    ))}
-                  </div>
-                ) : null}
-                {!trending.data?.hashtags?.length && !trending.data?.users?.length && (
-                  <EmptyState
-                    title="Nothing trending yet"
-                    message="Trending hashtags and athletes appear as the community gets active."
-                  />
-                )}
-              </div>
-            )}
-          </section>
-        </div>
-      )}
-
-      {/* ---------- results ---------- */}
-      {activeQuery && results.isLoading && (
-        <div className="space-y-3">
-          <UserRowSkeleton />
-          <UserRowSkeleton />
-          <PostCardSkeleton />
-        </div>
-      )}
-
-      {activeQuery && results.isError && (
-        <ErrorState
-          title="Search failed"
-          message={errMsg(results.error, 'Please try a different query.')}
-          action={
-            <Button variant="primary" onClick={() => results.refetch()}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {activeQuery && nothingFound && (
-        <EmptyState
-          title={`No results for “${activeQuery}”`}
-          message="Try a different spelling, or search for a hashtag instead."
-        />
-      )}
-
-      {activeQuery && results.isSuccess && (
-        <div className="space-y-6">
-          {!!hashtags.length && (
-            <section>
-              <h2 className="mb-2 text-sm font-bold">Hashtags</h2>
-              <HashtagList hashtags={hashtags} />
             </section>
-          )}
 
-          {!!users.length && (
-            <section className="space-y-3">
-              <h2 className="text-sm font-bold">People</h2>
-              {users.map((u) => (
-                <UserRow key={u._id} user={u} />
-              ))}
+            <section aria-labelledby="trending-heading">
+              <SubHeading>
+                <span id="trending-heading">Trending now</span>
+              </SubHeading>
+              {trending.isLoading ? (
+                <div className="flex flex-wrap gap-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-9 w-24 rounded-xs" />
+                  ))}
+                </div>
+              ) : trending.isError ? (
+                <p className="text-sm text-text-2">{errMsg(trending.error, 'Trending content is unavailable right now.')}</p>
+              ) : (
+                <div className="space-y-5">
+                  {trending.data?.hashtags?.length ? (
+                    <HashtagList hashtags={trending.data.hashtags.map((h) => ({ hashtag: h._id, count: h.count }))} />
+                  ) : null}
+                  {trending.data?.users?.length ? (
+                    <div className="space-y-2">
+                      <h3 className="type-label text-text-2">Popular athletes</h3>
+                      <div className="space-y-2">
+                        {trending.data.users.map((u) => (
+                          <UserRow key={u._id} user={u} />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {!trending.data?.hashtags?.length && !trending.data?.users?.length ? (
+                    <EmptyState
+                      size="sm"
+                      title="Nothing trending yet"
+                      message="Trending hashtags and athletes appear as the community gets active."
+                      action={{ label: 'Explore posts', to: '/discover', variant: 'secondary' }}
+                    />
+                  ) : null}
+                </div>
+              )}
             </section>
-          )}
+          </div>
+        ) : null}
 
-          {!!posts.length && (
-            <section className="space-y-4">
-              <h2 className="text-sm font-bold">Posts</h2>
-              {posts.map((p) => (
-                <PostCard
-                  key={p._id}
-                  post={p}
-                  invalidate={[['search', activeQuery, type], ['feed']]}
-                />
-              ))}
-            </section>
-          )}
-        </div>
-      )}
-    </div>
+        {/* ---------- results ---------- */}
+        {activeQuery && results.isLoading ? (
+          <div className="space-y-3" aria-busy="true" aria-label="Searching">
+            <UserRowSkeleton />
+            <UserRowSkeleton />
+            <PostCardSkeleton />
+          </div>
+        ) : null}
+
+        {activeQuery && results.isError ? (
+          <ErrorState title="Search failed" error={results.error} retry={() => void results.refetch()} />
+        ) : null}
+
+        {activeQuery && nothingFound ? (
+          <EmptyState
+            variant="no-results"
+            title={`No results for “${activeQuery}”`}
+            message="Check the spelling, try fewer words, or search a hashtag instead."
+            action={{ label: 'Clear search', onClick: clearAll, variant: 'secondary' }}
+          />
+        ) : null}
+
+        {activeQuery && results.isSuccess && !nothingFound ? (
+          <div className="space-y-8">
+            {hashtags.length ? (
+              <section aria-labelledby="res-hashtags">
+                <SubHeading>
+                  <span id="res-hashtags">Hashtags</span>
+                </SubHeading>
+                <HashtagList hashtags={hashtags} />
+              </section>
+            ) : null}
+
+            {users.length ? (
+              <section aria-labelledby="res-people" className="space-y-2">
+                <SubHeading>
+                  <span id="res-people">People</span>
+                </SubHeading>
+                {users.map((u) => (
+                  <UserRow key={u._id} user={u} />
+                ))}
+              </section>
+            ) : null}
+
+            {posts.length ? (
+              <section aria-labelledby="res-posts" className="space-y-4">
+                <SubHeading>
+                  <span id="res-posts">Posts</span>
+                </SubHeading>
+                {posts.map((p) => (
+                  <PostCard key={p._id} post={p} invalidate={[['search', activeQuery, type], ['feed']]} />
+                ))}
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }

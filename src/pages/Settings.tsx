@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -15,15 +16,23 @@ import {
 } from '../lib/hooks';
 import {
   Button,
+  Callout,
   Card,
+  ConfirmDialog,
   ErrorState,
+  IconButton,
   Input,
+  PageHeader,
   Skeleton,
   Switch,
   Textarea,
+  ThemeControl,
+  cx,
   useToast,
 } from './ui';
-import { Check, X } from './icons';
+import { ChevronRight, ExternalLink, FileText, LifeBuoy, LogOut, Shield } from './icons';
+import { PasswordField } from './Login';
+import { PasswordRules } from './Register';
 
 const NOTIFICATION_LABELS: Record<NotificationSettingKey, { title: string; hint: string }> = {
   pauseAll: {
@@ -47,27 +56,73 @@ const NOTIFICATION_LABELS: Record<NotificationSettingKey, { title: string; hint:
 
 const DELETE_PHRASE = 'DELETE MY ACCOUNT';
 
-function Section({
+/* ------------------------------------------------------------------ pieces */
+
+function SettingsCard({
+  id,
   title,
   description,
   children,
+  className,
+  titleClassName,
+  padded = true,
 }: {
+  id: string;
   title: string;
-  description?: string;
-  children: React.ReactNode;
+  description?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  titleClassName?: string;
+  padded?: boolean;
 }) {
   return (
-    <Card className="p-5">
-      <h2 className="text-base font-bold">{title}</h2>
-      {description && (
-        <p className="mt-1 text-sm text-[var(--color-muted)]">{description}</p>
-      )}
-      <div className="mt-4">{children}</div>
+    <Card role="region" aria-labelledby={`${id}-title`} className={className} padded={padded}>
+      <div className={cx(!padded && 'px-4 pt-4 sm:px-5 sm:pt-5')}>
+        <h2 id={`${id}-title`} className={cx('type-heading text-lg text-text-1', titleClassName)}>
+          {title}
+        </h2>
+        {description ? <p className="mt-1 text-sm text-text-2">{description}</p> : null}
+      </div>
+      <div className={cx('mt-4', !padded && 'px-1 pb-1')}>{children}</div>
     </Card>
   );
 }
 
-/* ------------------------------------------------------------------ */
+function ToggleRow({
+  title,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className={cx('flex min-h-11 items-center gap-4 py-2', disabled && 'opacity-70')}>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-text-1">{title}</p>
+        <p className="text-xs text-text-2">{hint}</p>
+      </div>
+      <Switch checked={checked} disabled={disabled} label={title} onChange={onChange} />
+    </div>
+  );
+}
+
+function RowsSkeleton({ rows, height = 'h-11' }: { rows: number; height?: string }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <Skeleton key={i} className={cx('w-full rounded-sm', height)} />
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ account */
 
 function AccountSection() {
   const authUser = useAuth((s) => s.user);
@@ -86,6 +141,7 @@ function AccountSection() {
 
   const [form, setForm] = useState({ fullName: '', username: '', bio: '' });
   const [hydrated, setHydrated] = useState(false);
+  const [errors, setErrors] = useState<{ fullName?: string; username?: string }>({});
 
   useEffect(() => {
     if (meQuery.data && !hydrated) {
@@ -97,6 +153,12 @@ function AccountSection() {
       setHydrated(true);
     }
   }, [meQuery.data, hydrated]);
+
+  const dirty =
+    !!meQuery.data &&
+    (form.fullName !== (meQuery.data.fullName || '') ||
+      form.username !== (meQuery.data.username || '') ||
+      form.bio !== (meQuery.data.bio || ''));
 
   const save = useMutation({
     mutationFn: async () => {
@@ -110,6 +172,7 @@ function AccountSection() {
     onSuccess: (user) => {
       setUser(user as any);
       qc.setQueryData(['me'], user);
+      setForm({ fullName: user.fullName || '', username: user.username || '', bio: user.bio || '' });
       toast.success('Account details saved');
     },
     onError: (e) => toast.error(errMsg(e, 'Could not save your account details.')),
@@ -117,93 +180,104 @@ function AccountSection() {
 
   function submit(e: FormEvent) {
     e.preventDefault();
+    const next: typeof errors = {};
     const uErr = usernameError(form.username.trim());
-    if (uErr) return toast.error(uErr);
-    if (form.fullName.trim().length < 2) return toast.error('Enter your full name.');
+    if (uErr) next.username = uErr;
+    if (form.fullName.trim().length < 2) next.fullName = 'Enter your full name (2+ characters).';
+    setErrors(next);
+    if (next.username || next.fullName) return;
     save.mutate();
   }
 
   if (meQuery.isLoading && !meQuery.data) {
     return (
-      <Section title="Account">
-        <div className="space-y-3">
-          <Skeleton className="h-10 w-full rounded-xl" />
-          <Skeleton className="h-10 w-full rounded-xl" />
-          <Skeleton className="h-20 w-full rounded-xl" />
-        </div>
-      </Section>
+      <SettingsCard id="account" title="Account">
+        <RowsSkeleton rows={3} />
+      </SettingsCard>
     );
   }
 
-  if (meQuery.isError) {
+  if (meQuery.isError && !meQuery.data) {
     return (
-      <Section title="Account">
-        <ErrorState
-          title="Could not load your account"
-          message={errMsg(meQuery.error, 'Please try again.')}
-          action={
-            <Button variant="primary" onClick={() => meQuery.refetch()}>
-              Retry
-            </Button>
-          }
-        />
-      </Section>
+      <SettingsCard id="account" title="Account">
+        <ErrorState title="Could not load your account" error={meQuery.error} retry={() => void meQuery.refetch()} />
+      </SettingsCard>
     );
   }
 
   return (
-    <Section title="Account" description="Your public identity across Vybe.">
+    <SettingsCard id="account" title="Account" description="Your public identity across Vybe.">
       <form onSubmit={submit} className="space-y-4" noValidate>
-        <div>
-          <label htmlFor="set-name" className="mb-1.5 block text-xs font-semibold">
-            Full name
-          </label>
-          <Input
-            id="set-name"
-            maxLength={100}
-            value={form.fullName}
-            onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))}
-          />
+        <Input
+          id="set-name"
+          label="Full name"
+          autoComplete="name"
+          maxLength={100}
+          value={form.fullName}
+          error={errors.fullName}
+          onChange={(e) => {
+            setForm((f) => ({ ...f, fullName: e.target.value }));
+            if (errors.fullName) setErrors((x) => ({ ...x, fullName: undefined }));
+          }}
+        />
+        <Input
+          id="set-username"
+          label="Username"
+          autoComplete="username"
+          autoCapitalize="none"
+          maxLength={30}
+          leading={<span className="text-sm font-semibold">@</span>}
+          hint={errors.username ? undefined : '3–30 characters. Letters, numbers, periods and underscores.'}
+          error={errors.username}
+          value={form.username}
+          onChange={(e) => {
+            setForm((f) => ({ ...f, username: e.target.value.replace(/\s/g, '') }));
+            if (errors.username) setErrors((x) => ({ ...x, username: undefined }));
+          }}
+        />
+        <Textarea
+          id="set-bio"
+          label="Bio"
+          rows={3}
+          autoGrow
+          maxLength={300}
+          placeholder="A line about how you train."
+          hint={`${form.bio.length}/300 characters`}
+          value={form.bio}
+          onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {meQuery.data?.email ? (
+            <p className="text-xs text-text-3">
+              Signed in as <span className="font-semibold text-text-2">{meQuery.data.email}</span>
+            </p>
+          ) : (
+            <span />
+          )}
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty}>
+            Save changes
+          </Button>
         </div>
-        <div>
-          <label htmlFor="set-username" className="mb-1.5 block text-xs font-semibold">
-            Username
-          </label>
-          <Input
-            id="set-username"
-            maxLength={30}
-            value={form.username}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, username: e.target.value.replace(/\s/g, '') }))
-            }
-          />
-        </div>
-        <div>
-          <label htmlFor="set-bio" className="mb-1.5 block text-xs font-semibold">
-            Bio
-          </label>
-          <Textarea
-            id="set-bio"
-            rows={3}
-            maxLength={300}
-            value={form.bio}
-            onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))}
-          />
-        </div>
-        {meQuery.data?.email && (
-          <p className="text-xs text-[var(--color-muted)]">
-            Signed in as {meQuery.data.email}
-          </p>
-        )}
-        <Button type="submit" variant="primary" loading={save.isPending} disabled={save.isPending}>
-          Save changes
-        </Button>
       </form>
-    </Section>
+    </SettingsCard>
   );
 }
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ appearance */
+
+function AppearanceSection() {
+  return (
+    <SettingsCard
+      id="appearance"
+      title="Appearance"
+      description="Choose how Vybe looks. System follows your device setting and switches automatically."
+    >
+      <ThemeControl />
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ password */
 
 function PasswordSection() {
   const toast = useToast();
@@ -211,6 +285,7 @@ function PasswordSection() {
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [show, setShow] = useState(false);
+  const [errors, setErrors] = useState<{ current?: string; next?: string; confirm?: string }>({});
 
   const rules = passwordRules(newPassword);
 
@@ -219,7 +294,7 @@ function PasswordSection() {
       await api.put('/users/password', { currentPassword, newPassword });
     },
     onSuccess: () => {
-      toast.success('Password changed. Please sign in again.');
+      toast.success('Password changed. Sign in again to continue.');
       // The API revokes existing sessions, so drop the token and force re-login.
       tokenStore.clear();
       setTimeout(() => {
@@ -231,109 +306,89 @@ function PasswordSection() {
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!currentPassword) return toast.error('Enter your current password.');
-    if (!isPasswordValid(newPassword))
-      return toast.error('Your new password does not meet all requirements.');
-    if (newPassword === currentPassword)
-      return toast.error('Choose a password different from your current one.');
-    if (newPassword !== confirm) return toast.error('New passwords do not match.');
+    const next: typeof errors = {};
+    if (!currentPassword) next.current = 'Enter your current password.';
+    if (!isPasswordValid(newPassword)) next.next = 'Your new password does not meet all requirements yet.';
+    else if (newPassword === currentPassword) next.next = 'Choose a password different from your current one.';
+    if (newPassword !== confirm) next.confirm = 'New passwords do not match.';
+    setErrors(next);
+    if (next.current || next.next || next.confirm) return;
     change.mutate();
   }
 
   return (
-    <Section
-      title="Password"
-      description="Changing your password signs you out of every device."
-    >
+    <SettingsCard id="password" title="Password" description="Changing your password signs you out of every device.">
       <form onSubmit={submit} className="space-y-4" noValidate>
+        <PasswordField
+          id="set-current"
+          label="Current password"
+          autoComplete="current-password"
+          value={currentPassword}
+          visible={show}
+          onVisibleChange={setShow}
+          error={errors.current}
+          onChange={(e) => {
+            setCurrentPassword(e.target.value.slice(0, 128));
+            if (errors.current) setErrors((x) => ({ ...x, current: undefined }));
+          }}
+        />
         <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <label htmlFor="set-current" className="block text-xs font-semibold">
-              Current password
-            </label>
-            <button
-              type="button"
-              className="text-xs text-[var(--color-muted)] hover:text-white"
-              onClick={() => setShow((v) => !v)}
-            >
-              {show ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <Input
-            id="set-current"
-            type={show ? 'text' : 'password'}
-            autoComplete="current-password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value.slice(0, 128))}
-          />
-        </div>
-
-        <div>
-          <label htmlFor="set-new" className="mb-1.5 block text-xs font-semibold">
-            New password
-          </label>
-          <Input
+          <PasswordField
             id="set-new"
-            type={show ? 'text' : 'password'}
+            label="New password"
             autoComplete="new-password"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value.slice(0, 128))}
+            visible={show}
+            onVisibleChange={setShow}
+            error={errors.next}
+            aria-describedby="set-new-rules"
+            onChange={(e) => {
+              setNewPassword(e.target.value.slice(0, 128));
+              if (errors.next) setErrors((x) => ({ ...x, next: undefined }));
+            }}
           />
-          <ul className="mt-2 space-y-1">
-            {rules.map((rule) => (
-              <li
-                key={rule.id}
-                className={`flex items-center gap-2 text-xs ${
-                  rule.ok ? 'text-emerald-400' : 'text-[var(--color-muted)]'
-                }`}
-              >
-                {rule.ok ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-                {rule.label}
-              </li>
-            ))}
-          </ul>
+          <PasswordRules rules={rules} id="set-new-rules" />
         </div>
-
-        <div>
-          <label htmlFor="set-confirm" className="mb-1.5 block text-xs font-semibold">
-            Confirm new password
-          </label>
-          <Input
-            id="set-confirm"
-            type={show ? 'text' : 'password'}
-            autoComplete="new-password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value.slice(0, 128))}
-          />
+        <PasswordField
+          id="set-confirm"
+          label="Confirm new password"
+          autoComplete="new-password"
+          value={confirm}
+          visible={show}
+          onVisibleChange={setShow}
+          error={errors.confirm ?? (confirm.length > 0 && confirm !== newPassword ? 'New passwords do not match.' : undefined)}
+          onChange={(e) => {
+            setConfirm(e.target.value.slice(0, 128));
+            if (errors.confirm) setErrors((x) => ({ ...x, confirm: undefined }));
+          }}
+        />
+        <div className="flex justify-end">
+          <Button type="submit" variant="primary" loading={change.isPending} disabled={!currentPassword || !newPassword || !confirm}>
+            Change password
+          </Button>
         </div>
-
-        <Button
-          type="submit"
-          variant="primary"
-          loading={change.isPending}
-          disabled={change.isPending}
-        >
-          Change password
-        </Button>
       </form>
-    </Section>
+    </SettingsCard>
   );
 }
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ notifications */
 
-function NotificationsSection() {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const [draft, setDraft] = useState<NotificationSettings | null>(null);
-
-  const settingsQuery = useQuery({
+function useNotificationSettings() {
+  return useQuery({
     queryKey: ['notification-settings'],
     queryFn: async () => {
       const { data } = await api.get('/notifications/settings');
       return pickNotificationSettings(data.settings || data);
     },
   });
+}
+
+function NotificationsSection() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState<NotificationSettings | null>(null);
+  const settingsQuery = useNotificationSettings();
 
   useEffect(() => {
     if (settingsQuery.data && !draft) setDraft(settingsQuery.data);
@@ -345,101 +400,79 @@ function NotificationsSection() {
       const { data } = await api.put('/notifications/settings', payload);
       return pickNotificationSettings(data.settings || payload);
     },
-    onSuccess: (settings) => {
-      setDraft(settings);
-      qc.setQueryData(['notification-settings'], settings);
-      toast.success('Notification preferences saved');
-    },
-    onError: (e, _v, ctx) => {
-      if (ctx) setDraft(ctx as NotificationSettings);
-      toast.error(errMsg(e, 'Could not save your notification preferences.'));
-    },
     onMutate: (next) => {
       const prev = draft;
       setDraft(next);
       return prev;
     },
+    onSuccess: (settings) => {
+      setDraft(settings);
+      qc.setQueryData(['notification-settings'], settings);
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx) setDraft(ctx as NotificationSettings);
+      toast.error(errMsg(e, 'Could not save your notification preferences.'));
+    },
   });
 
   if (settingsQuery.isLoading) {
     return (
-      <Section title="Notifications">
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full rounded-xl" />
-          ))}
-        </div>
-      </Section>
+      <SettingsCard id="notifications" title="Notifications">
+        <RowsSkeleton rows={5} height="h-12" />
+      </SettingsCard>
     );
   }
 
   if (settingsQuery.isError) {
     return (
-      <Section title="Notifications">
-        <ErrorState
-          title="Preferences unavailable"
-          message={errMsg(settingsQuery.error, 'Please try again.')}
-          action={
-            <Button variant="primary" onClick={() => settingsQuery.refetch()}>
-              Retry
-            </Button>
-          }
-        />
-      </Section>
+      <SettingsCard id="notifications" title="Notifications">
+        <ErrorState title="Preferences unavailable" error={settingsQuery.error} retry={() => void settingsQuery.refetch()} />
+      </SettingsCard>
     );
   }
 
   const value = draft || settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
+  const paused = value.pauseAll === true;
+  const rest = NOTIFICATION_SETTING_KEYS.filter((k) => k !== 'pauseAll');
 
   return (
-    <Section
-      title="Notifications"
-      description="Choose what Vybe is allowed to notify you about."
-    >
-      <div className="divide-y divide-[var(--color-line)]">
-        {NOTIFICATION_SETTING_KEYS.map((key) => {
-          const meta = NOTIFICATION_LABELS[key];
-          const disabled =
-            save.isPending || (key !== 'pauseAll' && value.pauseAll === true);
-          return (
-            <div key={key} className="flex items-center gap-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold">{meta.title}</p>
-                <p className="text-xs text-[var(--color-muted)]">{meta.hint}</p>
-              </div>
-              <Switch
-                checked={value[key]}
-                disabled={disabled}
-                label={meta.title}
-                onChange={(checked) => save.mutate({ ...value, [key]: checked })}
-              />
-            </div>
-          );
-        })}
+    <SettingsCard id="notifications" title="Notifications" description="Choose what Vybe is allowed to notify you about. Changes save automatically.">
+      <ToggleRow
+        title={NOTIFICATION_LABELS.pauseAll.title}
+        hint={NOTIFICATION_LABELS.pauseAll.hint}
+        checked={paused}
+        disabled={save.isPending}
+        onChange={(checked) => save.mutate({ ...value, pauseAll: checked })}
+      />
+      {paused ? (
+        <Callout tone="warning" className="my-2">
+          All notifications are paused. Turn “Pause all notifications” off to adjust the individual settings.
+        </Callout>
+      ) : null}
+      <div className="mt-1 divide-y divide-line border-t border-line">
+        {rest.map((key) => (
+          <ToggleRow
+            key={key}
+            title={NOTIFICATION_LABELS[key].title}
+            hint={NOTIFICATION_LABELS[key].hint}
+            checked={value[key]}
+            disabled={save.isPending || paused}
+            onChange={(checked) => save.mutate({ ...value, [key]: checked })}
+          />
+        ))}
       </div>
-      {value.pauseAll && (
-        <p className="mt-3 text-xs text-[var(--color-muted)]">
-          All notifications are paused. Turn off “Pause all notifications” to adjust the
-          individual settings.
-        </p>
-      )}
-    </Section>
+    </SettingsCard>
   );
 }
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ email */
+
+const EMAIL_KEYS: NotificationSettingKey[] = ['newFollowers', 'likes', 'comments', 'friendRequests', 'workoutPosts'];
 
 function EmailPreferencesSection() {
   const toast = useToast();
   const [draft, setDraft] = useState<NotificationSettings | null>(null);
-
-  const settingsQuery = useQuery({
-    queryKey: ['notification-settings'],
-    queryFn: async () => {
-      const { data } = await api.get('/notifications/settings');
-      return pickNotificationSettings(data.settings || data);
-    },
-  });
+  const settingsQuery = useNotificationSettings();
 
   useEffect(() => {
     if (settingsQuery.data && !draft) setDraft(settingsQuery.data);
@@ -447,9 +480,7 @@ function EmailPreferencesSection() {
 
   const save = useMutation({
     mutationFn: async (next: NotificationSettings) => {
-      await api.put('/users/email-preferences', {
-        notifications: pickNotificationSettings(next),
-      });
+      await api.put('/users/email-preferences', { notifications: pickNotificationSettings(next) });
       return next;
     },
     onSuccess: () => toast.success('Email preferences saved'),
@@ -457,129 +488,181 @@ function EmailPreferencesSection() {
   });
 
   const value = draft || settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
-
-  const emailKeys: NotificationSettingKey[] = [
-    'newFollowers',
-    'likes',
-    'comments',
-    'friendRequests',
-    'workoutPosts',
-  ];
+  const base = settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
+  const dirty = EMAIL_KEYS.some((k) => value[k] !== base[k]);
 
   return (
-    <Section
-      title="Email preferences"
-      description="Which of these updates you also receive by email."
-    >
+    <SettingsCard id="email" title="Email preferences" description="Which of these updates you also receive by email.">
       {settingsQuery.isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full rounded-xl" />
-          ))}
-        </div>
+        <RowsSkeleton rows={4} height="h-12" />
+      ) : settingsQuery.isError ? (
+        <ErrorState title="Preferences unavailable" error={settingsQuery.error} retry={() => void settingsQuery.refetch()} />
       ) : (
         <>
-          <div className="divide-y divide-[var(--color-line)]">
-            {emailKeys.map((key) => (
-              <div key={key} className="flex items-center gap-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{NOTIFICATION_LABELS[key].title}</p>
-                  <p className="text-xs text-[var(--color-muted)]">
-                    {NOTIFICATION_LABELS[key].hint}
-                  </p>
-                </div>
-                <Switch
-                  checked={value[key]}
-                  label={NOTIFICATION_LABELS[key].title}
-                  disabled={save.isPending}
-                  onChange={(checked) => setDraft({ ...value, [key]: checked })}
-                />
-              </div>
+          <div className="divide-y divide-line">
+            {EMAIL_KEYS.map((key) => (
+              <ToggleRow
+                key={key}
+                title={NOTIFICATION_LABELS[key].title}
+                hint={NOTIFICATION_LABELS[key].hint}
+                checked={value[key]}
+                disabled={save.isPending}
+                onChange={(checked) => setDraft({ ...value, [key]: checked })}
+              />
             ))}
           </div>
-          <Button
-            variant="primary"
-            className="mt-4"
-            loading={save.isPending}
-            disabled={save.isPending}
-            onClick={() => save.mutate(value)}
-          >
-            Save email preferences
-          </Button>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-text-3">{dirty ? 'You have unsaved changes.' : 'Up to date.'}</p>
+            <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate(value)}>
+              Save email preferences
+            </Button>
+          </div>
         </>
       )}
-    </Section>
+    </SettingsCard>
   );
 }
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ about / legal */
+
+const ABOUT_LINKS: Array<{ label: string; hint: string; icon: ReactNode; to?: string; href?: string }> = [
+  { label: 'Contact support', hint: 'Report a problem or ask a question.', icon: <LifeBuoy size={20} />, to: '/support' },
+  { label: 'Privacy policy', hint: 'What we collect and why.', icon: <Shield size={20} />, href: '/privacy-policy.html' },
+  { label: 'Terms and conditions', hint: 'The rules of the road.', icon: <FileText size={20} />, href: '/terms-and-conditions.html' },
+];
+
+function AboutSection() {
+  const rowCls =
+    'flex min-h-14 items-center gap-3 rounded-sm px-3 py-2 text-left transition-colors dur-1 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px]';
+  return (
+    <SettingsCard id="about" title="Help and legal" padded={false}>
+      <ul className="divide-y divide-line">
+        {ABOUT_LINKS.map((l) => {
+          const body = (
+            <>
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2">{l.icon}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-text-1">{l.label}</span>
+                <span className="block text-xs text-text-2">{l.hint}</span>
+              </span>
+              {l.href ? <ExternalLink size={18} className="shrink-0 text-text-3" /> : <ChevronRight size={18} className="shrink-0 text-text-3" />}
+            </>
+          );
+          return (
+            <li key={l.label}>
+              {l.to ? (
+                <Link to={l.to} viewTransition className={rowCls}>
+                  {body}
+                </Link>
+              ) : (
+                <a href={l.href} className={rowCls}>
+                  {body}
+                </a>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ danger zone */
 
 function DangerZone() {
   const toast = useToast();
   const logout = useAuth((s) => s.logout);
   const [phrase, setPhrase] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   const remove = useMutation({
     mutationFn: async () => {
       await api.delete('/users/me');
     },
     onSuccess: () => {
+      setConfirming(false);
       toast.success('Your account has been permanently deleted.');
       setTimeout(() => logout(), 800);
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not delete your account.')),
+    onError: (e) => {
+      setConfirming(false);
+      toast.error(errMsg(e, 'Could not delete your account.'));
+    },
   });
 
+  const ready = phrase === DELETE_PHRASE;
+
   return (
-    <Card className="border-red-500/40 p-5">
-      <h2 className="text-base font-bold text-red-400">Delete account</h2>
-      <p className="mt-1 text-sm text-[var(--color-muted)]">
-        This permanently deletes your profile, posts, comments, workouts and meals. It cannot
-        be undone.
-      </p>
-      <div className="mt-4 space-y-3">
-        <label htmlFor="del-phrase" className="block text-xs font-semibold">
-          Type <span className="font-mono text-red-400">{DELETE_PHRASE}</span> to confirm
-        </label>
+    <SettingsCard
+      id="delete"
+      title="Delete account"
+      titleClassName="text-danger"
+      className="border-danger/40"
+      description="This permanently deletes your profile, posts, comments, workouts and meals. It cannot be undone."
+    >
+      <div className="space-y-3">
         <Input
           id="del-phrase"
+          label={`Type ${DELETE_PHRASE} to confirm`}
+          hint="Case-sensitive. The button unlocks once the phrase matches."
           value={phrase}
           placeholder={DELETE_PHRASE}
           autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
           onChange={(e) => setPhrase(e.target.value)}
         />
-        <Button
-          variant="danger"
-          disabled={phrase !== DELETE_PHRASE || remove.isPending}
-          loading={remove.isPending}
-          onClick={() => remove.mutate()}
-        >
-          Permanently delete my account
-        </Button>
+        <div className="flex justify-end">
+          <Button variant="danger" disabled={!ready} loading={remove.isPending} onClick={() => setConfirming(true)}>
+            Permanently delete my account
+          </Button>
+        </div>
       </div>
-    </Card>
+      <ConfirmDialog
+        open={confirming}
+        title="Delete your account?"
+        message="Everything you have posted, logged and saved on Vybe will be removed for good. There is no recovery."
+        confirmLabel="Delete account"
+        cancelLabel="Keep my account"
+        destructive
+        loading={remove.isPending}
+        onConfirm={() => remove.mutate()}
+        onCancel={() => setConfirming(false)}
+      />
+    </SettingsCard>
   );
 }
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ page */
 
 export default function Settings() {
   const logout = useAuth((s) => s.logout);
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">Settings</h1>
-        <Button variant="ghost" onClick={() => logout()}>
-          Sign out
-        </Button>
-      </header>
-
-      <AccountSection />
-      <PasswordSection />
-      <NotificationsSection />
-      <EmailPreferencesSection />
-      <DangerZone />
-    </div>
+    <>
+      <PageHeader
+        title="Settings"
+        subtitle="Account, appearance, notifications and privacy."
+        actions={
+          <Button variant="ghost" icon={<LogOut size={18} />} onClick={() => logout()}>
+            Sign out
+          </Button>
+        }
+        mobileActions={
+          <IconButton label="Sign out" onClick={() => logout()}>
+            <LogOut size={22} />
+          </IconButton>
+        }
+      />
+      <div className="w-full max-w-form space-y-4">
+        <AccountSection />
+        <AppearanceSection />
+        <PasswordSection />
+        <NotificationsSection />
+        <EmailPreferencesSection />
+        <AboutSection />
+        <DangerZone />
+      </div>
+    </>
   );
 }

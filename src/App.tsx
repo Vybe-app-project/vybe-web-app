@@ -1,7 +1,9 @@
+/// <reference types="vite-plugin-pwa/react" />
 import { lazy, Suspense, useEffect } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
-import { FullPageSpinner, ToastProvider } from './components/ui';
+import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth } from './lib/auth';
 
 /**
@@ -73,10 +75,16 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Signed-in users skip auth pages; honour the `from` location RequireAuth stored. */
 function GuestOnly({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <FullPageSpinner />;
-  if (user) return <Navigate to="/" replace />;
+  if (user) {
+    const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
+    const target = from?.pathname && from.pathname !== '/login' ? `${from.pathname}${from.search ?? ''}` : '/';
+    return <Navigate to={target} replace />;
+  }
   return <>{children}</>;
 }
 
@@ -87,13 +95,43 @@ function ScrollToTop() {
   return null;
 }
 
+/** Legacy paths that shipped in links: keep them working while pages migrate. */
+function RedirectPost() {
+  const { postId } = useParams();
+  return <Navigate to={postId ? `/p/${postId}` : '/'} replace />;
+}
+
+/** Service-worker lifecycle: prompt to reload when a new build is waiting. */
+function PwaUpdates() {
+  const toast = useToast();
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW({
+    onRegisterError(error) {
+      console.warn('Service worker registration failed', error);
+    },
+  });
+  useEffect(() => {
+    if (!needRefresh) return;
+    toast.info('A new version of Vybe is ready.', {
+      action: { label: 'Reload', onClick: () => void updateServiceWorker(true) },
+      duration: 60_000,
+    });
+    setNeedRefresh(false);
+  }, [needRefresh, setNeedRefresh, toast, updateServiceWorker]);
+  return null;
+}
+
 export default function App() {
   const bootstrap = useAuth((s) => s.bootstrap);
   useEffect(() => { void bootstrap(); }, [bootstrap]);
+  useThemeSync();
 
   return (
     <ToastProvider>
       <ScrollToTop />
+      <PwaUpdates />
       <Suspense fallback={<FullPageSpinner />}>
         <Routes>
           {/* Public auth */}
@@ -149,6 +187,16 @@ export default function App() {
             <Route path="health/photos" element={<ProgressPhotos />} />
             <Route path="challenges" element={<Challenges />} />
             <Route path="achievements" element={<Achievements />} />
+
+            {/* Aliases and legacy paths → canonical routes */}
+            <Route path="create" element={<Navigate to="/?compose=1" replace />} />
+            <Route path="post/:postId" element={<RedirectPost />} />
+            <Route path="feed" element={<Navigate to="/" replace />} />
+            <Route path="explore" element={<Navigate to="/discover" replace />} />
+            <Route path="inbox" element={<Navigate to="/messages" replace />} />
+            <Route path="meal-templates" element={<Navigate to="/meals/templates" replace />} />
+            <Route path="health-goals" element={<Navigate to="/health/goals" replace />} />
+            <Route path="water" element={<Navigate to="/health/water" replace />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

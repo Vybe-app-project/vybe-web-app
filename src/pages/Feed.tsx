@@ -1,45 +1,61 @@
-import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
-import { api, errMsg } from '../lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   ACCEPTED_IMAGE_TYPES,
   MAX_UPLOAD_BYTES,
-  compactNumber,
   displayName,
   extractHashtags,
   uploadImage,
   useInfiniteScroll,
   type PagedPosts,
+  type Post,
   type UploadedMedia,
 } from '../lib/hooks';
 import {
   Avatar,
+  AvatarStack,
   Button,
+  ButtonLink,
   Card,
+  Chip,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
+  IconButton,
+  PageHeader,
   Skeleton,
   Spinner,
   Textarea,
+  cx,
+  formatStat,
+  prefersReducedMotion,
+  useIsTouch,
+  useOnline,
   useToast,
 } from './ui';
-import { Image as ImageIcon, Plus, X } from './icons';
-import PostCard, { PostCardSkeleton } from './PostCard';
+import { ArrowUp, Image as ImageIcon, Refresh, UserPlus, X } from './icons';
+import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors } from './PostCard';
 
 const PAGE_SIZE = 10;
+const MAX_IMAGES = 4;
+const MAX_CHARS = 2000;
 
 /* ------------------------------------------------------------------ */
 /* Composer                                                            */
 /* ------------------------------------------------------------------ */
 
-function Composer() {
+function Composer({
+  open,
+  onOpen,
+  onClose,
+}: {
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const toast = useToast();
@@ -49,6 +65,18 @@ function Composer() {
   const [medias, setMedias] = useState<UploadedMedia[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  const dirty = content.trim().length > 0 || medias.length > 0;
+
+  const reset = useCallback(() => {
+    setContent('');
+    setMedias([]);
+    setPreviews((prev) => {
+      prev.forEach((url) => URL.revokeObjectURL(url));
+      return [];
+    });
+  }, []);
 
   const create = useMutation({
     mutationFn: async () => {
@@ -62,34 +90,36 @@ function Composer() {
       return data;
     },
     onSuccess: () => {
-      setContent('');
-      setMedias([]);
-      previews.forEach((url) => URL.revokeObjectURL(url));
-      setPreviews([]);
+      reset();
+      onClose();
       toast.success('Post shared');
       qc.invalidateQueries({ queryKey: ['feed'] });
       qc.invalidateQueries({ queryKey: ['trending-hashtags'] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not share your post.')),
+    onError: (e) => toast.error(e, 'Could not share your post.'),
   });
 
-  async function onFiles(files: FileList | null) {
-    if (!files?.length) return;
-    const selected = Array.from(files).slice(0, 4 - medias.length);
-    if (!selected.length) {
-      toast.error('You can attach up to 4 images per post.');
+  async function addFiles(files: FileList | File[] | null) {
+    if (!files || !files.length) return;
+    const list = Array.from(files);
+    const room = MAX_IMAGES - medias.length;
+    if (room <= 0) {
+      toast.error(`You can attach up to ${MAX_IMAGES} photos per post.`);
       return;
     }
+    const selected = list.slice(0, room);
+    if (list.length > room) toast.info(`Only the first ${room} photo${room === 1 ? '' : 's'} were added — ${MAX_IMAGES} per post.`);
 
+    onOpen();
     setUploading(true);
     try {
       for (const file of selected) {
         if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-          toast.error(`${file.name}: unsupported image format.`);
+          toast.error(`${file.name}: use a JPEG, PNG, WebP or HEIC photo.`);
           continue;
         }
         if (file.size > MAX_UPLOAD_BYTES) {
-          toast.error(`${file.name} is larger than 10 MB.`);
+          toast.error(`${file.name} is over 10 MB.`);
           continue;
         }
         const uploaded = await uploadImage(file, 'posts');
@@ -97,7 +127,7 @@ function Composer() {
         setPreviews((prev) => [...prev, URL.createObjectURL(file)]);
       }
     } catch (e) {
-      toast.error(errMsg(e, 'Image upload failed.'));
+      toast.error(e, 'Photo upload failed.');
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -113,85 +143,148 @@ function Composer() {
     });
   }
 
-  const canPost = (content.trim().length > 0 || medias.length > 0) && !create.isPending && !uploading;
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
+    if (files.length) {
+      e.preventDefault();
+      void addFiles(files);
+    }
+  }
+
+  function cancel() {
+    if (dirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  }
+
+  const canPost = dirty && !create.isPending && !uploading;
+  const remaining = MAX_CHARS - content.length;
+
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept={ACCEPTED_IMAGE_TYPES.join(',')}
+      multiple
+      hidden
+      onChange={(e) => void addFiles(e.target.files)}
+    />
+  );
+
+  if (!open) {
+    return (
+      <Card className="flex items-center gap-3">
+        {fileInput}
+        <Avatar src={me?.avatar} name={displayName(me)} size="md" />
+        <button
+          type="button"
+          onClick={onOpen}
+          className="input-base flex min-w-0 flex-1 items-center text-left text-text-3 hover:border-text-3"
+        >
+          <span className="truncate">Share a session, a win or a meal…</span>
+        </button>
+        <IconButton label="Add a photo" variant="secondary" onClick={() => fileRef.current?.click()}>
+          <ImageIcon size={22} />
+        </IconButton>
+      </Card>
+    );
+  }
 
   return (
-    <Card className="p-4">
+    <Card aria-label="New post" role="form">
+      {fileInput}
       <div className="flex gap-3">
-        <Avatar src={me?.avatar} name={displayName(me)} size={40} />
+        <Avatar src={me?.avatar} name={displayName(me)} size="md" className="mt-0.5 hidden sm:inline-flex" />
         <div className="min-w-0 flex-1">
           <Textarea
-            placeholder="Share a workout, a win, or a meal… use #hashtags"
+            label="What do you want to share?"
+            hideLabel
+            autoFocus
+            autoGrow
             rows={3}
-            maxLength={2000}
+            maxRows={12}
+            maxLength={MAX_CHARS}
+            placeholder="Share a session, a win or a meal… #hashtags become links"
             value={content}
             onChange={(e) => setContent(e.target.value)}
+            onPaste={onPaste}
             disabled={create.isPending}
           />
 
-          {(previews.length > 0 || uploading) && (
-            <div className="mt-3 flex flex-wrap gap-2">
+          {previews.length > 0 || uploading ? (
+            <ul className="mt-3 flex flex-wrap gap-2" aria-label="Attached photos">
               {previews.map((src, i) => (
-                <div key={src} className="relative h-20 w-20 overflow-hidden rounded-lg">
-                  <img src={src} alt="" className="h-full w-full object-cover" />
+                <li key={src} className="relative h-22 w-22 overflow-hidden rounded-md bg-surface-2">
+                  <img src={src} alt={`Attachment ${i + 1}`} className="h-full w-full object-cover" />
                   <button
                     type="button"
-                    aria-label="Remove image"
+                    aria-label={`Remove photo ${i + 1}`}
                     onClick={() => removeMedia(i)}
-                    className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/70"
+                    className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-scrim text-[var(--navy-50)] before:absolute before:-inset-2 before:content-[''] hover:bg-danger"
                   >
-                    <X className="h-3 w-3" />
+                    <X size={14} />
                   </button>
-                </div>
+                </li>
               ))}
-              {uploading && (
-                <div className="grid h-20 w-20 place-items-center rounded-lg bg-[var(--color-surface-2)]">
-                  <Spinner size={18} />
-                </div>
-              )}
-            </div>
-          )}
+              {uploading ? (
+                <li className="grid h-22 w-22 place-items-center rounded-md bg-surface-2 text-text-2" aria-label="Uploading">
+                  <Spinner size={20} />
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
 
-          <div className="mt-3 flex items-center gap-2">
-            <input
-              ref={fileRef}
-              type="file"
-              accept={ACCEPTED_IMAGE_TYPES.join(',')}
-              multiple
-              hidden
-              onChange={(e) => onFiles(e.target.files)}
-            />
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading || medias.length >= 4 || create.isPending}
-            >
-              <ImageIcon className="h-4 w-4" />
-              Photo
-            </button>
-            <span className="text-xs text-[var(--color-muted)]">
-              {content.trim().length}/2000
-            </span>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button
-              variant="primary"
-              className="ml-auto"
-              onClick={() => create.mutate()}
-              disabled={!canPost}
-              loading={create.isPending}
+              variant="ghost"
+              icon={<ImageIcon size={20} />}
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || medias.length >= MAX_IMAGES || create.isPending}
             >
-              <Plus className="h-4 w-4" />
-              Post
+              Photo
+              {medias.length ? <span className="tabular text-text-3">{medias.length}/{MAX_IMAGES}</span> : null}
             </Button>
+            {content.length > 0 ? (
+              <span
+                className={cx('tabular text-xs', remaining < 100 ? 'text-warning-text' : 'text-text-3')}
+                aria-live="polite"
+              >
+                {remaining} left
+              </span>
+            ) : null}
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="ghost" onClick={cancel} disabled={create.isPending}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={() => create.mutate()} disabled={!canPost} loading={create.isPending}>
+                Post
+              </Button>
+            </div>
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDiscard}
+        title="Discard this post?"
+        message="Your text and photos will be removed."
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          reset();
+          onClose();
+        }}
+        onCancel={() => setConfirmDiscard(false)}
+      />
     </Card>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Trending hashtags strip                                             */
+/* Trending hashtags strip (phones/tablets; the desktop rail has them) */
 /* ------------------------------------------------------------------ */
 
 function TrendingHashtags() {
@@ -208,9 +301,9 @@ function TrendingHashtags() {
 
   if (isLoading) {
     return (
-      <div className="flex gap-2 overflow-hidden">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-8 w-24 shrink-0 rounded-full" />
+      <div className="flex gap-2 overflow-hidden lg:hidden" aria-hidden="true">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-9 w-24 shrink-0 rounded-xs" />
         ))}
       </div>
     );
@@ -219,19 +312,151 @@ function TrendingHashtags() {
   if (!data?.length) return null;
 
   return (
-    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-      {data.map((tag) => (
-        <Link
-          key={tag._id}
-          to={`/search?q=${encodeURIComponent(`#${tag._id}`)}`}
-          className="shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-1.5 text-xs font-semibold hover:border-[var(--color-brand)]"
-        >
-          #{tag._id}
-          <span className="ml-1.5 text-[var(--color-muted)]">
-            {compactNumber(tag.count)}
-          </span>
-        </Link>
-      ))}
+    <nav aria-label="Trending hashtags" className="-mx-4 md:-mx-6 lg:hidden">
+      <div className="snap-row no-scrollbar mask-fade-r flex gap-2 overflow-x-auto px-4 scroll-pl-4 md:px-6 md:scroll-pl-6">
+        {data.slice(0, 12).map((tag) => (
+          <Chip key={tag._id} to={`/search?q=${encodeURIComponent(`#${tag._id}`)}`} className="snap-item shrink-0">
+            #{tag._id}
+            <span className="tabular ml-1 font-medium text-text-3">{formatStat(tag.count, { compact: true })}</span>
+          </Chip>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Pull to refresh (touch)                                             */
+/* ------------------------------------------------------------------ */
+
+const PULL_THRESHOLD = 64;
+const PULL_MAX = 96;
+const PULL_DAMPING = 0.5;
+
+function usePullToRefresh(onRefresh: () => Promise<unknown>, enabled: boolean) {
+  const [pull, setPull] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const pullRef = useRef(0);
+  const refreshingRef = useRef(false);
+  const cb = useRef(onRefresh);
+  cb.current = onRefresh;
+
+  useEffect(() => {
+    if (!enabled) return;
+    let startY: number | null = null;
+    let tracking = false;
+
+    const set = (v: number) => {
+      pullRef.current = v;
+      setPull(v);
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if (refreshingRef.current || window.scrollY > 0 || e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      tracking = true;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!tracking || startY === null) return;
+      const dy = e.touches[0].clientY - startY;
+      if (dy <= 0 || window.scrollY > 0) {
+        if (pullRef.current) set(0);
+        setDragging(false);
+        return;
+      }
+      setDragging(true);
+      set(Math.min(PULL_MAX, dy * PULL_DAMPING));
+    };
+    const onEnd = () => {
+      if (!tracking) return;
+      tracking = false;
+      startY = null;
+      setDragging(false);
+      if (pullRef.current >= PULL_THRESHOLD) {
+        refreshingRef.current = true;
+        setRefreshing(true);
+        set(PULL_THRESHOLD * 0.75);
+        Promise.resolve(cb.current()).finally(() => {
+          refreshingRef.current = false;
+          setRefreshing(false);
+          set(0);
+        });
+      } else {
+        set(0);
+      }
+    };
+
+    // Our indicator replaces the browser's own pull gesture while the feed is mounted.
+    const previous = document.body.style.overscrollBehaviorY;
+    document.body.style.overscrollBehaviorY = 'contain';
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onEnd, { passive: true });
+    window.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      document.body.style.overscrollBehaviorY = previous;
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+      window.removeEventListener('touchcancel', onEnd);
+    };
+  }, [enabled]);
+
+  return { pull, dragging, refreshing };
+}
+
+function PullIndicator({ pull, dragging, refreshing }: { pull: number; dragging: boolean; refreshing: boolean }) {
+  if (pull <= 0 && !refreshing) return null;
+  const progress = Math.min(1, pull / PULL_THRESHOLD);
+  const ready = progress >= 1 || refreshing;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cx('flex items-end justify-center overflow-hidden', !dragging && 'transition-[height] dur-2 ease-out')}
+      style={{ height: pull }}
+    >
+      <div
+        className={cx(
+          'mb-2 grid h-9 w-9 place-items-center rounded-full bg-surface-1 shadow-2 transition-colors dur-1',
+          ready ? 'text-brand' : 'text-text-2',
+        )}
+      >
+        {refreshing ? (
+          <Spinner size={18} />
+        ) : (
+          <Refresh size={18} style={{ transform: `rotate(${progress * 270}deg)`, opacity: 0.35 + progress * 0.65 }} />
+        )}
+      </div>
+      <span className="sr-only">{refreshing ? 'Refreshing your feed' : ready ? 'Release to refresh' : 'Pull to refresh'}</span>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* "New posts" pill                                                    */
+/* ------------------------------------------------------------------ */
+
+function NewPostsPill({ fresh, onShow, busy }: { fresh: Post[]; onShow: () => void; busy: boolean }) {
+  if (!fresh.length) return null;
+  const seen = new Set<string>();
+  const authors = fresh
+    .map((p) => p.author)
+    .filter((a): a is NonNullable<Post['author']> => !!a && !seen.has(a._id) && !!seen.add(a._id))
+    .map((a) => ({ src: a.avatar, name: displayName(a) }));
+  return (
+    <div className="pointer-events-none sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-30 flex justify-center lg:top-[4.5rem]">
+      <button
+        type="button"
+        onClick={onShow}
+        disabled={busy}
+        className="btn btn-primary anim-pop-in pointer-events-auto h-11 rounded-full pl-2 pr-4 shadow-2"
+      >
+        {authors.length ? <AvatarStack users={authors} size="xs" max={3} /> : null}
+        <span className="tabular">{fresh.length === 1 ? '1 new post' : `${fresh.length} new posts`}</span>
+        {busy ? <Spinner size={16} /> : <ArrowUp size={18} />}
+      </button>
     </div>
   );
 }
@@ -240,96 +465,170 @@ function TrendingHashtags() {
 /* Feed                                                                */
 /* ------------------------------------------------------------------ */
 
+function todayLabel(): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+  } catch {
+    return '';
+  }
+}
+
 export default function Feed() {
-  const {
-    data,
-    isLoading,
-    isError,
-    error,
-    refetch,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    isRefetching,
-  } = useInfiniteQuery({
+  const qc = useQueryClient();
+  const online = useOnline();
+  const touch = useIsTouch();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [showingNew, setShowingNew] = useState(false);
+  const hidden = useHiddenAuthors((s) => s.ids);
+  const unhide = useHiddenAuthors((s) => s.unhide);
+
+  // Deep link contract: /?compose=1 (Log sheet, manifest shortcut, /create) opens the composer once.
+  const compose = searchParams.get('compose') === '1';
+  useEffect(() => {
+    if (!compose) return;
+    setComposerOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('compose');
+    setSearchParams(next, { replace: true });
+  }, [compose, searchParams, setSearchParams]);
+
+  const feed = useInfiniteQuery({
     queryKey: ['feed'],
     initialPageParam: 1,
     queryFn: async ({ pageParam }) => {
-      const { data } = await api.get('/posts/feed', {
-        params: { page: pageParam, limit: PAGE_SIZE },
-      });
+      const { data } = await api.get('/posts/feed', { params: { page: pageParam, limit: PAGE_SIZE } });
       return data as PagedPosts;
     },
     getNextPageParam: (last, all) => (last.hasNextPage ? all.length + 1 : undefined),
   });
 
+  const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = feed;
+
+  const allPosts = useMemo(() => data?.pages.flatMap((p) => p.posts || []) ?? [], [data]);
+  const posts = useMemo(() => allPosts.filter((p) => !isAuthorHidden(hidden, p)), [allPosts, hidden]);
+  const hiddenCount = allPosts.length - posts.length;
+
+  // Quiet poll of the first page: surfaces a "New posts" pill instead of a Refresh button.
+  const peek = useQuery({
+    queryKey: ['feed', 'peek'],
+    enabled: allPosts.length > 0 && online,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data } = await api.get('/posts/feed', { params: { page: 1, limit: PAGE_SIZE } });
+      return data as PagedPosts;
+    },
+  });
+
+  const fresh = useMemo(() => {
+    const candidates = peek.data?.posts || [];
+    if (!candidates.length || !allPosts.length) return [];
+    const known = new Set(allPosts.map((p) => p._id));
+    const newest = Math.max(...allPosts.map((p) => new Date(p.createdAt).getTime() || 0));
+    return candidates.filter(
+      (p) => !known.has(p._id) && (new Date(p.createdAt).getTime() || 0) > newest && !isAuthorHidden(hidden, p),
+    );
+  }, [peek.data, allPosts, hidden]);
+
+  const refreshFeed = useCallback(() => qc.invalidateQueries({ queryKey: ['feed'] }), [qc]);
+
+  const showNew = async () => {
+    setShowingNew(true);
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    try {
+      await refreshFeed();
+    } finally {
+      setShowingNew(false);
+    }
+  };
+
+  const pullState = usePullToRefresh(refreshFeed, touch && !isLoading);
+
   const sentinelRef = useInfiniteScroll(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, !!hasNextPage);
 
-  const posts = data?.pages.flatMap((p) => p.posts || []) ?? [];
+  const openComposer = () => {
+    setComposerOpen(true);
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  };
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">Your feed</h1>
-        <Button variant="ghost" onClick={() => refetch()} loading={isRefetching}>
-          Refresh
-        </Button>
-      </header>
+    <div>
+      <PageHeader title="Home" subtitle={todayLabel()} />
+      <PullIndicator {...pullState} />
 
-      <Composer />
-      <TrendingHashtags />
+      <div className="space-y-4">
+        <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
+        <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
+        <TrendingHashtags />
 
-      {isLoading && (
-        <div className="space-y-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <PostCardSkeleton key={i} />
-          ))}
-        </div>
-      )}
+        {isLoading ? (
+          <div className="space-y-4" aria-busy="true" aria-label="Loading your feed">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <PostCardSkeleton key={i} media={i !== 1} />
+            ))}
+          </div>
+        ) : null}
 
-      {isError && !isLoading && (
-        <ErrorState
-          title="We couldn't load your feed"
-          message={errMsg(error, 'Please check your connection and try again.')}
-          action={<Button variant="primary" onClick={() => refetch()}>Try again</Button>}
-        />
-      )}
+        {isError && !isLoading ? (
+          <ErrorState error={error} title="We couldn’t load your feed" onRetry={() => refetch()} />
+        ) : null}
 
-      {!isLoading && !isError && posts.length === 0 && (
-        <EmptyState
-          title="Your feed is quiet"
-          message="Follow other athletes or share your first post to get things moving."
-          action={
-            <Link to="/discover">
-              <Button variant="primary">Discover people</Button>
-            </Link>
-          }
-        />
-      )}
+        {!isLoading && !isError && allPosts.length === 0 ? (
+          <EmptyState
+            title="Your feed is quiet"
+            message="Follow a few athletes and their sessions will show up here."
+            action={{ label: 'Find people to follow', to: '/discover', icon: <UserPlus size={18} /> }}
+            secondaryAction={{ label: 'Share your first post', onClick: openComposer }}
+          />
+        ) : null}
 
-      {posts.map((post) => (
-        <PostCard key={post._id} post={post} invalidate={[['feed']]} />
-      ))}
+        {!isLoading && !isError && allPosts.length > 0 && posts.length === 0 ? (
+          <EmptyState
+            variant="no-results"
+            title="Everything here is from people you muted"
+            message="Unmute them to see their posts again, or find more people to follow."
+            action={{ label: 'Unmute everyone', onClick: () => Object.keys(hidden).forEach(unhide), variant: 'secondary' }}
+            secondaryAction={{ label: 'Find people', to: '/discover' }}
+          />
+        ) : null}
 
-      {hasNextPage && (
-        <div ref={sentinelRef} className="py-6 text-center">
-          {isFetchingNextPage ? (
-            <Spinner />
-          ) : (
-            <Button variant="ghost" onClick={() => fetchNextPage()}>
-              Load more
-            </Button>
-          )}
-        </div>
-      )}
+        {posts.map((post) => (
+          <PostCard key={post._id} post={post} invalidate={[['feed']]} />
+        ))}
 
-      {!hasNextPage && posts.length > 0 && (
-        <p className="py-6 text-center text-xs text-[var(--color-muted)]">
-          You&apos;re all caught up.
-        </p>
-      )}
+        {hasNextPage ? (
+          <div ref={sentinelRef} className="flex justify-center py-4">
+            {isFetchingNextPage ? (
+              <Spinner className="text-text-2" />
+            ) : (
+              <Button variant="ghost" onClick={() => fetchNextPage()}>
+                Load more
+              </Button>
+            )}
+          </div>
+        ) : null}
+
+        {!hasNextPage && posts.length > 0 ? (
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <p className="text-sm font-semibold text-text-1">You’re all caught up.</p>
+            {hiddenCount > 0 ? (
+              <p className="text-xs text-text-3">
+                {hiddenCount} {hiddenCount === 1 ? 'post' : 'posts'} hidden from people you muted.{' '}
+                <button type="button" onClick={() => Object.keys(hidden).forEach(unhide)} className="font-semibold text-brand-text hover:underline">
+                  Unmute everyone
+                </button>
+              </p>
+            ) : null}
+            <ButtonLink to="/discover" variant="ghost">
+              Explore more athletes
+            </ButtonLink>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

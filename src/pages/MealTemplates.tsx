@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -7,19 +8,41 @@ import {
   Badge,
   Button,
   Card,
+  CardMedia,
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
+  Menu,
   Modal,
+  PageHeader,
+  SearchField,
+  Select,
   Skeleton,
+  Stepper,
   Tabs,
   Textarea,
+  cx,
+  formatStat,
+  usePulse,
   useToast,
 } from './ui';
-import { Utensils, Plus, Trash, Edit, Heart, Check, Clock } from './icons';
+import type { MenuItem } from './ui';
+import { Utensils, Plus, Trash, Edit, Heart, Check, Clock, Bookmark, Copy, Link as LinkIcon, Globe, ShareUp } from './icons';
+import { MacroLine, MEAL_TYPE_OPTIONS, defaultMealType, mealTypeLabel, plural } from './Meals';
 
 /* ------------------------------------------------------------------ types */
+
+type TemplateNutrition = {
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
+  sugar?: number;
+  sodium?: number;
+};
 
 type TemplateFood = {
   foodId?: string;
@@ -27,43 +50,38 @@ type TemplateFood = {
   brandName?: string;
   servingSize?: string;
   servingsConsumed?: number;
-  nutrition?: {
-    calories?: number;
-    protein?: number;
-    carbs?: number;
-    fat?: number;
-    fiber?: number;
-    sugar?: number;
-    sodium?: number;
-  };
+  nutrition?: TemplateNutrition;
 };
+
+type TemplateOwner = { _id: string; username?: string; fullName?: string; avatar?: string };
 
 type MealTemplate = {
   _id: string;
-  user?: { _id: string; username?: string; fullName?: string; avatar?: string } | string;
+  user?: TemplateOwner | string;
   name: string;
   description?: string;
   meal_type?: string;
   foods: TemplateFood[];
-  totalNutrition?: { calories?: number; protein?: number; carbs?: number; fat?: number };
+  totalNutrition?: TemplateNutrition;
   timesUsed?: number;
   lastUsed?: string;
   isPublic?: boolean;
   sharedToProfile?: boolean;
   likes?: string[];
   saves?: string[];
+  likesCount?: number;
+  savesCount?: number;
   copyCount?: number;
   image_url?: string;
   tags?: string[];
   isLiked?: boolean;
   isSaved?: boolean;
+  isOwner?: boolean;
   createdAt?: string;
 };
 
-const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack'] as const;
-
 const TABS = [
-  { key: 'mine', label: 'My templates' },
+  { key: 'mine', label: 'Mine' },
   { key: 'discover', label: 'Discover' },
   { key: 'saved', label: 'Saved' },
 ] as const;
@@ -72,18 +90,56 @@ type TabKey = (typeof TABS)[number]['key'];
 
 /* ---------------------------------------------------------------- helpers */
 
-const totalsOf = (t: MealTemplate) => {
+const totalsOf = (t: MealTemplate): TemplateNutrition => {
   if (t.totalNutrition) return t.totalNutrition;
-  return (t.foods ?? []).reduce(
-    (acc, f) => ({
-      calories: (acc.calories ?? 0) + (f.nutrition?.calories ?? 0),
-      protein: (acc.protein ?? 0) + (f.nutrition?.protein ?? 0),
-      carbs: (acc.carbs ?? 0) + (f.nutrition?.carbs ?? 0),
-      fat: (acc.fat ?? 0) + (f.nutrition?.fat ?? 0),
-    }),
+  return (t.foods ?? []).reduce<TemplateNutrition>(
+    (acc, f) => {
+      const k = f.servingsConsumed ?? 1;
+      return {
+        calories: (acc.calories ?? 0) + (f.nutrition?.calories ?? 0) * k,
+        protein: (acc.protein ?? 0) + (f.nutrition?.protein ?? 0) * k,
+        carbs: (acc.carbs ?? 0) + (f.nutrition?.carbs ?? 0) * k,
+        fat: (acc.fat ?? 0) + (f.nutrition?.fat ?? 0) * k,
+      };
+    },
     { calories: 0, protein: 0, carbs: 0, fat: 0 },
   );
 };
+
+const ownerOf = (t: MealTemplate): TemplateOwner | undefined => (typeof t.user === 'object' && t.user ? t.user : undefined);
+
+const shareUrlFor = (token: string) => `${location.origin}/meals/templates?shared=${encodeURIComponent(token)}`;
+
+async function shareOrCopy(url: string, title: string, toast: ReturnType<typeof useToast>) {
+  try {
+    if (typeof navigator.share === 'function') {
+      await navigator.share({ title, url });
+      return;
+    }
+    await navigator.clipboard.writeText(url);
+    toast.success('Share link copied');
+  } catch (e) {
+    if ((e as { name?: string })?.name === 'AbortError') return;
+    toast.info(`Share link: ${url}`, { duration: 8000 });
+  }
+}
+
+const FOOD_LIMIT = 4;
+
+function FoodList({ foods, id }: { foods: TemplateFood[]; id: string }) {
+  if (!foods.length) return <p className="text-xs text-text-3">No foods added yet.</p>;
+  return (
+    <ul className="space-y-0.5 text-xs text-text-2" aria-label="Foods">
+      {foods.slice(0, FOOD_LIMIT).map((f, i) => (
+        <li key={`${id}-${i}`} className="flex items-baseline gap-2">
+          <span className="truncate">{f.food_name}</span>
+          {f.servingsConsumed && f.servingsConsumed !== 1 ? <span className="tabular shrink-0 text-text-3">{f.servingsConsumed}×</span> : null}
+        </li>
+      ))}
+      {foods.length > FOOD_LIMIT ? <li className="text-text-3">and {foods.length - FOOD_LIMIT} more</li> : null}
+    </ul>
+  );
+}
 
 /* ---------------------------------------------------------- template modal */
 
@@ -91,7 +147,7 @@ type FoodDraft = {
   food_name: string;
   brandName: string;
   servingSize: string;
-  servings: string;
+  servings: number;
   calories: string;
   protein: string;
   carbs: string;
@@ -102,7 +158,7 @@ const emptyFood = (): FoodDraft => ({
   food_name: '',
   brandName: '',
   servingSize: '',
-  servings: '1',
+  servings: 1,
   calories: '',
   protein: '',
   carbs: '',
@@ -115,53 +171,69 @@ const foodDraftsFrom = (t?: MealTemplate | null): FoodDraft[] =>
         food_name: f.food_name ?? '',
         brandName: f.brandName ?? '',
         servingSize: f.servingSize ?? '',
-        servings: String(f.servingsConsumed ?? 1),
-        calories: String(f.nutrition?.calories ?? ''),
-        protein: String(f.nutrition?.protein ?? ''),
-        carbs: String(f.nutrition?.carbs ?? ''),
-        fat: String(f.nutrition?.fat ?? ''),
+        servings: f.servingsConsumed ?? 1,
+        calories: f.nutrition?.calories != null ? String(f.nutrition.calories) : '',
+        protein: f.nutrition?.protein != null ? String(f.nutrition.protein) : '',
+        carbs: f.nutrition?.carbs != null ? String(f.nutrition.carbs) : '',
+        fat: f.nutrition?.fat != null ? String(f.nutrition.fat) : '',
       }))
     : [emptyFood()];
 
-function TemplateModal({
-  open,
-  editing,
-  onClose,
-}: {
-  open: boolean;
-  editing: MealTemplate | null;
-  onClose: () => void;
-}) {
+const MACRO_FIELDS = [
+  { key: 'calories', label: 'Calories', unit: 'kcal' },
+  { key: 'protein', label: 'Protein', unit: 'g' },
+  { key: 'carbs', label: 'Carbs', unit: 'g' },
+  { key: 'fat', label: 'Fat', unit: 'g' },
+] as const;
+
+function TemplateModal({ open, editing, onClose }: { open: boolean; editing: MealTemplate | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState(editing?.name ?? '');
   const [description, setDescription] = useState(editing?.description ?? '');
-  const [mealType, setMealType] = useState(editing?.meal_type ?? 'breakfast');
+  const [mealType, setMealType] = useState(editing?.meal_type ?? defaultMealType());
   const [foods, setFoods] = useState<FoodDraft[]>(() => foodDraftsFrom(editing));
+  const [errors, setErrors] = useState<{ name?: string; foods?: string }>({});
   const [seedKey, setSeedKey] = useState('');
 
+  // Re-seed the form whenever the modal opens for a different template.
   const seed = `${open ? 'open' : 'closed'}:${editing?._id ?? 'new'}`;
   if (seed !== seedKey) {
     setSeedKey(seed);
     setName(editing?.name ?? '');
     setDescription(editing?.description ?? '');
-    setMealType(editing?.meal_type ?? 'breakfast');
+    setMealType(editing?.meal_type ?? defaultMealType());
     setFoods(foodDraftsFrom(editing));
+    setErrors({});
   }
 
-  const update = (i: number, patch: Partial<FoodDraft>) =>
-    setFoods((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
+  const update = (i: number, patch: Partial<FoodDraft>) => setFoods((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
+
+  const totals = useMemo(
+    () =>
+      foods.reduce(
+        (acc, f) => ({
+          calories: acc.calories + (Number(f.calories) || 0) * f.servings,
+          protein: acc.protein + (Number(f.protein) || 0) * f.servings,
+          carbs: acc.carbs + (Number(f.carbs) || 0) * f.servings,
+          fat: acc.fat + (Number(f.fat) || 0) * f.servings,
+        }),
+        { calories: 0, protein: 0, carbs: 0, fat: 0 },
+      ),
+    [foods],
+  );
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!name.trim()) throw new Error('Template name is required');
+      const next: typeof errors = {};
+      if (!name.trim()) next.name = 'Give the template a name.';
       const payloadFoods: TemplateFood[] = foods
         .filter((f) => f.food_name.trim())
         .map((f) => ({
           food_name: f.food_name.trim(),
           brandName: f.brandName.trim() || undefined,
           servingSize: f.servingSize.trim() || undefined,
-          servingsConsumed: Number(f.servings) || 1,
+          servingsConsumed: f.servings || 1,
           nutrition: {
             calories: Number(f.calories) || 0,
             protein: Number(f.protein) || 0,
@@ -169,8 +241,11 @@ function TemplateModal({
             fat: Number(f.fat) || 0,
           },
         }));
-      if (!payloadFoods.length) throw new Error('Add at least one food');
-
+      if (!payloadFoods.length) next.foods = 'Add at least one food with a name.';
+      if (next.name || next.foods) {
+        setErrors(next);
+        throw new Error('validation');
+      }
       const body = {
         name: name.trim(),
         description: description.trim() || undefined,
@@ -185,139 +260,244 @@ function TemplateModal({
       return data;
     },
     onSuccess: () => {
-      toast.success(editing ? 'Template updated' : 'Template created');
+      toast.success(editing ? 'Template saved' : 'Template created');
       qc.invalidateQueries({ queryKey: ['meal-templates'] });
       onClose();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save template')),
+    onError: (e) => {
+      if ((e as Error)?.message !== 'validation') toast.error(errMsg(e, 'Could not save template'));
+    },
   });
 
+  const formId = 'meal-template-form';
+
   return (
-    <Modal open={open} onClose={onClose} title={editing ? 'Edit template' : 'New meal template'}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={editing ? 'Edit template' : 'New meal template'}
+      description="A template is a meal you eat often. Log it in one tap from the Templates tab."
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" loading={save.isPending}>
+            {editing ? 'Save changes' : 'Create template'}
+          </Button>
+        </div>
+      }
+    >
       <form
-        className="space-y-4"
+        id={formId}
+        className="space-y-5"
         onSubmit={(e) => {
           e.preventDefault();
           save.mutate();
         }}
       >
-        <Input
-          placeholder="Template name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
+        <div className="grid gap-3 sm:grid-cols-[1fr_12rem]">
+          <Input
+            label="Template name"
+            placeholder="Overnight oats"
+            value={name}
+            error={errors.name}
+            autoComplete="off"
+            onChange={(e) => {
+              setErrors((er) => ({ ...er, name: undefined }));
+              setName(e.target.value);
+            }}
+          />
+          <Select label="Meal type" value={mealType} onChange={setMealType} options={MEAL_TYPE_OPTIONS} />
+        </div>
         <Textarea
+          label="Description"
+          hint="Optional"
           rows={2}
-          placeholder="Description (optional)"
+          autoGrow
+          maxRows={4}
+          placeholder="What makes this one work for you?"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
-        <label className="space-y-1">
-          <span className="text-xs text-[var(--color-muted)]">Meal type</span>
-          <select
-            className="input-base"
-            value={mealType}
-            onChange={(e) => setMealType(e.target.value)}
-          >
-            {MEAL_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
 
-        <div className="space-y-3">
-          <p className="text-sm font-semibold">Foods</p>
+        <fieldset className="space-y-3">
+          <legend className="type-label mb-2 text-text-2">Foods</legend>
           {foods.map((food, i) => (
-            <div key={i} className="space-y-2 rounded-xl border border-[var(--color-line)] p-3">
-              <div className="flex items-center gap-2">
+            <div key={i} className="space-y-3 rounded-md border border-line bg-surface-1 p-3">
+              <div className="flex items-end gap-2">
                 <Input
-                  placeholder="Food name"
+                  label={`Food ${i + 1}`}
+                  placeholder="Rolled oats"
                   value={food.food_name}
-                  onChange={(e) => update(i, { food_name: e.target.value })}
+                  containerClassName="flex-1"
+                  onChange={(e) => {
+                    setErrors((er) => ({ ...er, foods: undefined }));
+                    update(i, { food_name: e.target.value });
+                  }}
                 />
-                {foods.length > 1 && (
-                  <button
-                    type="button"
-                    aria-label={`Remove food ${i + 1}`}
-                    className="btn btn-ghost px-2"
-                    onClick={() => setFoods((prev) => prev.filter((_, idx) => idx !== i))}
-                  >
-                    <Trash size={16} />
-                  </button>
-                )}
+                <IconButton
+                  label={`Remove food ${i + 1}`}
+                  variant="ghost"
+                  disabled={foods.length === 1}
+                  onClick={() => setFoods((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  <Trash size={18} />
+                </IconButton>
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                <Input
-                  placeholder="Brand"
-                  value={food.brandName}
-                  onChange={(e) => update(i, { brandName: e.target.value })}
-                />
-                <Input
-                  placeholder="Serving size"
-                  value={food.servingSize}
-                  onChange={(e) => update(i, { servingSize: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.25"
-                  placeholder="Servings"
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <Input label="Brand" hint="Optional" placeholder="Quaker" value={food.brandName} onChange={(e) => update(i, { brandName: e.target.value })} />
+                <Input label="Serving size" placeholder="80 g" value={food.servingSize} onChange={(e) => update(i, { servingSize: e.target.value })} />
+                <Stepper
+                  label="Servings"
                   value={food.servings}
-                  onChange={(e) => update(i, { servings: e.target.value })}
+                  min={0.5}
+                  max={20}
+                  step={0.5}
+                  format={(v) => `${v}×`}
+                  onChange={(next) => update(i, { servings: next })}
+                  containerClassName="col-span-2 sm:col-span-1"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Calories"
-                  value={food.calories}
-                  onChange={(e) => update(i, { calories: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Protein"
-                  value={food.protein}
-                  onChange={(e) => update(i, { protein: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Carbs"
-                  value={food.carbs}
-                  onChange={(e) => update(i, { carbs: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Fat"
-                  value={food.fat}
-                  onChange={(e) => update(i, { fat: e.target.value })}
-                />
+                {MACRO_FIELDS.map((m) => (
+                  <Input
+                    key={m.key}
+                    label={`${m.label} (${m.unit})`}
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="any"
+                    placeholder="0"
+                    className="tabular"
+                    value={food[m.key]}
+                    onChange={(e) => update(i, { [m.key]: e.target.value })}
+                  />
+                ))}
               </div>
             </div>
           ))}
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setFoods((prev) => [...prev, emptyFood()])}
-          >
-            <Plus size={16} /> Add food
+          {errors.foods ? (
+            <p role="alert" className="text-xs text-danger">
+              {errors.foods}
+            </p>
+          ) : null}
+          <Button type="button" variant="secondary" icon={<Plus size={18} />} onClick={() => setFoods((prev) => [...prev, emptyFood()])}>
+            Add another food
           </Button>
-        </div>
+        </fieldset>
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" loading={save.isPending}>
-            {editing ? 'Save changes' : 'Create template'}
-          </Button>
+        <div className="rounded-md bg-surface-2 p-3" aria-live="polite">
+          <p className="type-label text-text-2">Whole template</p>
+          <MacroLine nutrition={totals} className="mt-1 text-sm" />
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------- shared modal */
+
+function SharedTemplateModal({ token, onClose }: { token: string | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  const shared = useQuery({
+    queryKey: ['meal-templates', 'shared-link', token],
+    queryFn: async (): Promise<MealTemplate> => {
+      const { data } = await api.get<MealTemplate>(`/meal-templates/shared/${encodeURIComponent(token ?? '')}`);
+      return data;
+    },
+    enabled: Boolean(token),
+    retry: false,
+  });
+
+  const copy = useMutation({
+    mutationFn: async () => {
+      if (!shared.data) throw new Error('Nothing to copy');
+      const { data } = await api.post(`/meal-templates/${shared.data._id}/copy`, { shareToken: token });
+      return data;
+    },
+    onSuccess: () => {
+      toast.success('Added to your templates');
+      qc.invalidateQueries({ queryKey: ['meal-templates'] });
+      onClose();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not copy this template')),
+  });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!shared.data) throw new Error('Nothing to save');
+      const { data } = await api.post(`/meal-templates/${shared.data._id}/save`, { shareToken: token });
+      return data as { isSaved: boolean };
+    },
+    onSuccess: (data) => {
+      toast.success(data.isSaved ? 'Saved' : 'Removed from saved');
+      qc.invalidateQueries({ queryKey: ['meal-templates'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not save this template')),
+  });
+
+  const t = shared.data;
+  const owner = t ? ownerOf(t) : undefined;
+
+  return (
+    <Modal
+      open={Boolean(token)}
+      onClose={onClose}
+      title="Shared template"
+      description={owner ? `Shared by ${owner.fullName || `@${owner.username ?? 'a Vybe member'}`}` : undefined}
+      size="sm"
+      footer={
+        t && !t.isOwner ? (
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" icon={<Bookmark size={18} filled={Boolean(t.isSaved)} />} loading={save.isPending} onClick={() => save.mutate()}>
+              {t.isSaved ? 'Saved' : 'Save'}
+            </Button>
+            <Button variant="primary" icon={<Copy size={18} />} loading={copy.isPending} onClick={() => copy.mutate()}>
+              Add to my templates
+            </Button>
+          </div>
+        ) : undefined
+      }
+    >
+      {shared.isLoading ? (
+        <div className="space-y-3" aria-busy="true">
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      ) : shared.isError || !t ? (
+        <ErrorState
+          title="This link has expired"
+          message="Share links stop working after a while. Ask for a fresh one."
+          action={
+            <Button variant="primary" onClick={onClose}>
+              Close
+            </Button>
+          }
+        />
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-md font-semibold text-text-1">{t.name}</p>
+              {t.description ? <p className="mt-0.5 text-sm text-text-2">{t.description}</p> : null}
+            </div>
+            <Badge tone="brand">{mealTypeLabel(t.meal_type)}</Badge>
+          </div>
+          {t.image_url ? (
+            <CardMedia ratio="16/9">
+              <img src={mediaUrl(t.image_url)} alt="" className="h-full w-full object-cover" />
+            </CardMedia>
+          ) : null}
+          <MacroLine nutrition={totalsOf(t)} />
+          <FoodList foods={t.foods ?? []} id={t._id} />
+          {t.isOwner ? <p className="text-xs text-text-2">This is one of your own templates.</p> : null}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -337,16 +517,16 @@ function TemplateCard({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
   const { user } = useAuth();
+  const pulse = usePulse();
 
-  const owner = typeof template.user === 'object' && template.user ? template.user : undefined;
-  const isMine = tab === 'mine' || (user && owner?._id === user._id);
+  const owner = ownerOf(template);
+  const isMine = template.isOwner ?? (tab === 'mine' || Boolean(user && owner?._id === user._id));
   const totals = totalsOf(template);
-
-  const liked =
-    template.isLiked ?? Boolean(user && (template.likes ?? []).some((v) => String(v) === user._id));
-  const saved =
-    template.isSaved ?? Boolean(user && (template.saves ?? []).some((v) => String(v) === user._id));
+  const liked = template.isLiked ?? Boolean(user && (template.likes ?? []).some((v) => String(v) === user._id));
+  const saved = template.isSaved ?? Boolean(user && (template.saves ?? []).some((v) => String(v) === user._id));
+  const likeCount = template.likesCount ?? (template.likes ?? []).length;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['meal-templates'] });
 
@@ -356,7 +536,7 @@ function TemplateCard({
       return data as { isLiked: boolean; likesCount: number };
     },
     onError: (e) => toast.error(errMsg(e, 'Could not like template')),
-    onSuccess: () => invalidate(),
+    onSettled: () => invalidate(),
   });
 
   const save = useMutation({
@@ -365,7 +545,7 @@ function TemplateCard({
       return data as { isSaved: boolean };
     },
     onSuccess: (data) => {
-      toast.success(data.isSaved ? 'Saved to collection' : 'Removed from saved');
+      toast.success(data.isSaved ? 'Saved' : 'Removed from saved');
       invalidate();
     },
     onError: (e) => toast.error(errMsg(e, 'Could not save template')),
@@ -377,7 +557,7 @@ function TemplateCard({
       return data;
     },
     onSuccess: () => {
-      toast.success('Copied to your templates');
+      toast.success('Added to your templates');
       invalidate();
     },
     onError: (e) => toast.error(errMsg(e, 'Could not copy template')),
@@ -386,11 +566,15 @@ function TemplateCard({
   const logTemplate = useMutation({
     mutationFn: async () => {
       const { data } = await api.post(`/meal-templates/${template._id}/log`);
-      return data as { message: string };
+      return data as { message?: string };
     },
-    onSuccess: (data) => {
-      toast.success(data.message || 'Template logged');
+    onSuccess: () => {
+      const n = template.foods?.length ?? 0;
+      toast.success(`Logged ${template.name} as ${mealTypeLabel(template.meal_type).toLowerCase()}${n > 1 ? ` (${n} foods)` : ''}`, {
+        action: { label: 'View meals', onClick: () => navigate('/meals', { viewTransition: true }) },
+      });
       qc.invalidateQueries({ queryKey: ['meals'] });
+      qc.invalidateQueries({ queryKey: ['nutrition-summary'] });
       invalidate();
     },
     onError: (e) => toast.error(errMsg(e, 'Could not log template')),
@@ -401,123 +585,149 @@ function TemplateCard({
       const { data } = await api.post(`/meal-templates/${template._id}/share-token`);
       return data as { token: string; expiresAt: string };
     },
-    onSuccess: async (data) => {
-      const url = `${location.origin}/meal-templates/shared/${data.token}`;
-      try {
-        await navigator.clipboard.writeText(url);
-        toast.success('Share link copied');
-      } catch {
-        toast.success(`Share link: ${url}`);
-      }
-    },
-    onError: (e) => toast.error(errMsg(e, 'Could not create share link')),
+    onSuccess: (data) => void shareOrCopy(shareUrlFor(data.token), `${template.name} on Vybe`, toast),
+    onError: (e) => toast.error(errMsg(e, 'Could not create a share link')),
   });
 
+  const profileShare = useMutation({
+    mutationFn: async () => {
+      const { data } = template.sharedToProfile
+        ? await api.post(`/meal-templates/${template._id}/unshare-profile`)
+        : await api.post(`/meal-templates/${template._id}/share-profile`);
+      return data;
+    },
+    onSuccess: () => {
+      toast.success(template.sharedToProfile ? 'Removed from your profile' : 'Shared to your profile');
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not update sharing')),
+  });
+
+  const revoke = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.delete(`/meal-templates/${template._id}/share-token`);
+      return data;
+    },
+    onSuccess: () => toast.success('Share links revoked'),
+    onError: (e) => toast.error(errMsg(e, 'Could not revoke share links')),
+  });
+
+  const ownerMenu: MenuItem[] = [
+    { label: 'Edit template', icon: <Edit size={18} />, onSelect: () => onEdit(template) },
+    { label: 'Copy share link', description: 'Anyone with the link can view and copy it', icon: <LinkIcon size={18} />, onSelect: () => share.mutate() },
+    {
+      label: template.sharedToProfile ? 'Remove from profile' : 'Share to profile',
+      description: template.sharedToProfile ? 'Hide it from Discover' : 'Show it in Discover and on your profile',
+      icon: <Globe size={18} />,
+      onSelect: () => profileShare.mutate(),
+    },
+    { label: 'Revoke share links', icon: <ShareUp size={18} />, onSelect: () => revoke.mutate() },
+    { label: 'Delete template', icon: <Trash size={18} />, danger: true, divider: true, onSelect: () => onDelete(template) },
+  ];
+
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card className="flex h-full flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate font-semibold">{template.name}</p>
-          {template.description && (
-            <p className="line-clamp-2 text-sm text-[var(--color-muted)]">
-              {template.description}
-            </p>
-          )}
+          <h3 className="truncate text-md font-semibold text-text-1">{template.name}</h3>
+          {template.description ? <p className="mt-0.5 line-clamp-2 text-sm text-text-2">{template.description}</p> : null}
         </div>
-        {template.meal_type && <Badge>{template.meal_type}</Badge>}
+        <Badge tone="brand" className="shrink-0">
+          {mealTypeLabel(template.meal_type)}
+        </Badge>
       </div>
 
-      {template.image_url && (
-        <img
-          src={mediaUrl(template.image_url)}
-          alt={template.name}
-          loading="lazy"
-          className="h-28 w-full rounded-xl object-cover"
-        />
-      )}
-
-      <p className="text-xs text-[var(--color-muted)]">
-        {Math.round(totals.calories ?? 0)} kcal · P{Math.round(totals.protein ?? 0)}g · C
-        {Math.round(totals.carbs ?? 0)}g · F{Math.round(totals.fat ?? 0)}g
-      </p>
-
-      <ul className="space-y-1">
-        {(template.foods ?? []).slice(0, 4).map((f, i) => (
-          <li key={`${template._id}-${i}`} className="truncate text-xs text-[var(--color-muted)]">
-            • {f.food_name}
-            {f.servingsConsumed && f.servingsConsumed !== 1 ? ` ×${f.servingsConsumed}` : ''}
-          </li>
-        ))}
-        {(template.foods?.length ?? 0) > 4 && (
-          <li className="text-xs text-[var(--color-muted)]">
-            +{(template.foods?.length ?? 0) - 4} more
-          </li>
-        )}
-      </ul>
-
-      {owner && !isMine && (
-        <div className="flex items-center gap-2">
-          <Avatar src={mediaUrl(owner.avatar)} alt={owner.username ?? ''} size={22} />
-          <span className="text-xs text-[var(--color-muted)]">
-            @{owner.username ?? 'unknown'}
-          </span>
-        </div>
-      )}
-
-      {template.timesUsed ? (
-        <span className="inline-flex items-center gap-1 text-xs text-[var(--color-muted)]">
-          <Clock size={12} /> used {template.timesUsed}×
-        </span>
+      {template.image_url ? (
+        <CardMedia ratio="16/9">
+          <img src={mediaUrl(template.image_url)} alt="" loading="lazy" className="h-full w-full object-cover" />
+        </CardMedia>
       ) : null}
 
-      <div className="mt-auto flex flex-wrap gap-2 pt-1">
+      <MacroLine nutrition={totals} />
+      <FoodList foods={template.foods ?? []} id={template._id} />
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-2">
+        {owner && !isMine ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Avatar src={owner.avatar} name={owner.fullName || owner.username} alt="" size="xs" />
+            <span className="truncate">{owner.fullName || `@${owner.username ?? 'member'}`}</span>
+          </span>
+        ) : null}
+        {template.timesUsed ? (
+          <span className="inline-flex items-center gap-1">
+            <Clock size={13} /> Logged {formatStat(template.timesUsed)} {plural(template.timesUsed, 'time')}
+          </span>
+        ) : null}
+        {isMine && template.sharedToProfile ? (
+          <Badge tone="neutral">
+            <Globe size={12} /> On profile
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className="mt-auto flex items-center gap-2 pt-1">
         {isMine ? (
           <>
-            <Button variant="primary" onClick={() => logTemplate.mutate()} loading={logTemplate.isPending}>
-              <Check size={14} /> Log
+            <Button variant="primary" icon={<Check size={18} />} onClick={() => logTemplate.mutate()} loading={logTemplate.isPending} className="flex-1 sm:flex-none">
+              Log now
             </Button>
-            <Button variant="ghost" onClick={() => onEdit(template)}>
-              <Edit size={14} /> Edit
+            <Button variant="secondary" icon={<Edit size={18} />} onClick={() => onEdit(template)} className="hidden sm:inline-flex">
+              Edit
             </Button>
-            <Button variant="ghost" onClick={() => share.mutate()} loading={share.isPending}>
-              Share
-            </Button>
-            <button
-              type="button"
-              aria-label="Delete template"
-              className="btn btn-ghost px-2"
-              onClick={() => onDelete(template)}
-            >
-              <Trash size={14} />
-            </button>
+            <span className="ml-auto">
+              <Menu label={`Options for ${template.name}`} items={ownerMenu} />
+            </span>
           </>
         ) : (
           <>
-            <Button variant="primary" onClick={() => copy.mutate()} loading={copy.isPending}>
+            <Button variant="primary" icon={<Copy size={18} />} onClick={() => copy.mutate()} loading={copy.isPending} className="flex-1 sm:flex-none">
               Copy
             </Button>
-            <button
-              type="button"
-              className="btn btn-ghost px-3 py-1 text-xs"
-              aria-pressed={liked}
-              onClick={() => like.mutate()}
-              disabled={like.isPending}
-            >
-              <Heart size={13} /> {(template.likes ?? []).length}
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost px-3 py-1 text-xs"
-              aria-pressed={saved}
-              onClick={() => save.mutate()}
-              disabled={save.isPending}
-            >
-              {saved ? 'Saved' : 'Save'}
-            </button>
+            <span className="ml-auto flex items-center gap-1">
+              <button
+                type="button"
+                className={cx(
+                  'inline-flex h-11 min-w-11 items-center gap-1.5 rounded-sm px-2.5 text-xs font-semibold transition-colors dur-1',
+                  liked ? 'text-accent-text' : 'text-text-2 hover:bg-surface-2 hover:text-text-1',
+                )}
+                aria-pressed={liked}
+                aria-label={liked ? 'Unlike' : 'Like'}
+                onClick={() => {
+                  pulse.pulse();
+                  like.mutate();
+                }}
+                disabled={like.isPending}
+              >
+                <Heart size={18} filled={liked} className={cx(pulse.className, liked && 'text-accent')} />
+                <span className="tabular">{formatStat(likeCount)}</span>
+              </button>
+              <IconButton label={saved ? 'Remove from saved' : 'Save template'} active={saved} onClick={() => save.mutate()} disabled={save.isPending}>
+                <Bookmark size={20} filled={saved} />
+              </IconButton>
+            </span>
           </>
         )}
       </div>
     </Card>
+  );
+}
+
+function CardSkeletons({ count = 6 }: { count?: number }) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading templates">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="card space-y-3 p-4 sm:p-5">
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-3 w-1/2" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-4/5" />
+          <div className="flex gap-2 pt-2">
+            <Skeleton className="h-11 w-28" />
+            <Skeleton className="h-11 w-11" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -526,11 +736,19 @@ function TemplateCard({
 export default function MealTemplates() {
   const qc = useQueryClient();
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState<TabKey>('mine');
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<MealTemplate | null>(null);
   const [pendingDelete, setPendingDelete] = useState<MealTemplate | null>(null);
   const [search, setSearch] = useState('');
+
+  const sharedToken = params.get('shared');
+  const closeShared = () => {
+    const next = new URLSearchParams(params);
+    next.delete('shared');
+    setParams(next, { replace: true });
+  };
 
   const mine = useQuery({
     queryKey: ['meal-templates', 'mine'],
@@ -538,15 +756,12 @@ export default function MealTemplates() {
       const { data } = await api.get<MealTemplate[]>('/meal-templates');
       return data;
     },
-    enabled: tab === 'mine',
   });
 
   const discover = useQuery({
     queryKey: ['meal-templates', 'discover'],
     queryFn: async (): Promise<MealTemplate[]> => {
-      const { data } = await api.get<MealTemplate[]>('/meal-templates/feed/shared', {
-        params: { page: 1, limit: 50 },
-      });
+      const { data } = await api.get<MealTemplate[]>('/meal-templates/feed/shared', { params: { page: 1, limit: 50 } });
       return data;
     },
     enabled: tab === 'discover',
@@ -572,9 +787,7 @@ export default function MealTemplates() {
       const key = ['meal-templates', 'mine'];
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<MealTemplate[]>(key);
-      qc.setQueryData<MealTemplate[]>(key, (old) =>
-        (old ?? []).filter((t) => t._id !== template._id),
-      );
+      qc.setQueryData<MealTemplate[]>(key, (old) => (old ?? []).filter((t) => t._id !== template._id));
       return { previous, key };
     },
     onError: (e, _v, ctx) => {
@@ -591,79 +804,102 @@ export default function MealTemplates() {
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
     const data = active.data ?? [];
-    return q ? data.filter((t) => t.name.toLowerCase().includes(q)) : data;
+    if (!q) return data;
+    return data.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        (t.description ?? '').toLowerCase().includes(q) ||
+        (t.foods ?? []).some((f) => f.food_name?.toLowerCase().includes(q)) ||
+        (t.tags ?? []).some((tag) => tag.toLowerCase().includes(q)),
+    );
   }, [active.data, search]);
 
+  const openNew = () => {
+    setEditing(null);
+    setModal(true);
+  };
+
+  const emptyCopy: Record<TabKey, { title: string; message: string; action: { label: string; onClick: () => void; icon?: React.ReactNode } }> = {
+    mine: {
+      title: 'No templates yet',
+      message: 'Save a meal you eat often and log it in one tap next time.',
+      action: { label: 'New template', onClick: openNew, icon: <Plus size={18} /> },
+    },
+    discover: {
+      title: 'Nothing shared yet',
+      message: 'Templates people share to their profile show up here. Share one of yours from its menu to get things going.',
+      action: { label: 'See my templates', onClick: () => setTab('mine') },
+    },
+    saved: {
+      title: 'Nothing saved yet',
+      message: 'Tap the bookmark on a template in Discover to keep it here.',
+      action: { label: 'Browse Discover', onClick: () => setTab('discover') },
+    },
+  };
+
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5 p-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Meal templates</h1>
-          <p className="text-sm text-[var(--color-muted)]">
-            Save meals you eat often and log them in one tap.
-          </p>
-        </div>
-        <Button
-          variant="primary"
-          onClick={() => {
-            setEditing(null);
-            setModal(true);
-          }}
-        >
-          <Plus size={16} /> New template
-        </Button>
-      </header>
-
-      <Tabs
-        tabs={TABS.map((t) => ({ key: t.key, label: t.label }))}
-        value={tab}
-        onChange={(k: string) => setTab(k as TabKey)}
+    <div className="space-y-6">
+      <PageHeader
+        title="Meal templates"
+        subtitle="Save the meals you eat often and log them in one tap."
+        actions={
+          <Button variant="primary" icon={<Plus size={18} />} onClick={openNew}>
+            New template
+          </Button>
+        }
+        mobileActions={
+          <IconButton label="New template" onClick={openNew}>
+            <Plus size={22} />
+          </IconButton>
+        }
       />
 
-      <Input
-        placeholder="Filter templates…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Tabs
+          variant="segmented"
+          aria-label="Template collections"
+          tabs={TABS.map((t) => ({
+            key: t.key,
+            label: t.label,
+            count: t.key === 'mine' ? mine.data?.length : t.key === 'discover' ? discover.data?.length : saved.data?.length,
+          }))}
+          value={tab}
+          onChange={(k: string) => setTab(k as TabKey)}
+        />
+        <SearchField
+          label="Filter templates"
+          hideLabel
+          placeholder="Filter by name, food or tag"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          containerClassName="sm:max-w-xs"
+        />
+      </div>
 
       {active.isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-56 w-full" />
-          ))}
-        </div>
+        <CardSkeletons />
       ) : active.isError ? (
-        <ErrorState
-          message={errMsg(active.error, 'Could not load templates')}
-          onRetry={() => active.refetch()}
-        />
+        <ErrorState title="Couldn’t load templates" error={active.error} onRetry={() => active.refetch()} />
       ) : list.length === 0 ? (
-        <EmptyState
-          icon={<Utensils size={28} />}
-          title={
-            tab === 'mine'
-              ? 'No templates yet'
-              : tab === 'saved'
-                ? 'Nothing saved yet'
-                : 'Nothing shared yet'
-          }
-          description={
-            tab === 'mine'
-              ? 'Create a template for your go-to meals.'
-              : tab === 'saved'
-                ? 'Save templates from Discover to find them here.'
-                : 'Check back later for meals shared by the community.'
-          }
-          action={
-            tab === 'mine' ? (
-              <Button variant="primary" onClick={() => setModal(true)}>
-                <Plus size={16} /> New template
-              </Button>
-            ) : undefined
-          }
-        />
+        <Card padded={false}>
+          {search.trim() && (active.data?.length ?? 0) > 0 ? (
+            <EmptyState
+              variant="no-results"
+              title={`No templates match “${search.trim()}”`}
+              message="Try a shorter word, or clear the filter."
+              action={{ label: 'Clear filter', onClick: () => setSearch(''), variant: 'secondary' }}
+            />
+          ) : (
+            <EmptyState
+              title={emptyCopy[tab].title}
+              message={emptyCopy[tab].message}
+              action={{ ...emptyCopy[tab].action, variant: 'primary' }}
+              secondaryAction={tab !== 'mine' ? { label: 'New template', onClick: openNew, icon: <Plus size={18} /> } : undefined}
+            />
+          )}
+        </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((template) => (
             <TemplateCard
               key={template._id}
@@ -687,11 +923,13 @@ export default function MealTemplates() {
           setEditing(null);
         }}
       />
+      <SharedTemplateModal token={sharedToken} onClose={closeShared} />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
-        title="Delete template"
-        message={`"${pendingDelete?.name ?? ''}" will be permanently removed.`}
-        confirmLabel="Delete"
+        title="Delete this template?"
+        message={`“${pendingDelete?.name ?? ''}” will be removed for good. Meals you already logged from it stay in your log.`}
+        confirmLabel="Delete template"
+        destructive
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => pendingDelete && remove.mutate(pendingDelete)}

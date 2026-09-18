@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api, errMsg } from '../lib/api';
-import type { Post, PublicUser } from '../lib/hooks';
-import { Button, EmptyState, ErrorState, Input, Tabs } from './ui';
-import { Search as SearchIcon } from './icons';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { useDebounced, type Post, type PublicUser } from '../lib/hooks';
+import { EmptyState, ErrorState, PageHeader, SearchField, Tabs, cx } from './ui';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
 
@@ -16,6 +15,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'coaches', label: 'Coaches' },
 ];
 
+const isTabKey = (v: string): v is TabKey => TABS.some((t) => t.key === v);
+
 function PostList({
   queryKey,
   feed,
@@ -27,9 +28,7 @@ function PostList({
   emptyTitle: string;
   emptyMessage: string;
 }) {
-  const endpoint = feed === 'recommended'
-    ? '/posts/recommended'
-    : '/posts/all/trendings';
+  const endpoint = feed === 'recommended' ? '/posts/recommended' : '/posts/all/trendings';
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [queryKey],
     queryFn: async () => {
@@ -40,27 +39,23 @@ function PostList({
 
   if (isLoading)
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" aria-busy="true">
         {Array.from({ length: 3 }).map((_, i) => (
           <PostCardSkeleton key={i} />
         ))}
       </div>
     );
 
-  if (isError)
+  if (isError) return <ErrorState title="Could not load posts" error={error} retry={() => void refetch()} />;
+
+  if (!data?.length)
     return (
-      <ErrorState
-        title="Could not load posts"
-        message={errMsg(error, 'Please try again in a moment.')}
-        action={
-          <Button variant="primary" onClick={() => refetch()}>
-            Try again
-          </Button>
-        }
+      <EmptyState
+        title={emptyTitle}
+        message={emptyMessage}
+        action={{ label: 'Find people to follow', to: '/search', variant: 'secondary' }}
       />
     );
-
-  if (!data?.length) return <EmptyState title={emptyTitle} message={emptyMessage} />;
 
   return (
     <div className="space-y-4">
@@ -85,8 +80,9 @@ function PeopleList({
   emptyMessage: string;
 }) {
   const endpoint = audience === 'people' ? '/users/all/search' : '/users/coaches';
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch, isPlaceholderData } = useQuery({
     queryKey: [queryKey, search],
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const { data } = await api.get(endpoint, { params: search ? { q: search } : {} });
       return (data.users || data.coaches || []) as PublicUser[];
@@ -95,30 +91,27 @@ function PeopleList({
 
   if (isLoading)
     return (
-      <div className="space-y-3">
+      <div className="space-y-2" aria-busy="true">
         {Array.from({ length: 5 }).map((_, i) => (
           <UserRowSkeleton key={i} />
         ))}
       </div>
     );
 
-  if (isError)
+  if (isError) return <ErrorState title="Could not load people" error={error} retry={() => void refetch()} />;
+
+  if (!data?.length)
     return (
-      <ErrorState
-        title="Could not load people"
-        message={errMsg(error, 'Please try again in a moment.')}
-        action={
-          <Button variant="primary" onClick={() => refetch()}>
-            Try again
-          </Button>
-        }
+      <EmptyState
+        variant={search ? 'no-results' : 'first-run'}
+        size="sm"
+        title={search ? `No matches for “${search}”` : emptyTitle}
+        message={search ? 'Try a different name or username.' : emptyMessage}
       />
     );
 
-  if (!data?.length) return <EmptyState title={emptyTitle} message={emptyMessage} />;
-
   return (
-    <div className="space-y-3">
+    <div className={cx('space-y-2 transition-opacity dur-2', isPlaceholderData && 'opacity-60')} aria-busy={isPlaceholderData || undefined}>
       {data.map((user) => (
         <UserRow key={user._id} user={user} />
       ))}
@@ -130,83 +123,80 @@ export default function Discover() {
   const [tab, setTab] = useState<TabKey>('recommended');
   const [peopleQuery, setPeopleQuery] = useState('');
   const [coachQuery, setCoachQuery] = useState('');
+  const peopleSearch = useDebounced(peopleQuery.trim(), 300);
+  const coachSearch = useDebounced(coachQuery.trim(), 300);
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
-      <header>
-        <h1 className="text-xl font-bold">Discover</h1>
-        <p className="mt-1 text-sm text-[var(--color-muted)]">
-          Fresh posts, trending workouts and people worth following.
-        </p>
-      </header>
-
-      <Tabs
-        tabs={TABS.map((t) => ({ key: t.key, label: t.label }))}
-        value={tab}
-        onChange={(key) => setTab(key as TabKey)}
-      />
-
-      {tab === 'recommended' && (
-        <PostList
-          queryKey="recommended-posts"
-          feed="recommended"
-          emptyTitle="Nothing recommended yet"
-          emptyMessage="Follow a few athletes and interact with posts so we can tune your recommendations."
+    <>
+      <PageHeader title="Explore" subtitle="Fresh posts, trending workouts and people worth following." />
+      <div className="w-full max-w-form space-y-4">
+        <Tabs
+          aria-label="Explore"
+          tabs={TABS.map((t) => ({ key: t.key, label: t.label }))}
+          value={tab}
+          onChange={(key) => {
+            if (isTabKey(key)) setTab(key);
+          }}
         />
-      )}
 
-      {tab === 'trending' && (
-        <PostList
-          queryKey="trending-posts"
-          feed="trending"
-          emptyTitle="No trending posts"
-          emptyMessage="Check back soon — trending posts refresh throughout the day."
-        />
-      )}
+        {tab === 'recommended' ? (
+          <PostList
+            queryKey="recommended-posts"
+            feed="recommended"
+            emptyTitle="Nothing recommended yet"
+            emptyMessage="Follow a few athletes and react to posts so we can tune what shows up here."
+          />
+        ) : null}
 
-      {tab === 'people' && (
-        <div className="space-y-3">
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" />
-            <Input
-              className="!pl-9"
+        {tab === 'trending' ? (
+          <PostList
+            queryKey="trending-posts"
+            feed="trending"
+            emptyTitle="No trending posts right now"
+            emptyMessage="Trending refreshes through the day as the community posts."
+          />
+        ) : null}
+
+        {tab === 'people' ? (
+          <div className="space-y-3">
+            <SearchField
+              label="Search people"
+              hideLabel
               placeholder="Search people by name or username"
               value={peopleQuery}
+              enterKeyHint="search"
               onChange={(e) => setPeopleQuery(e.target.value)}
-              aria-label="Search people"
+            />
+            <PeopleList
+              queryKey="discover-people"
+              audience="people"
+              search={peopleSearch}
+              emptyTitle="No one to show yet"
+              emptyMessage="People appear here as they join Vybe. Try searching by name or username."
             />
           </div>
-          <PeopleList
-            queryKey="discover-people"
-            audience="people"
-            search={peopleQuery.trim()}
-            emptyTitle="No people found"
-            emptyMessage="Try a different name or username."
-          />
-        </div>
-      )}
+        ) : null}
 
-      {tab === 'coaches' && (
-        <div className="space-y-3">
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" />
-            <Input
-              className="!pl-9"
+        {tab === 'coaches' ? (
+          <div className="space-y-3">
+            <SearchField
+              label="Search coaches"
+              hideLabel
               placeholder="Search coaches by name or speciality"
               value={coachQuery}
+              enterKeyHint="search"
               onChange={(e) => setCoachQuery(e.target.value)}
-              aria-label="Search coaches"
+            />
+            <PeopleList
+              queryKey="discover-coaches"
+              audience="coaches"
+              search={coachSearch}
+              emptyTitle="No coaches yet"
+              emptyMessage="Verified coaches show up here as they join Vybe."
             />
           </div>
-          <PeopleList
-            queryKey="discover-coaches"
-            audience="coaches"
-            search={coachQuery.trim()}
-            emptyTitle="No coaches found"
-            emptyMessage="Try another speciality, or check back as more coaches join Vybe."
-          />
-        </div>
-      )}
-    </div>
+        ) : null}
+      </div>
+    </>
   );
 }
