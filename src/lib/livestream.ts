@@ -17,7 +17,14 @@ export type LivestreamIceServer = {
   credential?: string;
 };
 
-/** Body of `session` in PUT /livestreams/:id/start and POST /livestreams/:id/join. */
+/**
+ * Body of `session` in PUT /livestreams/:id/start and POST /livestreams/:id/join.
+ *
+ * The rooms never check `iceCredentialsExpireAt` themselves: the server refuses
+ * a LIVESTREAM_MAX_BROADCAST_SECONDS above either TTL, so credentials minted at
+ * start outlive the longest possible broadcast, and a socket re-join after a
+ * server-side expiry already fetches a fresh session.
+ */
 export type LivestreamSession = {
   token: string;
   role: LivestreamRole;
@@ -102,16 +109,19 @@ export function safeCandidate(value: unknown): SignalCandidate | null {
   return clean;
 }
 
-/** The kinds a participant may legitimately receive. Hosts never get offers; viewers never get answers. */
-export function receivableSignalKinds(role: LivestreamRole): SignalKind[] {
-  return role === 'host' ? ['answer', 'candidate'] : ['offer', 'candidate'];
-}
-
 /** Mirror of the server's rolePairAllowed: offers flow host→viewer, answers viewer→host, candidates across roles. */
 export function rolePairAllowed(sender: LivestreamRole, target: LivestreamRole, kind: string): boolean {
   if (kind === 'offer') return sender === 'host' && target === 'viewer';
   if (kind === 'answer') return sender === 'viewer' && target === 'host';
   return kind === 'candidate' && sender !== target;
+}
+
+const SIGNAL_KINDS: SignalKind[] = ['offer', 'answer', 'candidate'];
+
+/** The kinds a participant may legitimately receive, i.e. what the other role is allowed to send it. */
+export function receivableSignalKinds(role: LivestreamRole): SignalKind[] {
+  const sender: LivestreamRole = role === 'host' ? 'viewer' : 'host';
+  return SIGNAL_KINDS.filter((kind) => rolePairAllowed(sender, role, kind));
 }
 
 /**
@@ -388,6 +398,8 @@ export type PeerEvent =
   | { type: 'track' }
   | { type: 'connection'; state: ConnectionState }
   | { type: 'peer-left' }
+  /** ICE failed but the re-join ladder still has attempts: wait for a fresh offer. */
+  | { type: 'retry' }
   | { type: 'end'; reason?: string }
   | { type: 'fail'; reason?: string }
   | { type: 'reset' };
@@ -420,6 +432,7 @@ export function reducePeerState(state: PeerState, event: PeerEvent): PeerState {
       if (state.phase === 'failed' && state.reason === (event.reason ?? null)) return state;
       return { phase: 'failed', reconnecting: false, reason: event.reason ?? null };
     case 'peer-left':
+    case 'retry':
       if (state.phase === 'idle') return state;
       if (state.phase === 'connecting' && state.reconnecting) return state;
       return { phase: 'connecting', reconnecting: true, reason: null };
@@ -497,6 +510,26 @@ export class SignalBudget {
   }
 }
 
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Run `send` once the budget admits it. The reservation is re-checked after
+ * every wait: two senders that fall asleep on the same exhausted window wake
+ * together, and only the one that wins `take()` may go; the other sleeps
+ * again instead of tripping the server's limit ("Too many live video updates").
+ */
+export async function sendWithinBudget<T>(
+  budget: SignalBudget,
+  send: () => Promise<T>,
+  wait: (ms: number) => Promise<void> = defaultSleep,
+  now: () => number = Date.now,
+): Promise<T> {
+  while (!budget.take(now())) {
+    await wait(Math.max(1, budget.waitMs(now())));
+  }
+  return send();
+}
+
 /** Trickle-ICE candidates that arrive before the remote description, keyed by peer. */
 export class CandidateQueue {
   private readonly pending = new Map<string, SignalCandidate[]>();
@@ -528,18 +561,6 @@ export class CandidateQueue {
 }
 
 /* ------------------------------------------------------------------ sessions */
-
-/** Absolute expiry of the scoped media token, from when the response was received. */
-export function sessionExpiresAt(session: Pick<LivestreamSession, 'expiresInSeconds'>, receivedAtMs: number): number {
-  const ttl = Number(session.expiresInSeconds);
-  return receivedAtMs + (Number.isFinite(ttl) && ttl > 0 ? ttl * 1000 : 0);
-}
-
-/** TURN credentials are HMAC-timestamped; a peer created after this instant cannot allocate. */
-export function iceCredentialsFresh(session: Pick<LivestreamSession, 'iceCredentialsExpireAt'>, nowMs: number): boolean {
-  const at = Date.parse(session.iceCredentialsExpireAt);
-  return Number.isFinite(at) ? at > nowMs : false;
-}
 
 /** Validate the `session` envelope of a start/join response. */
 export function parseSession(value: unknown): LivestreamSession | null {
@@ -644,6 +665,56 @@ export function sendCandidate(
   });
 }
 
+/* ------------------------------------------------------------------ host room rules */
+
+export type HostPhase = 'setup' | 'starting' | 'live' | 'ending' | 'ended';
+
+/**
+ * PUT /livestreams/:id/cancel is for a stream that has not started; the
+ * server answers 409 for a live one, which must be ended instead. While
+ * /start is in flight neither applies.
+ */
+export function canCancelStream(streamStatus: string | undefined, phase: HostPhase): boolean {
+  return streamStatus === 'scheduled' && phase === 'setup';
+}
+
+export type HostLeaveAction = 'end' | 'discard' | 'none';
+
+/**
+ * What unmounting the host room must do so nothing is left running or
+ * dangling on the server. A live broadcast ends, as the mobile screen does on
+ * unmount. A stream created from "Go live" for an immediate broadcast that
+ * never started is discarded, mirroring the mobile client cancelling a stream
+ * whose setup failed; without this it would sit in My streams forever, since
+ * nothing server-side expires a scheduled stream. A stream the host scheduled
+ * for later is theirs to keep, and a stream the server reports live was
+ * started elsewhere and is never cancelled from a setup screen.
+ */
+export function hostLeaveAction(input: {
+  phase: HostPhase;
+  streamStatus: string | undefined;
+  createdForImmediateStart: boolean;
+  /** An end or cancel request is already in flight or done. */
+  closing: boolean;
+}): HostLeaveAction {
+  if (input.closing) return 'none';
+  if (input.phase === 'live') return 'end';
+  if (input.phase === 'setup' && input.createdForImmediateStart && input.streamStatus === 'scheduled') return 'discard';
+  return 'none';
+}
+
+/**
+ * Same rule as the server's isStreamModerator minus the host, who has their
+ * own room: the listed moderators, whether populated users or bare ids.
+ */
+export function isStreamModerator(moderators: unknown, userId: string): boolean {
+  if (!userId || !Array.isArray(moderators)) return false;
+  return moderators.some((entry) => {
+    const id = typeof entry === 'string' ? entry : isRecord(entry) && typeof entry._id === 'string' ? entry._id : '';
+    return id !== '' && id === userId;
+  });
+}
+
 /* ------------------------------------------------------------------ copy helpers */
 
 /** "2 hours" / "90 minutes", as the mobile setup screen words the server's cap. */
@@ -654,6 +725,18 @@ export function durationLabel(seconds: number): string {
     return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
   }
   return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
+/** "45s" / "1m 30s" / "1h 02m": a broadcast's real length, honest for a one-minute test. */
+export function elapsedLabel(seconds: number): string {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (hours > 0) return `${hours}h ${pad(minutes)}m`;
+  if (minutes > 0) return `${minutes}m ${pad(rest)}s`;
+  return `${rest}s`;
 }
 
 /** Camera orientation from the decoded frame size, for a stage that fits either. */

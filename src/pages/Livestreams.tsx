@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
+import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, uploadImage } from '../lib/hooks';
 import {
   Avatar,
   Badge,
@@ -26,7 +27,7 @@ import {
   cx,
   useToast,
 } from './ui';
-import { CalendarDays, ChevronLeft, ChevronRight, Eye, Play, Plus, Radio, Users } from './icons';
+import { CalendarDays, ChevronLeft, ChevronRight, Eye, Image as ImageIcon, Play, Plus, Radio, Users, X } from './icons';
 import LiveRoom from './LiveRoom';
 import { CATEGORY_OPTIONS, at, categoryLabel, hostOf, hostName, viewersOf, type Stream } from './liveTypes';
 
@@ -183,17 +184,38 @@ function StreamCard({ stream, onOpen, mine }: { stream: Stream; onOpen: () => vo
 
 /* ------------------------------------------------------------------ create */
 
-function CreateStreamModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id?: string) => void }) {
+function CreateStreamModal({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** `instant` is true when the host wants to go live now rather than at a scheduled time. */
+  onCreated: (id: string | undefined, instant: boolean) => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const [title, setTitle] = useState('');
   const [titleTouched, setTitleTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('general');
   const [visibility, setVisibility] = useState('public');
   const [scheduledAt, setScheduledAt] = useState('');
+  /** Owned media key from the upload endpoint; the server verifies ownership on create. */
   const [thumbnail, setThumbnail] = useState('');
+  const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
+  const [uploadingThumbnail, setUploadingThumbnail] = useState(false);
   const [tags, setTags] = useState('');
+
+  const clearThumbnail = useCallback(() => {
+    setThumbnail('');
+    setThumbnailPreview((previous) => {
+      if (previous) URL.revokeObjectURL(previous);
+      return null;
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -203,10 +225,38 @@ function CreateStreamModal({ open, onClose, onCreated }: { open: boolean; onClos
       setCategory('general');
       setVisibility('public');
       setScheduledAt('');
-      setThumbnail('');
+      clearThumbnail();
       setTags('');
     }
-  }, [open]);
+  }, [open, clearThumbnail]);
+
+  const pickThumbnail = async (file: File | undefined) => {
+    if (fileRef.current) fileRef.current.value = '';
+    if (!file) return;
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      toast.error('Use a JPEG, PNG, WebP or HEIC image for the thumbnail.');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error('The thumbnail must be 10 MB or smaller.');
+      return;
+    }
+    setUploadingThumbnail(true);
+    try {
+      // The same owned-media upload post photos use; the server accepts that
+      // purpose for stream thumbnails and re-verifies ownership on create.
+      const uploaded = await uploadImage(file, 'posts');
+      setThumbnail(uploaded.key);
+      setThumbnailPreview((previous) => {
+        if (previous) URL.revokeObjectURL(previous);
+        return URL.createObjectURL(file);
+      });
+    } catch (e) {
+      toast.error(errMsg(e, 'Could not upload the thumbnail'));
+    } finally {
+      setUploadingThumbnail(false);
+    }
+  };
 
   const parsedTags = tags
     .split(/[\s,]+/)
@@ -215,7 +265,7 @@ function CreateStreamModal({ open, onClose, onCreated }: { open: boolean; onClos
   const titleError = titleTouched && title.trim().length < 3 ? 'Give the stream a title of at least 3 characters.' : null;
   const tagsError = parsedTags.length > 10 ? 'Use at most 10 tags.' : parsedTags.some((t) => t.length > 30) ? 'Each tag must be 30 characters or fewer.' : null;
   const scheduleError = scheduledAt && Number.isNaN(new Date(scheduledAt).getTime()) ? 'Pick a valid date and time.' : null;
-  const canSubmit = title.trim().length >= 3 && !tagsError && !scheduleError;
+  const canSubmit = title.trim().length >= 3 && !tagsError && !scheduleError && !uploadingThumbnail;
 
   const create = useMutation({
     mutationFn: async () => {
@@ -235,7 +285,7 @@ function CreateStreamModal({ open, onClose, onCreated }: { open: boolean; onClos
       toast.success(scheduledAt ? 'Stream scheduled' : 'Stream created — set up your camera next');
       qc.invalidateQueries({ queryKey: ['livestreams'] });
       onClose();
-      onCreated(data?._id);
+      onCreated(data?._id, !scheduledAt);
     },
     onError: (e) => toast.error(errMsg(e, 'Could not create the stream')),
   });
@@ -307,13 +357,30 @@ function CreateStreamModal({ open, onClose, onCreated }: { open: boolean; onClos
           error={scheduleError}
           onChange={(e) => setScheduledAt(e.target.value)}
         />
-        <Input
-          label="Thumbnail"
-          hint="Optional. An uploaded media key."
-          placeholder="uploads/…"
-          value={thumbnail}
-          onChange={(e) => setThumbnail(e.target.value)}
-        />
+        <div>
+          <span id="stream-thumbnail-label" className="type-label mb-1.5 block text-text-2">
+            Thumbnail
+          </span>
+          <div className="flex flex-wrap items-center gap-3" role="group" aria-labelledby="stream-thumbnail-label">
+            {thumbnailPreview ? (
+              <img src={thumbnailPreview} alt="Thumbnail preview" className="h-14 w-24 shrink-0 rounded-md object-cover" />
+            ) : (
+              <span className="flex h-14 w-24 shrink-0 items-center justify-center rounded-md bg-surface-2 text-text-3" aria-hidden="true">
+                <ImageIcon size={22} />
+              </span>
+            )}
+            <Button variant="secondary" size="sm" loading={uploadingThumbnail} disabled={create.isPending} onClick={() => fileRef.current?.click()} icon={<ImageIcon size={16} />}>
+              {thumbnail ? 'Replace image' : 'Add image'}
+            </Button>
+            {thumbnail ? (
+              <Button variant="ghost" size="sm" disabled={uploadingThumbnail || create.isPending} onClick={clearThumbnail} icon={<X size={16} />}>
+                Remove
+              </Button>
+            ) : null}
+          </div>
+          <p className="mt-1.5 text-xs text-text-3">Optional. Shown on your stream’s card. JPEG, PNG, WebP or HEIC up to 10 MB.</p>
+          <input ref={fileRef} type="file" accept={ACCEPTED_IMAGE_TYPES.join(',')} hidden onChange={(e) => void pickThumbnail(e.target.files?.[0])} />
+        </div>
         <Input
           label="Tags"
           hint="Optional. Up to 10, separated by spaces or commas."
@@ -377,7 +444,13 @@ export default function Livestreams() {
   const capabilities = useCapabilities();
   const enabled = capabilities.data?.livestreamRelay === true;
 
-  const openStream = useCallback((id: string) => navigate(`/live/${id}`, { viewTransition: true }), [navigate]);
+  const openStream = useCallback(
+    (id: string, options?: { instant?: boolean }) =>
+      // History state, not a query flag: the room uses it to discard a stream
+      // created for an immediate broadcast if the host leaves without starting.
+      navigate(`/live/${id}`, { viewTransition: true, state: options?.instant ? { instant: true } : undefined }),
+    [navigate],
+  );
 
   const streams = useQuery({
     queryKey: ['livestreams', tab, page],
@@ -520,8 +593,8 @@ export default function Livestreams() {
       <CreateStreamModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={(id) => {
-          if (id) openStream(id);
+        onCreated={(id, instant) => {
+          if (id) openStream(id, { instant });
           else setTab('mine');
         }}
       />

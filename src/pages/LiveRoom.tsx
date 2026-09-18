@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Socket } from 'socket.io-client';
 import { api, errMsg } from '../lib/api';
@@ -12,9 +12,13 @@ import {
   MAX_MESH_VIEWERS,
   SignalBudget,
   canAcceptViewer,
+  canCancelStream,
   durationLabel,
+  elapsedLabel,
   hasRelayServer,
+  hostLeaveAction,
   isForStream,
+  isStreamModerator,
   joinLivestreamRoom,
   leaveLivestreamRoom,
   parseParticipantLeft,
@@ -27,9 +31,11 @@ import {
   roomCapacity,
   sendCandidate,
   sendDescription,
+  sendWithinBudget,
   videoOrientation,
   type ConnectionState,
   type DescribedMediaError,
+  type HostPhase,
   type LivestreamCapabilities,
   type LivestreamSession,
   type LivestreamSignal,
@@ -521,8 +527,6 @@ function ReactionBurst({ reaction }: { reaction: { id: number; from: string } | 
 
 /* ================================================================== host */
 
-type HostPhase = 'setup' | 'starting' | 'live' | 'ending' | 'ended';
-
 type ViewerPeer = { socketId: string; name: string; avatar?: string; state: ConnectionState };
 
 /** How long a hidden tab may keep a paused camera before the broadcast ends for its viewers. */
@@ -535,8 +539,6 @@ const MAX_SESSION_REFRESHES = 3;
  * deadline as failed.
  */
 const CONNECT_TIMEOUT_MS = 20_000;
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** errMsg plus the one axios code the rooms hit in practice: a server that never answered. */
 const requestMessage = (e: unknown, fallback: string) =>
@@ -561,19 +563,23 @@ function mergeStream(previous: Stream | undefined, next: unknown): Stream | unde
 
 function useHostBroadcast({
   streamId,
+  streamStatus,
   resumeLive,
+  createdForImmediateStart,
   capabilities,
   streamCapacity,
 }: {
   streamId: string;
+  streamStatus: string | undefined;
   /** The stream is already live (host reloaded): rejoin instead of starting. */
   resumeLive: boolean;
+  /** Created from "Go live" moments ago; discarded if the host leaves without ever starting. */
+  createdForImmediateStart: boolean;
   capabilities: LivestreamCapabilities | null;
   streamCapacity: number | undefined;
 }) {
   const { socket, connected } = useSharedSocket();
   const qc = useQueryClient();
-  const toast = useToast();
   const [phase, setPhase] = useState<HostPhase>('setup');
   const [media, setMedia] = useState<MediaStream | null>(null);
   const [capturing, setCapturing] = useState(false);
@@ -591,6 +597,8 @@ function useHostBroadcast({
   const [notice, setNotice] = useState<string | null>(null);
   const [endedStream, setEndedStream] = useState<Stream | null>(null);
   const [endedReason, setEndedReason] = useState<string | null>(null);
+  const [endError, setEndError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const peers = useRef(new Map<string, RTCPeerConnection>());
   const pending = useRef(new CandidateQueue());
@@ -600,11 +608,19 @@ function useHostBroadcast({
   const phaseRef = useRef<HostPhase>('setup');
   const maxViewersRef = useRef(maxViewers);
   const endingRef = useRef(false);
+  /** A cancel succeeded: the stream is gone and leaving has nothing to discard. */
+  const closedRef = useRef(false);
+  /** Why the end was requested, kept so a failed end can be retried with the same summary. */
+  const endReasonRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const discardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshesRef = useRef(0);
   const backgroundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Read through a ref in the unmount cleanup so a socket identity change can
+  // Read through refs in the unmount cleanup so a socket identity change can
   // never be mistaken for leaving the page and end a live broadcast.
   const socketRef = useRef<Socket | null>(socket);
+  const streamStatusRef = useRef(streamStatus);
+  const discardRef = useRef(createdForImmediateStart);
 
   useEffect(() => {
     mediaRef.current = media;
@@ -612,7 +628,9 @@ function useHostBroadcast({
     phaseRef.current = phase;
     maxViewersRef.current = maxViewers;
     socketRef.current = socket;
-  }, [media, session, phase, maxViewers, socket]);
+    streamStatusRef.current = streamStatus;
+    discardRef.current = createdForImmediateStart;
+  }, [media, session, phase, maxViewers, socket, streamStatus, createdForImmediateStart]);
 
   useEffect(() => {
     setMaxViewers(roomCapacity(streamCapacity, capabilities?.maxViewers));
@@ -639,12 +657,7 @@ function useHostBroadcast({
   }, []);
 
   /** Send within the server's rate limit; a burst of ICE candidates waits instead of tripping "reconnect". */
-  const guardedSend = useCallback(async (send: () => Promise<unknown>) => {
-    const wait = budget.current.waitMs();
-    if (wait > 0) await sleep(wait);
-    budget.current.take();
-    await send();
-  }, []);
+  const guardedSend = useCallback((send: () => Promise<unknown>) => sendWithinBudget(budget.current, send), []);
 
   const capture = useCallback(async (deviceId?: string) => {
     setCapturing(true);
@@ -686,16 +699,26 @@ function useHostBroadcast({
   const endBroadcast = useCallback(async (reason: string | null = null) => {
     if (endingRef.current) return;
     endingRef.current = true;
+    endReasonRef.current = reason;
     setPhase('ending');
-    setEndedReason(reason);
+    setEndError(null);
     try {
       const { data } = await api.put(`/livestreams/${streamId}/end`);
       setEndedStream((data?.stream as Stream | undefined) ?? null);
     } catch (e) {
       // A 409 means the server already closed it (duration cap): not an error for the host.
       const status = (e as { response?: { status?: number } })?.response?.status;
-      if (status !== 409) toast.error(errMsg(e, 'Could not close the stream on the server. It will expire on its own.'));
+      if (status !== 409) {
+        // The stream is still live on the server and viewers are still waiting
+        // on it, so the room stays live too; a summary over a running camera
+        // would be a lie. The host retries from the banner.
+        endingRef.current = false;
+        setPhase('live');
+        setEndError(requestMessage(e, 'Could not end the stream on the server.'));
+        return;
+      }
     }
+    setEndedReason(reason);
     if (socket?.connected) await leaveLivestreamRoom(socket, streamId).catch(() => undefined);
     closeEveryPeer();
     releaseMedia();
@@ -705,7 +728,37 @@ function useHostBroadcast({
     endingRef.current = false;
     qc.invalidateQueries({ queryKey: ['livestreams'] });
     qc.invalidateQueries({ queryKey: ['livestream', streamId] });
-  }, [streamId, socket, closeEveryPeer, releaseMedia, qc, toast]);
+  }, [streamId, socket, closeEveryPeer, releaseMedia, qc]);
+
+  const retryEnd = useCallback(() => endBroadcast(endReasonRef.current), [endBroadcast]);
+
+  /**
+   * Remove a stream that has not started (PUT /cancel). Resolves with the
+   * server's verdict: 'live' means it was started from another device in the
+   * meantime and must be ended instead; the detail refetch flips the room.
+   */
+  const cancelStream = useCallback(async (): Promise<'cancelled' | 'live' | 'failed'> => {
+    setCancelling(true);
+    setError(null);
+    try {
+      const { data } = await api.put(`/livestreams/${streamId}/cancel`);
+      closedRef.current = true;
+      releaseMedia();
+      qc.setQueryData<StreamDetail | undefined>(['livestream', streamId], (old) => (old ? { ...old, stream: mergeStream(old.stream, data?.stream) ?? old.stream } : old));
+      qc.invalidateQueries({ queryKey: ['livestreams'] });
+      return 'cancelled';
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        qc.invalidateQueries({ queryKey: ['livestream', streamId] });
+        return 'live';
+      }
+      setError(requestMessage(e, 'Could not cancel the stream.'));
+      return 'failed';
+    } finally {
+      setCancelling(false);
+    }
+  }, [streamId, releaseMedia, qc]);
 
   const start = useCallback(async () => {
     if (!capabilities?.enabled) {
@@ -726,6 +779,12 @@ function useHostBroadcast({
       const { data } = resumeLive
         ? await api.post(`/livestreams/${streamId}/join`)
         : await api.put(`/livestreams/${streamId}/start`);
+      if (!mountedRef.current) {
+        // The host left while the request was in flight: the server now has a
+        // live stream with no broadcaster, so close it rather than strand viewers.
+        void api.put(`/livestreams/${streamId}/end`).catch(() => undefined);
+        return;
+      }
       const parsed = parseSession(data?.session);
       if (!parsed || parsed.role !== 'host') throw new Error('The server did not return a broadcaster session.');
       if (!hasRelayServer(parsed.iceServers)) throw new Error('The video relay is not available right now. Try again in a moment.');
@@ -735,6 +794,13 @@ function useHostBroadcast({
       qc.invalidateQueries({ queryKey: ['livestreams'] });
       qc.setQueryData<StreamDetail | undefined>(['livestream', streamId], (old) => (old ? { ...old, stream: mergeStream(old.stream, data?.stream) ?? old.stream } : old));
     } catch (e) {
+      if (!mountedRef.current) {
+        // Left during a start that then failed: the leave rule for an
+        // unstarted stream applies as if the host had never pressed Go live.
+        const action = hostLeaveAction({ phase: 'setup', streamStatus: streamStatusRef.current, createdForImmediateStart: discardRef.current, closing: closedRef.current });
+        if (action === 'discard') void api.put(`/livestreams/${streamId}/cancel`).catch(() => undefined);
+        return;
+      }
       setError(requestMessage(e, 'The live broadcast could not start.'));
       setPhase('setup');
     }
@@ -795,9 +861,14 @@ function useHostBroadcast({
     }
   }, []);
 
+  // 'ending' is still broadcasting: a failed end request returns the room to
+  // 'live', and keying these effects on the phase itself would make that
+  // round trip re-join the room and re-offer to every connected viewer.
+  const broadcasting = phase === 'live' || phase === 'ending';
+
   // Room events while live.
   useEffect(() => {
-    if (!socket || phase !== 'live') return;
+    if (!socket || !broadcasting) return;
     const onViewerReady = (payload: unknown) => {
       const ready = parseViewerReady(payload, streamId);
       if (!ready) return;
@@ -833,13 +904,13 @@ function useHostBroadcast({
       socket.off('livestream:presence', onPresence);
       socket.off('livestream:status', onStatus);
     };
-  }, [socket, phase, streamId, createOfferForViewer, handleSignal, closePeer, endBroadcast]);
+  }, [socket, broadcasting, streamId, createOfferForViewer, handleSignal, closePeer, endBroadcast]);
 
   // Join (and after every reconnect, re-join) the room as the host. The
   // server replays 'viewer-ready' for everyone already waiting, which
   // re-offers to viewers who lost us.
   useEffect(() => {
-    if (!socket || !connected || !session || phase !== 'live') {
+    if (!socket || !connected || !session || !broadcasting) {
       setRoomJoined(false);
       return;
     }
@@ -875,7 +946,7 @@ function useHostBroadcast({
     return () => {
       cancelled = true;
     };
-  }, [socket, connected, session, phase, streamId, capabilities?.maxViewers]);
+  }, [socket, connected, session, broadcasting, streamId, capabilities?.maxViewers]);
 
   // A camera or microphone that stops (unplugged, permission revoked, OS
   // suspended it) ends the broadcast rather than leaving viewers on a freeze.
@@ -943,18 +1014,46 @@ function useHostBroadcast({
   }, [streamId, socket]);
 
   // Leaving the page (route change) ends an abandoned broadcast, as the
-  // mobile screen does on unmount.
-  useEffect(() => () => {
-    const live = socketRef.current;
-    if (phaseRef.current === 'live' && !endingRef.current) {
-      void api.put(`/livestreams/${streamId}/end`).catch(() => undefined);
-      if (live?.connected) void leaveLivestreamRoom(live, streamId).catch(() => undefined);
+  // mobile screen does on unmount, and discards an instant stream that never
+  // started so it cannot linger in My streams. The discard is deferred one
+  // tick and undone by a re-mount, so StrictMode's simulated unmount in
+  // development never cancels a real stream.
+  useEffect(() => {
+    mountedRef.current = true;
+    if (discardTimer.current) {
+      clearTimeout(discardTimer.current);
+      discardTimer.current = null;
     }
-    peers.current.forEach((peer) => peer.close());
-    peers.current.clear();
-    pending.current.clear();
-    stopMedia(mediaRef.current);
-  }, [streamId]);
+    return () => {
+      mountedRef.current = false;
+      const live = socketRef.current;
+      const action = hostLeaveAction({
+        phase: phaseRef.current,
+        streamStatus: streamStatusRef.current,
+        createdForImmediateStart: discardRef.current,
+        closing: endingRef.current || closedRef.current,
+      });
+      if (action === 'end') {
+        void api.put(`/livestreams/${streamId}/end`).catch(() => undefined);
+        if (live?.connected) void leaveLivestreamRoom(live, streamId).catch(() => undefined);
+      } else if (action === 'discard') {
+        discardTimer.current = setTimeout(() => {
+          discardTimer.current = null;
+          void api
+            .put(`/livestreams/${streamId}/cancel`)
+            .then(() => {
+              qc.invalidateQueries({ queryKey: ['livestreams'] });
+              qc.invalidateQueries({ queryKey: ['livestream', streamId] });
+            })
+            .catch(() => undefined);
+        }, 0);
+      }
+      peers.current.forEach((peer) => peer.close());
+      peers.current.clear();
+      pending.current.clear();
+      stopMedia(mediaRef.current);
+    };
+  }, [streamId, qc]);
 
   const toggleMute = () => {
     const next = !muted;
@@ -987,9 +1086,13 @@ function useHostBroadcast({
     notice,
     endedStream,
     endedReason,
+    endError,
+    cancelling,
     capture,
     start,
     endBroadcast,
+    retryEnd,
+    cancelStream,
     toggleMute,
     toggleCamera,
     dismissNotice: () => setNotice(null),
@@ -1001,12 +1104,20 @@ function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: Live
   const me = useAuth((s) => s.user);
   const myId = userIdOf(me);
   const online = useOnline();
+  const navigate = useNavigate();
+  const toast = useToast();
+  // Set by the Go live modal when it created this stream for an immediate
+  // broadcast (history state, so it survives a reload but not a later visit
+  // from My streams).
+  const instant = (useLocation().state as { instant?: unknown } | null)?.instant === true;
   const { socket, connected } = useSharedSocket();
   const support = liveVideoSupport();
   const alreadyLive = stream.status === 'live';
   const host = useHostBroadcast({
     streamId: stream._id,
+    streamStatus: stream.status,
     resumeLive: alreadyLive,
+    createdForImmediateStart: instant,
     capabilities,
     streamCapacity: stream.settings?.maxViewers,
   });
@@ -1014,6 +1125,19 @@ function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: Live
   const videoRef = useRef<HTMLVideoElement>(null);
   const { orientation } = useVideoStream(videoRef, host.media);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const canCancel = canCancelStream(stream.status, host.phase);
+
+  const confirmCancelStream = async () => {
+    const result = await host.cancelStream();
+    setConfirmCancel(false);
+    if (result === 'cancelled') {
+      toast.success('Stream cancelled');
+      navigate('/live', { viewTransition: true });
+    } else if (result === 'live') {
+      toast.error('This stream is already live from another device. End it instead.');
+    }
+  };
 
   const closed = stream.status === 'ended' || stream.status === 'cancelled';
   const capacityCopy = capabilities?.enabled
@@ -1043,7 +1167,7 @@ function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: Live
             </div>
             <div className="rounded-md bg-surface-2 p-3">
               <dt className="type-label text-text-2">Duration</dt>
-              <dd className="type-stat mt-1 text-2xl text-text-1">{durationLabel(summary.duration ?? 0)}</dd>
+              <dd className="type-stat mt-1 text-2xl text-text-1">{elapsedLabel(summary.duration ?? 0)}</dd>
             </div>
           </dl>
           <div className="flex flex-wrap justify-center gap-2">
@@ -1183,6 +1307,19 @@ function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: Live
             </Callout>
           ) : null}
           {host.error ? <Callout tone="danger">{host.error}</Callout> : null}
+          {host.endError ? (
+            <Callout
+              tone="danger"
+              title="Your broadcast is still live"
+              action={
+                <Button variant="secondary" size="sm" loading={host.phase === 'ending'} onClick={() => void host.retryEnd()}>
+                  Try again
+                </Button>
+              }
+            >
+              {host.endError} Viewers stay connected until the server confirms the end.
+            </Callout>
+          ) : null}
           {host.notice ? (
             <Callout tone="info" action={<Button variant="ghost" size="sm" onClick={host.dismissNotice}>Dismiss</Button>}>
               {host.notice}
@@ -1206,6 +1343,11 @@ function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: Live
                 <Button variant="primary" size="lg" disabled={!canGoLive} loading={host.phase === 'starting'} onClick={() => void host.start()} icon={<Radio size={18} />}>
                   {startLabel}
                 </Button>
+                {canCancel ? (
+                  <Button variant="secondary" size="lg" disabled={host.cancelling} onClick={() => setConfirmCancel(true)}>
+                    Cancel stream
+                  </Button>
+                ) : null}
                 {!host.media ? <span className="text-xs text-text-3">Enable your camera to continue.</span> : null}
                 {host.media && !connected ? (
                   <span className="inline-flex items-center gap-2 text-xs text-text-3">
@@ -1275,6 +1417,17 @@ function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: Live
           void host.endBroadcast();
         }}
       />
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel this stream?"
+        description={instant ? 'The stream is removed and nobody is notified. You can go live again from the Live tab.' : 'It comes off the schedule, and people who planned to watch will not find it.'}
+        confirmLabel="Cancel stream"
+        cancelLabel="Keep it"
+        destructive
+        loading={host.cancelling}
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={() => void confirmCancelStream()}
+      />
     </div>
   );
 }
@@ -1312,6 +1465,8 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
   const [endedReason, setEndedReason] = useState<string | null>(null);
   const [peerState, dispatch] = useReducer(reducePeerState, INITIAL_PEER_STATE);
   const [joinAttempt, setJoinAttempt] = useState(0);
+  /** The host's socket left the room; distinguishes "broadcaster is reconnecting" from our own link dropping. */
+  const [hostAway, setHostAway] = useState(false);
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const hostSocketRef = useRef<string | null>(null);
@@ -1327,6 +1482,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
   const socketRef = useRef<Socket | null>(socket);
   const joiningRef = useRef(false);
   const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const presenceSeen = useRef(false);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -1334,12 +1490,18 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     socketRef.current = socket;
   }, [session, phase, socket]);
 
-  // By value, for the same reason as the chat seed: presence events must win
-  // over a re-rendered but unchanged REST payload.
+  // Seed from REST only until the room reports presence: the socket counts
+  // distinct viewers in the room, and a later detail refetch must not flash
+  // the server's stale field over it.
   const seedViewers = stream ? viewersOf(stream) : 0;
   useEffect(() => {
-    setViewerCount(seedViewers);
+    if (!presenceSeen.current) setViewerCount(seedViewers);
   }, [seedViewers]);
+
+  const setRoomViewerCount = useCallback((count: number) => {
+    presenceSeen.current = true;
+    setViewerCount(count);
+  }, []);
 
   const clearConnectTimer = useCallback(() => {
     if (connectTimer.current) {
@@ -1357,17 +1519,12 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     setRemote(null);
   }, [clearConnectTimer]);
 
-  const guardedSend = useCallback(async (send: () => Promise<unknown>) => {
-    const wait = budget.current.waitMs();
-    if (wait > 0) await sleep(wait);
-    budget.current.take();
-    await send();
-  }, []);
+  const guardedSend = useCallback((send: () => Promise<unknown>) => sendWithinBudget(budget.current, send), []);
 
   /**
    * Re-join the room so the host receives 'viewer-ready' and re-offers, with
-   * growing delays; after the last attempt the failure is shown and the
-   * viewer retries by hand.
+   * growing delays; the stage reads "reconnecting" meanwhile. After the last
+   * attempt the failure is shown and the viewer retries by hand.
    */
   const scheduleRetry = useCallback((reason: string) => {
     if (retryTimer.current) clearTimeout(retryTimer.current);
@@ -1378,6 +1535,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
       dispatch({ type: 'fail', reason: `${reason} The relay may be unreachable from your network.` });
       return;
     }
+    dispatch({ type: 'retry' });
     const delay = RETRY_DELAYS_MS[retriesRef.current];
     retriesRef.current += 1;
     retryTimer.current = setTimeout(() => setJoinAttempt((n) => n + 1), delay);
@@ -1452,6 +1610,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     const peer = createPeer(activeSession.iceServers);
     peerRef.current = peer;
     hostSocketRef.current = fromSocketId;
+    setHostAway(false);
     dispatch({ type: 'negotiate' });
     peer.onicecandidate = (event) => {
       if (!event.candidate) return;
@@ -1472,16 +1631,24 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
       dispatch({ type: 'track' });
     };
     peer.onconnectionstatechange = () => {
+      // A superseded peer (re-offer already answered) says nothing about the room.
+      if (peerRef.current !== peer) return;
       const state = peer.connectionState;
+      if (state === 'failed') {
+        clearConnectTimer();
+        // Drop the attached-but-silent tracks: a black frame under a
+        // "Connecting" pill is not a state. The ladder decides between
+        // "reconnecting" and the failure the viewer has to act on.
+        closePeer();
+        setPhase('connecting');
+        scheduleRetry('The video connection failed.');
+        return;
+      }
       dispatch({ type: 'connection', state });
       if (state === 'connected') {
         clearConnectTimer();
         retriesRef.current = 0;
         setPhase('watching');
-      } else if (state === 'failed') {
-        clearConnectTimer();
-        setPhase('connecting');
-        scheduleRetry('The video connection failed.');
       } else if (state === 'disconnected') {
         setPhase('connecting');
       }
@@ -1520,7 +1687,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     };
     const onPresence = (payload: unknown) => {
       const count = presenceCount(payload, streamId);
-      if (count !== null) setViewerCount(count);
+      if (count !== null) setRoomViewerCount(count);
     };
     const onStatus = (payload: unknown) => {
       const status = parseStatus(payload, streamId);
@@ -1536,6 +1703,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     const onHostDisconnected = (payload: unknown) => {
       if (!isForStream(payload, streamId)) return;
       closePeer();
+      setHostAway(true);
       dispatch({ type: 'peer-left' });
       if (phaseRef.current === 'watching') setPhase('connecting');
     };
@@ -1559,7 +1727,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
       socket.off('livestream:host-disconnected', onHostDisconnected);
       socket.off('livestream:banned', onBanned);
     };
-  }, [socket, streamId, handleSignal, closePeer, qc]);
+  }, [socket, streamId, handleSignal, closePeer, qc, setRoomViewerCount]);
 
   // Join the room whenever we have a session and a live socket: first time,
   // after every reconnect, and after a failed peer asks for a fresh offer.
@@ -1571,7 +1739,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
       try {
         const ack = await joinLivestreamRoom(socket, streamId, session.token);
         if (cancelled) return;
-        setViewerCount(ack.viewerCount ?? 0);
+        setRoomViewerCount(ack.viewerCount ?? 0);
         setError(null);
       } catch (joinError) {
         if (cancelled) return;
@@ -1609,7 +1777,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     return () => {
       cancelled = true;
     };
-  }, [socket, connected, session, streamId, joinAttempt]);
+  }, [socket, connected, session, streamId, joinAttempt, setRoomViewerCount]);
 
   // Closing the tab: tell the server we are gone so the seat frees up.
   useEffect(() => {
@@ -1642,7 +1810,7 @@ function useViewerSession({ streamId, stream }: { streamId: string; stream: Stre
     void join();
   }, [closePeer, join]);
 
-  return { socketConnected: connected, phase, peerState, remote, viewerCount, error, endedReason, join, leave, retry };
+  return { socketConnected: connected, phase, peerState, hostAway, remote, viewerCount, error, endedReason, join, leave, retry };
 }
 
 function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknown }) {
@@ -1659,14 +1827,15 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
   const [muted, setMuted] = useState(true);
   const host = hostOf(stream);
   const isLive = stream.status === 'live' && viewer.phase !== 'ended';
+  // The server lets listed moderators remove anyone's message; the host has their own room.
+  const canModerate = isStreamModerator(stream.moderators, myId);
 
   // Join once the stream is confirmed live; a stream that starts while the
   // page is open joins as soon as the detail refresh reports it.
+  const { join } = viewer;
   useEffect(() => {
-    if (stream.status === 'live' && viewer.phase === 'idle' && support.ok) void viewer.join();
-    // viewer.join is stable per streamId; phase gates the call.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stream.status, viewer.phase, support.ok]);
+    if (stream.status === 'live' && viewer.phase === 'idle' && support.ok) void join();
+  }, [stream.status, viewer.phase, support.ok, join]);
 
   const leaveRoom = () => {
     void viewer.leave().finally(() => navigate('/live', { viewTransition: true }));
@@ -1728,7 +1897,7 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
               secondaryAction={host?._id ? { label: `More from ${hostName(stream)}`, to: `/u/${host._id}` } : undefined}
             />
           </Card>
-          <ChatPanel stream={{ ...stream, status: cancelled ? 'cancelled' : 'ended' }} chat={chat} myId={myId} canModerate={false} className="max-h-[70dvh]" />
+          <ChatPanel stream={{ ...stream, status: cancelled ? 'cancelled' : 'ended' }} chat={chat} myId={myId} canModerate={canModerate} className="max-h-[70dvh]" />
         </div>
       </div>
     );
@@ -1740,7 +1909,9 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
   const flowing = Boolean(viewer.remote) && viewer.peerState.phase === 'live';
   const connecting = !failed && !flowing;
   const statusCopy = viewer.peerState.reconnecting
-    ? 'Broadcaster is reconnecting…'
+    ? viewer.hostAway
+      ? 'Broadcaster is reconnecting…'
+      : 'Connection dropped. Reconnecting…'
     : viewer.phase === 'joining'
       ? 'Joining the room…'
       : !connected
@@ -1885,7 +2056,7 @@ function ViewerRoom({ stream, refetch }: { stream: Stream; refetch: () => unknow
           {connecting && !viewer.remote ? <p className="sr-only" role="status">{statusCopy}</p> : null}
         </section>
 
-        <ChatPanel stream={stream} chat={chat} myId={myId} canModerate={false} className="max-h-[70dvh] lg:sticky lg:top-20 lg:h-[calc(100dvh-8rem)]" />
+        <ChatPanel stream={stream} chat={chat} myId={myId} canModerate={canModerate} className="max-h-[70dvh] lg:sticky lg:top-20 lg:h-[calc(100dvh-8rem)]" />
       </div>
     </div>
   );

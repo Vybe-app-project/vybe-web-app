@@ -81,11 +81,16 @@ export function disposeSocket(): void {
   useSocketStatus.setState({ connected: false, unauthorized: false });
 }
 
-/** The shared socket plus its live connection state, for components. */
+/**
+ * The shared socket plus its live connection state, for components. The
+ * first render sees null: opening a connection is a side effect, so it
+ * happens in the effect, where StrictMode's double run is harmless because
+ * getSocket() is idempotent.
+ */
 export function useSharedSocket(): { socket: Socket | null; connected: boolean; unauthorized: boolean } {
   const connected = useSocketStatus((s) => s.connected);
   const unauthorized = useSocketStatus((s) => s.unauthorized);
-  const [socket, setSocket] = useState<Socket | null>(() => getSocket());
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
     const current = getSocket();

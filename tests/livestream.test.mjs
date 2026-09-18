@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { register } from 'node:module';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 register('./ts-loader.mjs', import.meta.url);
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 const lib = await import('../src/lib/livestream.ts');
 const {
@@ -12,13 +18,16 @@ const {
   MAX_SDP_LENGTH,
   SignalBudget,
   canAcceptViewer,
+  canCancelStream,
   checkLiveVideoSupport,
   describeMediaError,
   durationLabel,
+  elapsedLabel,
   emitWithAck,
   hasRelayServer,
-  iceCredentialsFresh,
+  hostLeaveAction,
   isForStream,
+  isStreamModerator,
   joinLivestreamRoom,
   leaveLivestreamRoom,
   mapIceServers,
@@ -38,7 +47,7 @@ const {
   safeDescription,
   sendCandidate,
   sendDescription,
-  sessionExpiresAt,
+  sendWithinBudget,
   videoOrientation,
 } = lib;
 
@@ -210,15 +219,6 @@ test('parseSession validates the start/join envelope and normalises ICE servers'
   assert.equal(parseSession({ token: 'jwt', role: 'viewer', expiresInSeconds: 'soon' }).expiresInSeconds, 0);
 });
 
-test('session expiry helpers use the receipt time and the TURN credential timestamp', () => {
-  assert.equal(sessionExpiresAt({ expiresInSeconds: 60 }, 1_000), 61_000);
-  assert.equal(sessionExpiresAt({ expiresInSeconds: -5 }, 1_000), 1_000);
-  const at = Date.parse('2026-09-17T12:00:00.000Z');
-  assert.equal(iceCredentialsFresh({ iceCredentialsExpireAt: '2026-09-17T12:00:00.000Z' }, at - 1), true);
-  assert.equal(iceCredentialsFresh({ iceCredentialsExpireAt: '2026-09-17T12:00:00.000Z' }, at), false);
-  assert.equal(iceCredentialsFresh({ iceCredentialsExpireAt: 'never' }, at), false);
-});
-
 /* ------------------------------------------------------------------ media errors and support */
 
 test('describeMediaError maps browser error names to actionable copy', () => {
@@ -307,6 +307,25 @@ test('peer state records failure and lets a new negotiation retry it', () => {
   assert.deepEqual(reducePeerState(INITIAL_PEER_STATE, { type: 'connection', state: 'new' }), connecting);
 });
 
+test('an automatic retry after ICE failure reads as reconnecting until the ladder is exhausted', () => {
+  const connecting = reducePeerState(INITIAL_PEER_STATE, { type: 'negotiate' });
+  const retrying = reducePeerState(connecting, { type: 'retry' });
+  assert.deepEqual(retrying, { phase: 'connecting', reconnecting: true, reason: null });
+  assert.equal(retrying.phase !== 'failed', true, 'the stage must not show the failure placeholder mid-retry');
+  assert.equal(reducePeerState(retrying, { type: 'retry' }), retrying);
+  const live = { phase: 'live', reconnecting: false, reason: null };
+  assert.deepEqual(reducePeerState(live, { type: 'retry' }), { phase: 'connecting', reconnecting: true, reason: null });
+  assert.equal(reducePeerState(INITIAL_PEER_STATE, { type: 'retry' }), INITIAL_PEER_STATE, 'nothing to retry before a negotiation');
+  const ended = reducePeerState(live, { type: 'end' });
+  assert.equal(reducePeerState(ended, { type: 'retry' }), ended, 'ended stays terminal');
+  // The fresh offer that follows keeps the reconnecting flag until media flows.
+  const renegotiated = reducePeerState(retrying, { type: 'negotiate' });
+  assert.equal(renegotiated.reconnecting, true);
+  assert.deepEqual(reducePeerState(renegotiated, { type: 'connection', state: 'connected' }), live);
+  // Only the exhausted ladder is a failure the viewer must act on.
+  assert.equal(reducePeerState(retrying, { type: 'fail', reason: 'Relay unreachable.' }).phase, 'failed');
+});
+
 /* ------------------------------------------------------------------ mesh rules */
 
 test('mesh capacity is bounded by the server maximum and known peers are always re-offered', () => {
@@ -341,6 +360,46 @@ test('SignalBudget enforces 180 sends per rolling minute', () => {
   assert.equal(small.take(0), true);
   assert.equal(small.take(999), false);
   assert.equal(small.take(1000), true);
+});
+
+test('sendWithinBudget re-checks the window after waking so two sleepers cannot both slip through', async () => {
+  let now = 0;
+  const budget = new SignalBudget(1, 1000);
+  const sent = [];
+  const waiters = [];
+  const wait = (ms) => new Promise((resolve) => waiters.push({ ms, resolve }));
+  const clock = () => now;
+  const send = (label) => () => {
+    sent.push({ label, at: now });
+    return Promise.resolve(label);
+  };
+
+  await sendWithinBudget(budget, send('a'), wait, clock);
+  assert.deepEqual(sent, [{ label: 'a', at: 0 }]);
+
+  // Two senders hit the exhausted window together and both go to sleep.
+  const b = sendWithinBudget(budget, send('b'), wait, clock);
+  const c = sendWithinBudget(budget, send('c'), wait, clock);
+  await Promise.resolve();
+  assert.equal(waiters.length, 2);
+  assert.deepEqual(waiters.map((w) => w.ms), [1000, 1000]);
+
+  // The window opens: exactly one may send; the other must wait again.
+  now = 1000;
+  waiters.splice(0).forEach((w) => w.resolve());
+  await b;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(sent.map((s) => s.label), ['a', 'b']);
+  assert.equal(waiters.length, 1, 'the loser of the race sleeps again instead of sending');
+
+  now = 2000;
+  waiters.splice(0).forEach((w) => w.resolve());
+  assert.equal(await c, 'c');
+  assert.deepEqual(sent, [{ label: 'a', at: 0 }, { label: 'b', at: 1000 }, { label: 'c', at: 2000 }]);
+
+  // A send that throws still releases the caller with the error.
+  const fresh = new SignalBudget(5, 1000);
+  await assert.rejects(sendWithinBudget(fresh, () => Promise.reject(new Error('nope')), wait, clock), /nope/);
 });
 
 test('CandidateQueue buffers trickle candidates per peer until drained', () => {
@@ -434,6 +493,62 @@ test('sendDescription and sendCandidate refuse locally what the server would rej
   assert.equal(socket.calls.length, 2, 'rejected payloads never reach the socket');
 });
 
+/* ------------------------------------------------------------------ host room rules */
+
+test('a scheduled stream can be cancelled from the room only before the broadcast starts', () => {
+  assert.equal(canCancelStream('scheduled', 'setup'), true);
+  assert.equal(canCancelStream('scheduled', 'starting'), false, 'PUT /start is in flight');
+  assert.equal(canCancelStream('scheduled', 'live'), false);
+  assert.equal(canCancelStream('live', 'setup'), false, 'a live stream (host reloaded) is ended, not cancelled');
+  assert.equal(canCancelStream('ended', 'setup'), false);
+  assert.equal(canCancelStream('cancelled', 'setup'), false);
+  assert.equal(canCancelStream(undefined, 'setup'), false);
+});
+
+test('leaving the host room ends a live broadcast and discards an unstarted instant stream', () => {
+  const base = { streamStatus: 'scheduled', createdForImmediateStart: false, closing: false };
+  // Mirrors the mobile screen: unmounting while live ends the broadcast.
+  assert.equal(hostLeaveAction({ ...base, phase: 'live' }), 'end');
+  assert.equal(hostLeaveAction({ ...base, phase: 'live', streamStatus: 'live' }), 'end');
+  // ...unless an end is already in flight.
+  assert.equal(hostLeaveAction({ ...base, phase: 'live', closing: true }), 'none');
+  assert.equal(hostLeaveAction({ ...base, phase: 'ending' }), 'none');
+  assert.equal(hostLeaveAction({ ...base, phase: 'ended' }), 'none');
+  // A stream created from "Go live" that never started must not linger in My streams
+  // (the mobile client cancels a stream whose setup failed).
+  assert.equal(hostLeaveAction({ ...base, phase: 'setup', createdForImmediateStart: true }), 'discard');
+  // A stream the host scheduled for later is theirs to keep.
+  assert.equal(hostLeaveAction({ ...base, phase: 'setup' }), 'none');
+  // Already cancelled by hand: nothing left to do.
+  assert.equal(hostLeaveAction({ ...base, phase: 'setup', createdForImmediateStart: true, closing: true }), 'none');
+  // The server says it is live (started elsewhere): never cancel that from a setup screen.
+  assert.equal(hostLeaveAction({ ...base, phase: 'setup', createdForImmediateStart: true, streamStatus: 'live' }), 'none');
+  // Start in flight: the outcome is handled by the start call itself.
+  assert.equal(hostLeaveAction({ ...base, phase: 'starting', createdForImmediateStart: true }), 'none');
+});
+
+test('the host room consumes the cancel route so a scheduled stream can be removed', () => {
+  const room = read('src/pages/LiveRoom.tsx');
+  assert.match(room, /api\.put\(`\/livestreams\/\$\{[^}]+\}\/cancel`\)/, 'PUT /livestreams/:id/cancel must be called from the room');
+  assert.match(room, /Cancel stream/, 'the host needs a visible control for it');
+  // The list page marks a stream created for an immediate broadcast so the
+  // room can discard it if the host leaves without ever starting.
+  const list = read('src/pages/Livestreams.tsx');
+  assert.match(list, /navigate\(`\/live\/\$\{id\}`,[^)]*state:[^)]*\{ instant: true \}/, 'the list page passes the instant flag as navigation state');
+});
+
+test('isStreamModerator mirrors the server: listed moderators by id or populated user, never by accident', () => {
+  assert.equal(isStreamModerator(['u1', 'u2'], 'u2'), true);
+  assert.equal(isStreamModerator([{ _id: 'u1' }, { _id: 'u2', username: 'b' }], 'u2'), true);
+  assert.equal(isStreamModerator(['u1'], 'u2'), false);
+  assert.equal(isStreamModerator([], 'u1'), false);
+  assert.equal(isStreamModerator(undefined, 'u1'), false);
+  assert.equal(isStreamModerator(['u1'], ''), false, 'an empty id never matches');
+  assert.equal(isStreamModerator([''], ''), false);
+  assert.equal(isStreamModerator([{ _id: 'u1' }], 'u1'), true);
+  assert.equal(isStreamModerator('u1', 'u1'), false, 'a bare string is not a list');
+});
+
 /* ------------------------------------------------------------------ copy helpers */
 
 test('durationLabel words the server cap like the mobile setup screen', () => {
@@ -443,6 +558,20 @@ test('durationLabel words the server cap like the mobile setup screen', () => {
   assert.equal(durationLabel(300), '5 minutes');
   assert.equal(durationLabel(60), '1 minute');
   assert.equal(durationLabel(0), '0 minutes');
+});
+
+test('elapsedLabel keeps seconds so a short test broadcast does not read as "0 minutes"', () => {
+  assert.equal(elapsedLabel(0), '0s');
+  assert.equal(elapsedLabel(45), '45s');
+  assert.equal(elapsedLabel(60), '1m 00s');
+  assert.equal(elapsedLabel(90), '1m 30s');
+  assert.equal(elapsedLabel(3599), '59m 59s');
+  assert.equal(elapsedLabel(3600), '1h 00m');
+  assert.equal(elapsedLabel(3725), '1h 02m');
+  assert.equal(elapsedLabel(7200), '2h 00m');
+  assert.equal(elapsedLabel(-5), '0s');
+  assert.equal(elapsedLabel(NaN), '0s');
+  assert.equal(elapsedLabel(59.9), '59s');
 });
 
 test('videoOrientation reads the decoded frame size', () => {
