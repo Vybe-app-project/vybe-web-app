@@ -286,7 +286,8 @@ function CommunityCard({
         className="group -m-1 flex-1 rounded-md p-1 text-left"
         aria-label={`${community.name || 'Community'} — open`}
       >
-        <CardMedia ratio="16/9">
+        {/* Inline elements only: block content inside a <button> is invalid HTML. */}
+        <CardMedia as="span" ratio="16/9">
           {cover ? (
             <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
           ) : (
@@ -295,15 +296,15 @@ function CommunityCard({
             </span>
           )}
         </CardMedia>
-        <div className="mt-3 space-y-1 px-1">
-          <p className="truncate text-md font-semibold text-text-1 group-hover:underline group-hover:underline-offset-2">
+        <span className="mt-3 block space-y-1 px-1">
+          <span className="block truncate text-md font-semibold text-text-1 group-hover:underline group-hover:underline-offset-2">
             {community.name || 'Community'}
-          </p>
-          <p className="flex min-w-0 items-center gap-1 truncate text-xs text-text-2">
+          </span>
+          <span className="flex min-w-0 items-center gap-1 truncate text-xs text-text-2">
             {community.vicinity ? <MapPin size={13} className="shrink-0 text-text-3" /> : <Globe size={13} className="shrink-0 text-text-3" />}
             <span className="truncate">{community.vicinity || community.description || 'Global community'}</span>
-          </p>
-          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          </span>
+          <span className="flex flex-wrap items-center gap-1.5 pt-1">
             <MembersBadge count={members} />
             {community.category && community.category !== 'gym' ? <Badge tone="neutral">{humanize(community.category)}</Badge> : null}
             <VisibilityBadge community={community} />
@@ -314,8 +315,8 @@ function CommunityCard({
                 Request pending
               </Badge>
             ) : null}
-          </div>
-        </div>
+          </span>
+        </span>
       </button>
       {action ? <div className="mt-3 border-t border-line pt-3">{action}</div> : null}
     </article>

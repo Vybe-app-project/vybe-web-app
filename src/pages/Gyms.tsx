@@ -392,23 +392,23 @@ function GymCard({ gym, onOpen }: { gym: Gym; onOpen: () => void }) {
       className="card card-interactive w-full p-3 text-left"
       aria-label={`${gym.name || 'Gym'} — open details`}
     >
-      <CardMedia ratio="16/9">
+      <CardMedia as="span" ratio="16/9">
         <img src={img} alt="" loading="lazy" className="h-full w-full object-cover" />
       </CardMedia>
-      <div className="mt-3 space-y-1 px-1 pb-1">
-        <div className="flex items-start justify-between gap-2">
-          <p className="min-w-0 truncate text-md font-semibold text-text-1">{gym.name || 'Unnamed gym'}</p>
+      <span className="mt-3 block space-y-1 px-1 pb-1">
+        <span className="flex items-start justify-between gap-2">
+          <span className="min-w-0 truncate text-md font-semibold text-text-1">{gym.name || 'Unnamed gym'}</span>
           {distance ? (
             <Badge tone="brand" className="shrink-0">
               {distance}
             </Badge>
           ) : null}
-        </div>
-        <p className="truncate text-xs text-text-2">{gym.address || gym.vicinity || 'Address not listed'}</p>
-        <div className="pt-1">
+        </span>
+        <span className="block truncate text-xs text-text-2">{gym.address || gym.vicinity || 'Address not listed'}</span>
+        <span className="block pt-1">
           <RatingRow gym={gym} />
-        </div>
-      </div>
+        </span>
+      </span>
     </button>
   );
 }

@@ -194,6 +194,43 @@ test('sheets only start a drag from a finger and never from a control', () => {
   assert.match(ui, /case 'Escape':\s*case 'Tab':\s*e\.preventDefault\(\);[\s\S]{0,400}?e\.stopPropagation\(\);\s*setOpen\(false\);/);
 });
 
+test('the modal focus trap arms once the panel exists and only the top modal answers Escape', () => {
+  const ui = read('src/components/ui.tsx');
+  // usePresence mounts the panel one render after `open`; a trap armed on
+  // `open` alone read a null ref and never re-ran (Tab escaped the sheet).
+  assert.match(ui, /useFocusTrap\(open && mounted, panelRef, initialFocusRef\);/);
+  // Nested dialogs: a ConfirmDialog over a sheet must not take both down.
+  assert.match(ui, /const modalStack: symbol\[\] = \[\];/);
+  assert.match(ui, /if \(!isTopmostModal\(stackToken\.current\)\) return;\s*e\.stopPropagation\(\);\s*onClose\(\);/);
+  // Stack membership is keyed on `open` only, so a parent whose onClose
+  // identity changes never leapfrogs the dialog open above it.
+  assert.match(ui, /modalStack\.push\(mine\);[\s\S]{0,300}?\}, \[open\]\);/);
+});
+
+test('card buttons hold inline content only (no block elements inside <button>)', () => {
+  const buttonsOf = (src, fnName) => {
+    const start = src.indexOf(`function ${fnName}(`);
+    assert.ok(start >= 0, `${fnName} exists`);
+    const end = src.indexOf('\n}\n', start);
+    const body = src.slice(start, end);
+    const buttons = [...body.matchAll(/<button[\s\S]*?<\/button>/g)].map((m) => m[0]);
+    assert.ok(buttons.length > 0, `${fnName} renders a button`);
+    return buttons;
+  };
+  for (const [file, fn] of [
+    ['src/pages/GymCommunity.tsx', 'CommunityCard'],
+    ['src/pages/Gyms.tsx', 'GymCard'],
+  ]) {
+    for (const button of buttonsOf(read(file), fn)) {
+      assert.doesNotMatch(button, /<(div|p|h[1-6]|ul|ol|li|section|article)[\s>]/, `${fn} in ${file} keeps block elements out of its button`);
+      assert.doesNotMatch(button, /<CardMedia(?![^>]*\bas="span")/, `${fn} in ${file} renders CardMedia as a span`);
+    }
+  }
+  const ui = read('src/components/ui.tsx');
+  assert.match(ui, /as: Tag = 'div',/);
+  assert.match(ui, /as\?: 'div' \| 'span';/);
+});
+
 test('community posts say where they were posted', () => {
   const card = read('src/pages/PostCard.tsx');
   assert.match(card, /post\.community\?\._id/);

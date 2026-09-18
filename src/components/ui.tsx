@@ -1473,14 +1473,25 @@ export function CardHeader({
 }
 
 /** Media slot inside a card: 14 px radius (card 20 → media 14 → chip 6). */
-export function CardMedia({ className, children, ratio }: { className?: string; children: ReactNode; ratio?: '1/1' | '4/5' | '16/9' | '3/2' }) {
+export function CardMedia({
+  className,
+  children,
+  ratio,
+  as: Tag = 'div',
+}: {
+  className?: string;
+  children: ReactNode;
+  ratio?: '1/1' | '4/5' | '16/9' | '3/2';
+  /** `span` when the media sits inside a `<button>` (block content is invalid there). */
+  as?: 'div' | 'span';
+}) {
   return (
-    <div
-      className={cx('overflow-hidden rounded-md bg-surface-2', className)}
+    <Tag
+      className={cx('block overflow-hidden rounded-md bg-surface-2', className)}
       style={ratio ? { aspectRatio: ratio.replace('/', ' / ') } : undefined}
     >
       {children}
-    </div>
+    </Tag>
   );
 }
 
@@ -1640,6 +1651,12 @@ function useFocusTrap(active: boolean, ref: RefObject<HTMLElement | null>, initi
   }, [active, ref, initialFocus]);
 }
 
+/** Open modals, bottom to top; see the Escape handling in Modal. */
+const modalStack: symbol[] = [];
+export const isTopmostModal = (token: symbol | null) => (
+  modalStack.length > 0 && modalStack[modalStack.length - 1] === token
+);
+
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 const MODAL_WIDTH: Record<ModalSize, string> = {
   sm: 'md:max-w-[30rem]',
@@ -1692,15 +1709,33 @@ export function Modal({
   const titleId = useId();
   const descId = useId();
   useLockBody(mounted);
-  useFocusTrap(open, panelRef, initialFocusRef);
+  // The panel mounts one render after `open` flips (usePresence), so the trap
+  // has to wait for it: armed on `open` alone it read a null panel ref, never
+  // re-ran, and Tab walked the page behind the sheet.
+  useFocusTrap(open && mounted, panelRef, initialFocusRef);
 
+  // Only the topmost open modal answers Escape. Every Modal listens on
+  // window, and stopPropagation inside one listener does not silence its
+  // siblings, so a ConfirmDialog over a sheet used to take both down.
+  const stackToken = useRef<symbol | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const mine = Symbol('modal');
+    stackToken.current = mine;
+    modalStack.push(mine);
+    return () => {
+      const at = modalStack.indexOf(mine);
+      if (at >= 0) modalStack.splice(at, 1);
+      if (stackToken.current === mine) stackToken.current = null;
+    };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== 'Escape') return;
+      if (!isTopmostModal(stackToken.current)) return;
+      e.stopPropagation();
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
