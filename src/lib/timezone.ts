@@ -1,3 +1,5 @@
+import { format, isValid, parseISO } from 'date-fns';
+
 /**
  * The device's timezone offset in the convention the API expects.
  *
@@ -20,3 +22,24 @@
  */
 export const timezoneOffsetMinutes = (now: Date = new Date()): number =>
   now.getTimezoneOffset();
+
+/** Query params every "which day is it" endpoint takes. */
+export const localDayParams = (now: Date = new Date()) => ({ timezoneOffsetMinutes: timezoneOffsetMinutes(now) });
+
+/**
+ * One time-of-day format for every Fuel page: the locale's short time
+ * ("12:16 PM" / "12:16"), the same `p` token the meal cards used while
+ * Hydration printed `HH:mm` and the shared-meal page `EEE d MMM, HH:mm`.
+ */
+export const timeOfDay = (value?: string | Date | null): string => {
+  if (!value) return '';
+  const d = typeof value === 'string' ? parseISO(value) : value;
+  return isValid(d) ? format(d, 'p') : '';
+};
+
+/** "Fri 18 Sep, 12:17 PM" — day plus the shared time-of-day format. */
+export const dayAndTime = (value?: string | Date | null): string => {
+  if (!value) return '';
+  const d = typeof value === 'string' ? parseISO(value) : value;
+  return isValid(d) ? `${format(d, 'EEE d MMM')}, ${format(d, 'p')}` : '';
+};

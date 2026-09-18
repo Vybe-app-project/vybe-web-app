@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, formatDistanceToNow, isValid, parseISO } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { copyLink as copyLinkToClipboard, shareOrCopy, shareUrls } from '../lib/share';
 import {
   Avatar,
   Badge,
@@ -18,6 +19,7 @@ import {
   Section,
   Skeleton,
   StatTile,
+  Switch,
   Textarea,
   VIZ,
   cx,
@@ -26,9 +28,11 @@ import {
   useToast,
 } from './ui';
 import type { MenuItem } from './ui';
-import { Utensils, Heart, Clock, Trash, Flag, ShareUp, Link as LinkIcon, Send, BadgeCheck } from './icons';
-import { MacroLine, mealTypeLabel, plural, type Meal } from './Meals';
+import { Utensils, Heart, Clock, Trash, Flag, ShareUp, Link as LinkIcon, Send, BadgeCheck, Globe } from './icons';
+import { MacroLine, PUBLISH_COPY, mealTypeLabel, plural, usePublishMeal, type Meal } from './Meals';
 import { useReportModal } from './Report';
+
+type MealShareResponse = { shareToken: string; sharePath: string; shareUrl?: string; expiresAt: string };
 
 type CommentAuthor = {
   _id: string;
@@ -108,6 +112,8 @@ export default function MealDetail() {
   const { report, reportModal } = useReportModal();
   const [text, setText] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmPublish, setConfirmPublish] = useState(false);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
 
   const mealKey = ['meal', id];
   const commentsKey = ['meal', id, 'comments'];
@@ -190,37 +196,67 @@ export default function MealDetail() {
     onSettled: () => setConfirmDelete(false),
   });
 
+  const ownerId = meal ? (typeof meal.user === 'object' && meal.user ? meal.user._id : typeof meal.user === 'string' ? meal.user : undefined) : undefined;
+  const isOwner = Boolean(user && ownerId && String(ownerId) === user._id);
+  const publish = usePublishMeal(meal, [mealKey]);
+
+  /**
+   * The link the owner hands out. A private meal answers 404 to anyone else
+   * at /meals/:id, so the owner mints a seven-day share token (the API's
+   * POST /meals/:id/share) and shares /meals/shared/<token>, which the
+   * recipient can open. Non-owners are looking at a community meal, whose
+   * canonical URL already works for anyone allowed to see it.
+   */
+  const shareableUrl = useMutation({
+    mutationFn: async (): Promise<{ url: string; expiresAt?: string }> => {
+      if (!meal) throw new Error('No meal');
+      if (!isOwner) return { url: `${location.origin}/meals/${meal._id}` };
+      if (meal.isPublic) return { url: `${location.origin}/meals/${meal._id}` };
+      const { data } = await api.post<MealShareResponse>(`/meals/${meal._id}/share`, {});
+      return { url: data.shareUrl || shareUrls.meal(data.shareToken), expiresAt: data.expiresAt };
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not create a share link')),
+  });
+
   const share = async () => {
-    if (!meal) return;
-    const url = `${location.origin}/meals/${meal._id}`;
+    if (!meal || shareableUrl.isPending) return;
     try {
-      if (typeof navigator.share === 'function') {
-        await navigator.share({ title: `${meal.food_name} on Vybe`, url });
-        return;
-      }
-      await navigator.clipboard.writeText(url);
-      toast.success('Link copied');
-    } catch (e) {
-      if ((e as { name?: string })?.name === 'AbortError') return;
-      toast.error('Could not share this meal');
+      const { url, expiresAt } = await shareableUrl.mutateAsync();
+      await shareOrCopy(url, `${meal.food_name} on Vybe`, toast, expiresAt ? 'Share link copied. It works for 7 days.' : 'Link copied');
+    } catch {
+      // The mutation already toasted.
     }
   };
 
   const copyLink = async () => {
-    if (!meal) return;
+    if (!meal || shareableUrl.isPending) return;
     try {
-      await navigator.clipboard.writeText(`${location.origin}/meals/${meal._id}`);
-      toast.success('Link copied');
+      const { url, expiresAt } = await shareableUrl.mutateAsync();
+      await copyLinkToClipboard(url, toast, expiresAt ? 'Share link copied. It works for 7 days.' : 'Link copied');
     } catch {
-      toast.error('Could not copy the link');
+      // The mutation already toasted.
     }
   };
+
+  const revoke = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.delete<{ revokedCount: number }>(`/meals/${id}/share`);
+      return data;
+    },
+    onSuccess: (data) => {
+      const n = data?.revokedCount ?? 0;
+      toast.success(n > 0 ? `${n} share ${plural(n, 'link')} revoked` : 'No active share links');
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not revoke share links')),
+    onSettled: () => setConfirmRevoke(false),
+  });
 
   if (mealQuery.isLoading) return <DetailSkeleton />;
 
   if (mealQuery.isError || !meal) {
     const status = (mealQuery.error as { response?: { status?: number } } | null)?.response?.status;
-    const missing = status === 404;
+    // 400 is a malformed id in the URL: as final as a 404, and just as unretryable.
+    const missing = status === 404 || status === 400;
     return (
       <div className="space-y-8">
         <PageHeader title="Meal" />
@@ -243,8 +279,6 @@ export default function MealDetail() {
   }
 
   const author = typeof meal.user === 'object' && meal.user ? meal.user : undefined;
-  const ownerId = typeof meal.user === 'object' && meal.user ? meal.user._id : typeof meal.user === 'string' ? meal.user : undefined;
-  const isOwner = Boolean(user && ownerId && String(ownerId) === user._id);
   const ts = meal.timestamp ? parseISO(meal.timestamp) : null;
   const when = ts && isValid(ts) ? ts : null;
   const comments = commentsQuery.data?.comments ?? [];
@@ -252,13 +286,24 @@ export default function MealDetail() {
   const likeCount = (meal.likes ?? []).length;
   const hasMicros = MICROS.some((m) => (meal.nutrition?.[m.key] ?? 0) > 0);
 
+  const linkHint = isOwner && !meal.isPublic ? 'Creates a private link that works for 7 days' : undefined;
   const menuItems: MenuItem[] = [
-    { label: 'Share', icon: <ShareUp size={18} />, onSelect: () => void share() },
-    { label: 'Copy link', icon: <LinkIcon size={18} />, onSelect: () => void copyLink() },
+    { label: 'Share', description: linkHint, icon: <ShareUp size={18} />, disabled: shareableUrl.isPending, onSelect: () => void share() },
+    { label: 'Copy link', description: linkHint, icon: <LinkIcon size={18} />, disabled: shareableUrl.isPending, onSelect: () => void copyLink() },
     ...(isOwner
-      ? [{ label: 'Delete meal', icon: <Trash size={18} />, danger: true, divider: true, onSelect: () => setConfirmDelete(true) } as MenuItem]
+      ? [
+          {
+            label: meal.isPublic ? 'Remove from community' : 'Share with community',
+            description: meal.isPublic ? 'Only you will see it' : 'Friends and followers see it in Community',
+            icon: <Globe size={18} />,
+            onSelect: () => (meal.isPublic ? publish.mutate(false) : setConfirmPublish(true)),
+          } as MenuItem,
+          { label: 'Revoke share links', description: 'Every link you sent stops working', icon: <LinkIcon size={18} />, onSelect: () => setConfirmRevoke(true) } as MenuItem,
+          { label: 'Delete meal', icon: <Trash size={18} />, danger: true, divider: true, onSelect: () => setConfirmDelete(true) } as MenuItem,
+        ]
       : [{ label: 'Report meal', icon: <Flag size={18} />, danger: true, divider: true, onSelect: () => report({ targetType: 'meal', targetId: meal._id, targetLabel: meal.food_name }) } as MenuItem]),
   ];
+  const foods = meal.foods ?? [];
   const menu = <Menu label="Meal options" items={menuItems} />;
 
   const subtitle = when
@@ -350,6 +395,44 @@ export default function MealDetail() {
               ))}
             </dl>
           ) : null}
+
+          {foods.length > 0 ? (
+            <div>
+              <p className="type-label mb-2 text-text-2">Foods in this meal</p>
+              <ul className="divide-y divide-line rounded-md border border-line" aria-label="Foods in this meal">
+                {foods.map((food, i) => (
+                  <li key={`${food.food_name}-${i}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-text-1">{food.food_name}</p>
+                      <p className="text-xs text-text-2">
+                        {[food.brandName, food.servings && food.servings !== 1 ? `${food.servings} × ${food.serving_size ?? 'serving'}` : food.serving_size].filter(Boolean).join(', ')}
+                      </p>
+                    </div>
+                    <MacroLine nutrition={food.nutrition} emphasis="sm" />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {isOwner ? (
+            <div className="flex items-start justify-between gap-3 rounded-md border border-line p-3">
+              <div className="min-w-0">
+                <p className="inline-flex items-center gap-2 text-sm font-semibold text-text-1">
+                  <Globe size={16} className="text-brand" /> Share with community
+                </p>
+                <p className="mt-0.5 text-xs text-text-2">
+                  {meal.isPublic ? 'Friends and followers can see this meal in Community and like or comment on it.' : 'Off: only you can open this meal. Share links you create still work.'}
+                </p>
+              </div>
+              <Switch
+                label="Share with community"
+                checked={Boolean(meal.isPublic)}
+                disabled={publish.isPending}
+                onChange={(next) => (next ? setConfirmPublish(true) : publish.mutate(false))}
+              />
+            </div>
+          ) : null}
         </div>
       </Card>
 
@@ -430,6 +513,28 @@ export default function MealDetail() {
       </Section>
 
       {reportModal}
+      <ConfirmDialog
+        open={confirmPublish}
+        title="Share this meal with the community?"
+        message={PUBLISH_COPY.on}
+        confirmLabel="Share meal"
+        loading={publish.isPending}
+        onCancel={() => setConfirmPublish(false)}
+        onConfirm={() => {
+          setConfirmPublish(false);
+          publish.mutate(true);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmRevoke}
+        title="Revoke every share link?"
+        message="Anyone you sent a link to will see “no longer available”. You can create a fresh link afterwards."
+        confirmLabel="Revoke links"
+        destructive
+        loading={revoke.isPending}
+        onCancel={() => setConfirmRevoke(false)}
+        onConfirm={() => revoke.mutate()}
+      />
       <ConfirmDialog
         open={confirmDelete}
         title="Delete this meal?"

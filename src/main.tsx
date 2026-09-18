@@ -8,6 +8,9 @@ import './styles.css';
 const qc = new QueryClient({
   defaultOptions: {
     queries: {
+      // Retry only what a retry can fix: network failures and 5xx. Any 4xx
+      // (400 bad id, 429 rate limit, 401/403/404) is final, so the page shows
+      // its error copy at once instead of a skeleton through three backoffs.
       retry: (count, err: any) => {
         // A 4xx is the API's final answer (bad input, no access, not found):
         // repeating it only stretches the skeleton for three seconds before
