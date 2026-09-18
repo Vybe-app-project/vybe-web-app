@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { create } from 'zustand';
 import { api, tokenStore, adminApi, revokeSession } from './api';
 import { disposeSocket } from './socket';
@@ -26,8 +27,10 @@ export type User = {
 type AuthState = {
   user: User | null;
   loading: boolean;
+  bootstrapError: string | null;
   admin: any | null;
   adminLoading: boolean;
+  adminBootstrapError: string | null;
   bootstrap: () => Promise<void>;
   bootstrapAdmin: () => Promise<void>;
   setUser: (u: User | null) => void;
@@ -39,40 +42,99 @@ type AuthState = {
   forgetAdminSession: () => void;
 };
 
+let userBootstrap: Promise<void> | null = null;
+let adminBootstrap: Promise<void> | null = null;
+
+const hasIdentity = (value: unknown): value is User =>
+  typeof value === 'object' && value !== null && '_id' in value
+  && typeof value._id === 'string' && value._id.length > 0;
+
 export const useAuth = create<AuthState>((set) => ({
   user: null,
   loading: true,
+  bootstrapError: null,
   admin: null,
   adminLoading: true,
+  adminBootstrapError: null,
 
-  bootstrap: async () => {
-    if (!tokenStore.get()) return set({ user: null, loading: false });
-    try {
-      const { data } = await api.get('/users/me');
-      set({ user: data.user || data, loading: false });
-    } catch {
-      tokenStore.clear();
-      set({ user: null, loading: false });
+  bootstrap: () => {
+    if (userBootstrap) return userBootstrap;
+    const token = tokenStore.get();
+    if (!token) {
+      set({ user: null, loading: false, bootstrapError: null });
+      return Promise.resolve();
     }
+    set({ loading: true, bootstrapError: null });
+    userBootstrap = (async () => {
+      try {
+        const { data } = await api.get('/users/me');
+        if (tokenStore.get() !== token) {
+          if (!tokenStore.get()) set({ user: null, loading: false, bootstrapError: null });
+          return;
+        }
+        const user: unknown = data?.user ?? data;
+        if (!hasIdentity(user)) throw new Error('Session response has no user identity.');
+        set({ user, loading: false, bootstrapError: null });
+      } catch (error) {
+        const current = tokenStore.get();
+        if (current && current !== token) return;
+        const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+        if (status === 401) {
+          tokenStore.clear();
+          set({ user: null, loading: false, bootstrapError: null });
+        } else if (!current) {
+          set({ user: null, loading: false, bootstrapError: null });
+        } else if (current === token) {
+          console.warn('User session verification is unavailable.', { status });
+          set({ loading: false, bootstrapError: 'Your saved sign-in is still on this device. Check your connection and try again.' });
+        }
+      }
+    })().finally(() => { userBootstrap = null; });
+    return userBootstrap;
   },
 
-  bootstrapAdmin: async () => {
-    if (!tokenStore.getAdmin()) return set({ admin: null, adminLoading: false });
-    try {
-      const { data } = await adminApi.get('/admins/me');
-      set({ admin: data.admin || data, adminLoading: false });
-    } catch {
-      tokenStore.clearAdmin();
-      set({ admin: null, adminLoading: false });
+  bootstrapAdmin: () => {
+    if (adminBootstrap) return adminBootstrap;
+    const token = tokenStore.getAdmin();
+    if (!token) {
+      set({ admin: null, adminLoading: false, adminBootstrapError: null });
+      return Promise.resolve();
     }
+    set({ adminLoading: true, adminBootstrapError: null });
+    adminBootstrap = (async () => {
+      try {
+        const { data } = await adminApi.get('/admins/me');
+        if (tokenStore.getAdmin() !== token) {
+          if (!tokenStore.getAdmin()) set({ admin: null, adminLoading: false, adminBootstrapError: null });
+          return;
+        }
+        const admin: unknown = data?.data?.admin ?? data?.admin ?? data;
+        if (!hasIdentity(admin)) throw new Error('Session response has no administrator identity.');
+        set({ admin, adminLoading: false, adminBootstrapError: null });
+      } catch (error) {
+        const current = tokenStore.getAdmin();
+        if (current && current !== token) return;
+        const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+        if (status === 401) {
+          tokenStore.clearAdmin();
+          set({ admin: null, adminLoading: false, adminBootstrapError: null });
+        } else if (!current) {
+          set({ admin: null, adminLoading: false, adminBootstrapError: null });
+        } else if (current === token) {
+          console.warn('Administrator session verification is unavailable.', { status });
+          set({ adminLoading: false, adminBootstrapError: 'Your administrator sign-in is still in this tab. Check your connection and try again.' });
+        }
+      }
+    })().finally(() => { adminBootstrap = null; });
+    return adminBootstrap;
   },
 
-  setUser: (u) => set({ user: u }),
+  setUser: (u) => set({ user: u, loading: false, bootstrapError: null }),
 
   login: async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
     tokenStore.set(data.token);
-    set({ user: data.user, loading: false });
+    set({ user: data.user, loading: false, bootstrapError: null });
   },
 
   adminLogin: async (email, password) => {
@@ -90,7 +152,7 @@ export const useAuth = create<AuthState>((set) => ({
       throw new Error(body?.message || 'Sign-in did not return an admin session.');
     }
     tokenStore.setAdmin(token);
-    set({ admin, adminLoading: false });
+    set({ admin, adminLoading: false, adminBootstrapError: null });
   },
 
   logout: () => {
@@ -108,7 +170,7 @@ export const useAuth = create<AuthState>((set) => ({
     // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
     tokenStore.clear();
-    set({ user: null });
+    set({ user: null, loading: false, bootstrapError: null });
     location.href = '/login';
   },
 
@@ -118,7 +180,7 @@ export const useAuth = create<AuthState>((set) => ({
     // whole moderation surface.
     revokeSession('/admins/logout', tokenStore.getAdmin());
     tokenStore.clearAdmin();
-    set({ admin: null });
+    set({ admin: null, adminLoading: false, adminBootstrapError: null });
     location.href = '/admin/login';
   },
 
@@ -128,6 +190,6 @@ export const useAuth = create<AuthState>((set) => ({
     // next visit to /admin/login shows the form straight away instead of first
     // failing a /admins/me call with the stale bearer.
     tokenStore.clearAdmin();
-    set({ admin: null, adminLoading: false });
+    set({ admin: null, adminLoading: false, adminBootstrapError: null });
   },
 }));

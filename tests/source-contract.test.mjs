@@ -69,7 +69,7 @@ test('the staff console exposes password recovery without a session', () => {
 
 test('the production client defaults to same-origin API routing', () => {
   const api = read('src/lib/api.ts');
-  assert.match(api, /import\.meta\.env\.VITE_API_BASE/);
+  assert.match(api, /import\.meta\.env\??\.VITE_API_BASE/);
   assert.match(api, /\|\| '\/api'/);
   assert.match(api, /timeout:\s*30000/);
 });

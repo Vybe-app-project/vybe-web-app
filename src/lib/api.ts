@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 
 export const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) || '/api';
+  (import.meta.env?.VITE_API_BASE as string | undefined) || '/api';
 
 export const ORIGIN_BASE = API_BASE.replace(/\/api\/?$/, '');
 
@@ -72,7 +72,11 @@ adminApi.interceptors.request.use((config) => {
 });
 
 /** Session-version invalidation: the API revokes tokens on password change. */
-function onUnauthorized(kind: 'user' | 'admin') {
+function onUnauthorized(kind: 'user' | 'admin', authorization: unknown) {
+  const current = kind === 'admin' ? tokenStore.getAdmin() : tokenStore.get();
+  // An old request must not invalidate a newer sign-in, or treat a failed
+  // public login attempt as an expired authenticated session.
+  if (!current || authorization !== `Bearer ${current}`) return;
   if (kind === 'admin') {
     tokenStore.clearAdmin();
     if (!location.pathname.startsWith('/admin/login')) location.href = '/admin/login';
@@ -85,14 +89,14 @@ function onUnauthorized(kind: 'user' | 'admin') {
 api.interceptors.response.use(
   (r) => r,
   (err: AxiosError) => {
-    if (err.response?.status === 401) onUnauthorized('user');
+    if (err.response?.status === 401) onUnauthorized('user', err.config?.headers.get('Authorization'));
     return Promise.reject(err);
   },
 );
 adminApi.interceptors.response.use(
   (r) => r,
   (err: AxiosError) => {
-    if (err.response?.status === 401) onUnauthorized('admin');
+    if (err.response?.status === 401) onUnauthorized('admin', err.config?.headers.get('Authorization'));
     return Promise.reject(err);
   },
 );
