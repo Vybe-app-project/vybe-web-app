@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { api, tokenStore, adminApi, revokeSession } from './api';
+import type { AxiosError } from 'axios';
+import { api, tokenStore, adminApi, revokeSession, signOutReason } from './api';
 import { disposeSocket } from './socket';
 
 /**
@@ -26,6 +27,12 @@ export type User = {
 type AuthState = {
   user: User | null;
   loading: boolean;
+  /**
+   * The session could not be verified with the API (offline, or the API is
+   * down) and `user` was restored from the local snapshot. The shell paints and
+   * says so; bootstrap runs again when the connection returns.
+   */
+  sessionStale: boolean;
   admin: any | null;
   adminLoading: boolean;
   bootstrap: () => Promise<void>;
@@ -33,26 +40,56 @@ type AuthState = {
   setUser: (u: User | null) => void;
   login: (email: string, password: string) => Promise<void>;
   adminLogin: (email: string, password: string) => Promise<void>;
+  /** End this device's session only. */
   logout: () => void;
+  /** End every session on every device (POST /auth/logout-all), then this one. */
+  logoutEverywhere: () => void;
   adminLogout: () => void;
   /** Drop the local admin session only; used when the API has already revoked it. */
   forgetAdminSession: () => void;
 };
 
-export const useAuth = create<AuthState>((set) => ({
+/** A 401/403 means the session itself is bad; anything else is the network or the server. */
+const isSessionRejected = (error: unknown): boolean => {
+  const status = (error as AxiosError | undefined)?.response?.status;
+  return status === 401 || status === 403;
+};
+
+const remember = (u: User | null) => {
+  if (u && u._id && u.username) tokenStore.setUser({ _id: u._id, username: u.username, fullName: u.fullName, avatar: u.avatar });
+};
+
+export const useAuth = create<AuthState>((set, get) => ({
   user: null,
   loading: true,
+  sessionStale: false,
   admin: null,
   adminLoading: true,
 
   bootstrap: async () => {
-    if (!tokenStore.get()) return set({ user: null, loading: false });
+    if (!tokenStore.get()) return set({ user: null, loading: false, sessionStale: false });
     try {
       const { data } = await api.get('/users/me');
-      set({ user: data.user || data, loading: false });
-    } catch {
-      tokenStore.clear();
-      set({ user: null, loading: false });
+      const user = (data.user || data) as User;
+      remember(user);
+      set({ user, loading: false, sessionStale: false });
+    } catch (error) {
+      if (isSessionRejected(error)) {
+        // The interceptor has already dropped the token and is redirecting.
+        tokenStore.clear();
+        return set({ user: null, loading: false, sessionStale: false });
+      }
+      // Offline, or the API is unreachable: this is not a sign-in problem, so
+      // the token stays and the shell paints from the snapshot. Before this,
+      // any failure here cleared the token and every offline reload landed on
+      // the sign-in page with "Unable to verify your sign-in".
+      const snapshot = tokenStore.getUser();
+      const current = get().user;
+      set({
+        user: current ?? (snapshot ? (snapshot as User) : null),
+        loading: false,
+        sessionStale: true,
+      });
     }
   },
 
@@ -67,12 +104,16 @@ export const useAuth = create<AuthState>((set) => ({
     }
   },
 
-  setUser: (u) => set({ user: u }),
+  setUser: (u) => {
+    remember(u);
+    set({ user: u });
+  },
 
   login: async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
     tokenStore.set(data.token);
-    set({ user: data.user, loading: false });
+    remember(data.user);
+    set({ user: data.user, loading: false, sessionStale: false });
   },
 
   adminLogin: async (email, password) => {
@@ -97,8 +138,8 @@ export const useAuth = create<AuthState>((set) => ({
     // Revoke on the server before forgetting the token locally. Sessions are
     // long-lived bearer tokens; clearing localStorage alone left a valid
     // 30-day token alive in whatever browser issued it. POST /auth/logout
-    // bumps the account's tokenVersion, which the API checks on every
-    // request, so every outstanding token dies -- not only this tab's.
+    // revokes this token's own session id, so only this device signs out;
+    // other devices keep working (logoutEverywhere is the wide version).
     // Best-effort and fire-and-forget: signing out must never be blocked by
     // the network, and a failed revocation still leaves the user signed out
     // locally, which is the pre-existing behaviour. revokeSession() carries
@@ -108,7 +149,16 @@ export const useAuth = create<AuthState>((set) => ({
     // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
     tokenStore.clear();
-    set({ user: null });
+    set({ user: null, sessionStale: false });
+    location.href = '/login';
+  },
+
+  logoutEverywhere: () => {
+    revokeSession('/auth/logout-all', tokenStore.get());
+    disposeSocket();
+    tokenStore.clear();
+    set({ user: null, sessionStale: false });
+    signOutReason.set('signed-out-all');
     location.href = '/login';
   },
 

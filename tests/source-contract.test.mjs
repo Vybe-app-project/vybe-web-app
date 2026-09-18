@@ -223,3 +223,55 @@ test('OVH release scripts require clean immutable commit artifacts', () => {
   assert.match(rollback, /releases\/\$commit_sha/);
   assert.doesNotMatch(`${local}\n${remote}\n${rollback}`, /149\.56\.18\.195/);
 });
+
+test('settings covers privacy, per-device sessions, separate email preferences and inline username errors', () => {
+  const settings = read('src/pages/Settings.tsx');
+  // Privacy: the switch the subtitle promised, backed by PUT /users/settings, plus the blocked list.
+  assert.match(settings, /title="Private account"/);
+  assert.match(settings, /api\.put\('\/users\/settings', \{ privacy \}\)/);
+  assert.match(settings, /api\.get\('\/users\/blocked'\)/);
+  assert.match(settings, /api\.post\('\/users\/unblock', \{ userId \}\)/);
+  assert.match(settings, /<PrivacySection \/>/);
+  // Email preferences read and write their own store and send only the changed keys.
+  assert.match(settings, /api\.get\('\/users\/email-preferences'\)/);
+  assert.match(settings, /api\.put\('\/users\/email-preferences', \{ notifications: patch \}\)/);
+  assert.match(settings, /save\.mutate\(changed\)/);
+  assert.match(settings, /qc\.setQueryData\(EMAIL_SETTINGS_KEY, settings\)/, 'a successful save must reset the dirty state');
+  assert.doesNotMatch(settings, /pickNotificationSettings\(next\)/, 'no card may replay the whole settings object');
+  // Push toggles patch one key on the shared query with rollback.
+  assert.match(settings, /save\.mutate\(\{ pauseAll: checked \}\)/);
+  assert.match(settings, /qc\.setQueryData\(NOTIFICATION_SETTINGS_KEY, ctx\.previous\)/);
+  // Sign out stays per device; everywhere is a separate confirmed action.
+  assert.match(settings, /Sign out of all devices\?/);
+  assert.match(settings, /logoutEverywhere/);
+  assert.match(settings, />\s*Sign out\s*<\/Button>/);
+  assert.match(settings, /label="Sign out"/);
+  // Username conflicts land under the field.
+  assert.match(settings, /setErrors\(\(x\) => \(\{ \.\.\.x, username: message \}\)\)/);
+  assert.match(settings, /getElementById\('set-username'\)\?\.focus\(\)/);
+
+  const auth = read('src/lib/auth.ts');
+  assert.match(auth, /revokeSession\('\/auth\/logout-all', tokenStore\.get\(\)\)/);
+  // A 401 bounce must explain itself on the sign-in page.
+  const api = read('src/lib/api.ts');
+  assert.match(api, /signOutReason\.set\('session-ended'\)/);
+  const login = read('src/pages/Login.tsx');
+  assert.match(login, /signOutReason\.take\(\)/);
+  assert.match(login, /Signed out on this device/);
+});
+
+test('an offline reload keeps the session and paints the shell', () => {
+  const auth = read('src/lib/auth.ts');
+  // Only a rejected session (401/403) may drop the token; a network error restores the snapshot.
+  assert.match(auth, /isSessionRejected\(error\)/);
+  assert.match(auth, /tokenStore\.getUser\(\)/);
+  assert.match(auth, /sessionStale: true/);
+  assert.doesNotMatch(auth, /\} catch \{\s*tokenStore\.clear\(\);\s*set\(\{ user: null, loading: false \}\);/s);
+  const api = read('src/lib/api.ts');
+  assert.match(api, /USER_SNAPSHOT_KEY/);
+  // The snapshot holds identity only.
+  assert.match(api, /JSON\.stringify\(\{ _id: u\._id, username: u\.username, fullName: u\.fullName, avatar: u\.avatar \}/);
+  const app = read('src/App.tsx');
+  assert.match(app, /window\.addEventListener\('online', retry\)/, 'bootstrap must re-run when the connection returns');
+  assert.match(read('src/components/Layout.tsx'), /Can’t reach Vybe right now/);
+});

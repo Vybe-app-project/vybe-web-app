@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { errMsg } from '../lib/api';
+import { errMsg, signOutReason } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { isEmail } from '../lib/hooks';
 import { Brand, BrandMark, Button, Callout, IconButton, Input, cx } from './ui';
@@ -139,13 +139,22 @@ export default function Login() {
   const [fieldError, setFieldError] = useState<{ email?: string; password?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Read once on mount: the 401 interceptor and "Sign out of all devices"
+  // leave a note explaining why the user is looking at this page.
+  const [reason] = useState(() => signOutReason.take());
 
   const notice =
     params.get('reset') === '1'
       ? 'Password updated. Sign in with your new password.'
       : params.get('registered') === '1'
         ? 'Account created. Welcome to Vybe.'
-        : null;
+        : reason === 'signed-out-all'
+          ? 'Signed out of all devices. Sign in again on the ones you still use.'
+          : null;
+  const sessionNotice =
+    reason === 'session-ended'
+      ? 'You were signed out. This happens after a password change, after “Sign out of all devices” on another device, or when a session expires. Sign in again to continue.'
+      : null;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -178,6 +187,11 @@ export default function Login() {
       {notice ? (
         <Callout tone="success" className="mb-5">
           {notice}
+        </Callout>
+      ) : null}
+      {sessionNotice ? (
+        <Callout tone="warning" title="Signed out on this device" className="mb-5">
+          {sessionNotice}
         </Callout>
       ) : null}
 

@@ -36,10 +36,8 @@
       </svg>
       <h1>You're offline</h1>
       <p>Vybe needs a connection for this page. Anything you already opened is still available once you're back online.</p>
-      <button type="button" onclick="location.reload()">Try again</button>
+      <button type="button" id="retry">Try again</button>
     </main>
-    <script>
-      addEventListener('online', function () { location.reload(); });
-    </script>
+    <script src="/offline.js"></script>
   </body>
 </html>

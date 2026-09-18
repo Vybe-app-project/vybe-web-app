@@ -163,7 +163,23 @@ function PwaUpdates() {
 
 export default function App() {
   const bootstrap = useAuth((s) => s.bootstrap);
+  const sessionStale = useAuth((s) => s.sessionStale);
   useEffect(() => { void bootstrap(); }, [bootstrap]);
+  // A session restored from the offline snapshot re-verifies itself as soon
+  // as the connection returns, and keeps trying while the API is unreachable,
+  // so nobody has to find a "Try again" button.
+  useEffect(() => {
+    if (!sessionStale) return;
+    const retry = () => void bootstrap();
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    const timer = window.setInterval(retry, 30_000);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+      window.clearInterval(timer);
+    };
+  }, [sessionStale, bootstrap]);
   useThemeSync();
 
   return (
