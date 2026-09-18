@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api, errMsg } from '../lib/api';
 import { compactNumber, useDebounced, type Post, type PublicUser } from '../lib/hooks';
 import {
   Avatar,
+  Badge,
   Button,
   Card,
   Chip,
@@ -16,13 +18,19 @@ import {
   SegmentedControl,
   Skeleton,
   cx,
+  formatStat,
+  humanize,
   useToast,
 } from './ui';
-import { Clock, Hash, Search as SearchIcon, X } from './icons';
+import { Clock, Hash, Heart, Search as SearchIcon, X } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
+import { CoverArt, type SocialWorkout } from './Workouts';
 
-type SearchType = 'all' | 'users' | 'posts' | 'hashtags';
+type SearchType = 'all' | 'users' | 'posts' | 'hashtags' | 'workouts';
+
+/** Search results carry a like count instead of the like list. */
+type SearchWorkout = Omit<SocialWorkout, 'likes'> & { likeCount?: number };
 
 type Suggestion = {
   type: 'user' | 'hashtag';
@@ -43,6 +51,7 @@ type SearchResponse = {
     users?: PublicUser[];
     posts?: Post[];
     hashtags?: HashtagResult[];
+    workouts?: SearchWorkout[];
     [k: string]: any;
   };
 };
@@ -51,6 +60,7 @@ const TYPE_TABS: { key: SearchType; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'users', label: 'People' },
   { key: 'posts', label: 'Posts' },
+  { key: 'workouts', label: 'Workouts' },
   { key: 'hashtags', label: 'Hashtags' },
 ];
 
@@ -71,6 +81,41 @@ function HashtagList({ hashtags }: { hashtags: HashtagResult[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Compact workout row: cover, title, category and the author, linking to the workout page. */
+function WorkoutResultRow({ workout }: { workout: SearchWorkout }) {
+  const author = workout.createdBy;
+  const exercises = workout.exercises?.length ?? 0;
+  return (
+    <Card padded={false} className="relative flex items-center gap-3 p-3">
+      <Link to={`/workouts/${workout._id}`} viewTransition aria-label={`Open ${workout.title}`} className="absolute inset-0 z-[1] rounded-[inherit]" />
+      <span className="h-14 w-20 shrink-0 overflow-hidden rounded-sm bg-surface-2">
+        <CoverArt workout={workout as SocialWorkout} compact />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-md font-semibold text-text-1">{workout.title}</p>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-2">
+          <Badge tone="brand" size="sm">
+            {humanize(workout.category)}
+          </Badge>
+          {workout.isPremade ? (
+            <Badge tone="accent" size="sm">
+              Premade
+            </Badge>
+          ) : null}
+          <span className="tabular">
+            {formatStat(exercises)} {exercises === 1 ? 'exercise' : 'exercises'}
+          </span>
+          {workout.duration ? <span className="tabular">{formatStat(workout.duration)} min</span> : null}
+          {author ? <span className="truncate">by {author.fullName || `@${author.username ?? 'unknown'}`}</span> : workout.isPremade ? <span>by Vybe</span> : null}
+        </div>
+      </div>
+      <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-text-2 tabular" aria-label={`${formatStat(workout.likeCount ?? 0)} likes`}>
+        <Heart size={16} /> {formatStat(workout.likeCount ?? 0)}
+      </span>
+    </Card>
   );
 }
 
@@ -186,12 +231,13 @@ export default function Search() {
   const users = results.data?.results?.users || [];
   const posts = results.data?.results?.posts || [];
   const hashtags = results.data?.results?.hashtags || [];
-  const nothingFound = results.isSuccess && !users.length && !posts.length && !hashtags.length;
+  const workouts = results.data?.results?.workouts || [];
+  const nothingFound = results.isSuccess && !users.length && !posts.length && !hashtags.length && !workouts.length;
   const showSuggestions = focused && debounced.length >= 2 && !!suggestions.data?.length;
 
   return (
     <>
-      <PageHeader title="Search" subtitle="People, posts and hashtags across Vybe." />
+      <PageHeader title="Search" subtitle="People, posts, workouts and hashtags across Vybe." />
       <div className="w-full max-w-form space-y-5">
         <form onSubmit={onSubmit} role="search" className="relative">
           <Input
@@ -202,7 +248,7 @@ export default function Search() {
             leading={<SearchIcon size={18} />}
             label="Search"
             hideLabel
-            placeholder="Search people, posts and hashtags"
+            placeholder="Search people, posts, workouts and hashtags"
             value={term}
             enterKeyHint="search"
             role="combobox"
@@ -374,7 +420,7 @@ export default function Search() {
           <EmptyState
             variant="no-results"
             title={`No results for “${activeQuery}”`}
-            message="Check the spelling, try fewer words, or search a hashtag instead."
+            message="Check the spelling, try fewer words, or search a hashtag or workout name instead."
             action={{ label: 'Clear search', onClick: clearAll, variant: 'secondary' }}
           />
         ) : null}
@@ -397,6 +443,25 @@ export default function Search() {
                 </SubHeading>
                 {users.map((u) => (
                   <UserRow key={u._id} user={u} />
+                ))}
+              </section>
+            ) : null}
+
+            {workouts.length ? (
+              <section aria-labelledby="res-workouts" className="space-y-2">
+                <SubHeading
+                  action={
+                    type === 'all' && workouts.length >= 5 ? (
+                      <Button variant="ghost" size="sm" onClick={() => setParams({ q: activeQuery, type: 'workouts' })}>
+                        See all
+                      </Button>
+                    ) : null
+                  }
+                >
+                  <span id="res-workouts">Workouts</span>
+                </SubHeading>
+                {(type === 'all' ? workouts.slice(0, 5) : workouts).map((w) => (
+                  <WorkoutResultRow key={w._id} workout={w} />
                 ))}
               </section>
             ) : null}

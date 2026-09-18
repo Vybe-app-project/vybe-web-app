@@ -165,15 +165,21 @@ const PAGE_SIZE = 24;
 
 type WorkoutPage = { items: SocialWorkout[]; pagination?: Pagination };
 
-async function fetchWorkoutPage(endpoint: string, page: number): Promise<WorkoutPage> {
-  const { data } = await api.get<ListEnvelope<SocialWorkout>>(endpoint, {
-    params: { page, limit: PAGE_SIZE },
-  });
-  return { items: data.data ?? [], pagination: data.pagination };
+const toPage = (data: ListEnvelope<SocialWorkout>): WorkoutPage => ({ items: data.data ?? [], pagination: data.pagination });
+
+// Literal paths on purpose: the contract audit (scripts/audit-api-contracts.cjs)
+// pins every request against the backend route snapshot.
+async function fetchMyWorkoutsPage(page: number): Promise<WorkoutPage> {
+  const { data } = await api.get<ListEnvelope<SocialWorkout>>('/workouts/my', { params: { page, limit: PAGE_SIZE } });
+  return toPage(data);
 }
 
-const MY_WORKOUTS = '/workouts/my';
-const EXPLORE_WORKOUTS = '/workouts/filter/all/workouts/feed/filter/feed';
+async function fetchExplorePage(page: number): Promise<WorkoutPage> {
+  const { data } = await api.get<ListEnvelope<SocialWorkout>>('/workouts/filter/all/workouts/feed/filter/feed', {
+    params: { page, limit: PAGE_SIZE },
+  });
+  return toPage(data);
+}
 
 export async function fetchMyPlans(): Promise<WorkoutPlan[]> {
   const { data } = await api.get<ListEnvelope<WorkoutPlan>>('/workouts/plans/my', {
@@ -1143,7 +1149,7 @@ export function AddWorkoutPicker({
 
   const mine = useQuery({
     queryKey: ['workouts', 'mine', 'picker'],
-    queryFn: async () => (await fetchWorkoutPage(MY_WORKOUTS, 1)).items,
+    queryFn: async () => (await fetchMyWorkoutsPage(1)).items,
     enabled: open,
   });
   const premade = useQuery({ queryKey: ['workouts', 'premade'], queryFn: fetchPremade, enabled: open });
@@ -1639,17 +1645,23 @@ export default function Workouts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsLog, wantsPlan]);
 
-  const pagedWorkouts = (key: string, endpoint: string, enabled: boolean) =>
-    useInfiniteQuery({
-      queryKey: ['workouts', key, 'paged'],
-      queryFn: ({ pageParam }) => fetchWorkoutPage(endpoint, pageParam as number),
-      initialPageParam: 1,
-      getNextPageParam: (last) => (last.pagination && last.pagination.page < last.pagination.pages ? last.pagination.page + 1 : undefined),
-      enabled,
-    });
+  const nextPage = (last: WorkoutPage) =>
+    last.pagination && last.pagination.page < last.pagination.pages ? last.pagination.page + 1 : undefined;
 
-  const mine = pagedWorkouts('mine', MY_WORKOUTS, tab === 'mine');
-  const explore = pagedWorkouts('explore', EXPLORE_WORKOUTS, tab === 'explore' && !showsPrograms);
+  const mine = useInfiniteQuery({
+    queryKey: ['workouts', 'mine', 'paged'],
+    queryFn: ({ pageParam }) => fetchMyWorkoutsPage(pageParam as number),
+    initialPageParam: 1,
+    getNextPageParam: nextPage,
+    enabled: tab === 'mine',
+  });
+  const explore = useInfiniteQuery({
+    queryKey: ['workouts', 'explore', 'paged'],
+    queryFn: ({ pageParam }) => fetchExplorePage(pageParam as number),
+    initialPageParam: 1,
+    getNextPageParam: nextPage,
+    enabled: tab === 'explore' && !showsPrograms,
+  });
   const plans = useQuery({ queryKey: ['workouts', 'plans'], queryFn: fetchMyPlans, enabled: tab === 'plans' });
   const premade = useQuery({ queryKey: ['workouts', 'premade'], queryFn: fetchPremade, enabled: tab === 'premade' && !showsPrograms });
   const premadePlans = useQuery({ queryKey: ['workouts', 'premade-plans'], queryFn: fetchPremadePlans, enabled: tab === 'premade' && showsPrograms });

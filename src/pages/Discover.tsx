@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useDebounced, type Post, type PublicUser } from '../lib/hooks';
-import { EmptyState, ErrorState, PageHeader, SearchField, Tabs, cx } from './ui';
+import { ButtonLink, Callout, EmptyState, ErrorState, PageHeader, SearchField, Tabs, cx } from './ui';
+import { Award } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
 
@@ -194,6 +195,18 @@ export default function Discover() {
               emptyTitle="No coaches yet"
               emptyMessage="Verified coaches show up here as they join Vybe."
             />
+            <Callout
+              tone="brand"
+              icon={<Award size={20} className="text-brand" />}
+              title="Are you a coach?"
+              action={
+                <ButtonLink to="/settings#coaching" variant="secondary" size="sm">
+                  Apply
+                </ButtonLink>
+              }
+            >
+              Apply from Settings to get the Coach badge and a place in this directory.
+            </Callout>
           </div>
         ) : null}
       </div>

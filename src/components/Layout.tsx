@@ -320,7 +320,7 @@ function SearchBox({ className }: { className?: string }) {
         hideLabel
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search people, workouts, meals…"
+        placeholder="Search people, posts, workouts…"
         className="h-10 min-h-10"
       />
     </form>

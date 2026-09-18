@@ -63,7 +63,8 @@ type ComparisonResponse = {
   latest: ProgressPhoto | null;
   weightChange?: string | null;
   daysBetween?: number;
-  measurementChanges?: Record<keyof Measurements, number> | null;
+  /** `null` for a measurement missing on either check-in: unknown, not "no change". */
+  measurementChanges?: Record<keyof Measurements, number | null> | null;
 };
 
 const PHOTO_TYPES: PhotoType[] = ['front', 'side', 'back', 'other'];
@@ -536,8 +537,9 @@ function ComparisonPanel() {
               <p className="type-label mb-2 text-text-2">Measurement changes in cm</p>
               <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 {MEASUREMENT_KEYS.map((key) => {
-                  const delta = Number(changes[key]);
-                  const valid = Number.isFinite(delta);
+                  const raw = changes[key];
+                  const valid = raw != null && Number.isFinite(Number(raw));
+                  const delta = valid ? Number(raw) : Number.NaN;
                   return (
                     <div key={key} className="rounded-md bg-surface-2 p-3">
                       <dt className="type-label text-text-2">{humanize(key)}</dt>

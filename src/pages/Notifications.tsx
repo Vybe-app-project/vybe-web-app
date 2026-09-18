@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { displayName, timeAgo, useInfiniteScroll, type AppNotification } from '../lib/hooks';
+import { notificationHref, notificationSentence } from '../lib/notificationRoutes';
 import {
   Avatar,
   Button,
@@ -25,33 +26,21 @@ import {
   Hash,
   Heart,
   Inbox,
+  Layers,
   MessageCircle,
   Trash,
   UserPlus,
   Users,
+  Utensils,
 } from './icons';
+
+export { notificationHref } from '../lib/notificationRoutes';
 
 type Page = {
   notifications: AppNotification[];
   total: number;
   page: number;
   hasNextPage: boolean;
-};
-
-const TYPE_TEXT: Record<string, string> = {
-  post_like: 'liked your post',
-  comment_like: 'liked your comment',
-  post_comment: 'commented on your post',
-  comment: 'commented on your post',
-  comment_reply: 'replied to your comment',
-  follow: 'started following you',
-  follow_request: 'requested to follow you',
-  follow_accept: 'accepted your follow request',
-  friend_request: 'sent you a friend request',
-  friend_accept: 'accepted your friend request',
-  message: 'sent you a message',
-  workout_post: 'shared a new workout',
-  mention: 'mentioned you',
 };
 
 /** Small glyph on the avatar so the kind of event reads before the text does. */
@@ -68,36 +57,19 @@ const TYPE_GLYPH: Record<string, { icon: ReactNode; className: string }> = {
   friend_accept: { icon: <Users size={12} />, className: 'bg-brand-soft text-brand-text' },
   message: { icon: <Inbox size={12} />, className: 'bg-info-soft text-info-text' },
   workout_post: { icon: <Dumbbell size={12} />, className: 'bg-accent-soft text-accent-text' },
+  workout_like: { icon: <Heart size={12} filled />, className: 'bg-danger-soft text-danger' },
+  workout_comment: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
+  workout_plan_like: { icon: <Heart size={12} filled />, className: 'bg-danger-soft text-danger' },
+  workout_plan_comment: { icon: <MessageCircle size={12} />, className: 'bg-info-soft text-info-text' },
+  new_workout: { icon: <Dumbbell size={12} />, className: 'bg-accent-soft text-accent-text' },
+  new_workout_plan: { icon: <Layers size={12} />, className: 'bg-accent-soft text-accent-text' },
+  new_post: { icon: <Hash size={12} />, className: 'bg-surface-3 text-text-2' },
+  new_meal: { icon: <Utensils size={12} />, className: 'bg-brand-soft text-brand-text' },
   mention: { icon: <Hash size={12} />, className: 'bg-surface-3 text-text-2' },
 };
 
-function notificationText(n: AppNotification): string {
-  return n.body || n.message || TYPE_TEXT[n.type] || 'sent you an update';
-}
-
-const idOf = (v: unknown): string | null => {
-  if (!v) return null;
-  if (typeof v === 'string') return v;
-  if (typeof v === 'object' && '_id' in (v as object)) return String((v as { _id: unknown })._id);
-  return null;
-};
-
-/** Canonical destinations: posts live at `/p/:postId`, threads at `/messages/:roomId`. */
-export function notificationHref(n: AppNotification): string | null {
-  const d = n.data || {};
-  const postId = idOf(d.postId) || idOf(d.post);
-  if (postId) return `/p/${postId}`;
-
-  if (n.type === 'message' || d.roomId || d.chatRoom || d.room) {
-    const room = idOf(d.roomId) || idOf(d.chatRoom) || idOf(d.room);
-    return room ? `/messages/${room}` : '/messages';
-  }
-  if (n.type === 'friend_request' || n.type === 'follow_request') return '/friends';
-
-  const senderId = idOf(n.sender?._id) || idOf(d.sender) || idOf(d.userId) || idOf(d.followerId);
-  if (senderId) return `/u/${senderId}`;
-  return null;
-}
+/** The predicate after the sender's name; see lib/notificationRoutes for why the name is stripped. */
+const notificationText = (n: AppNotification): string => notificationSentence(n);
 
 function isUnread(n: AppNotification) {
   return !(n.isRead ?? n.read ?? false);
