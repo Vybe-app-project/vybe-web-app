@@ -2273,12 +2273,16 @@ function useArchiveRoom(meId: string | undefined, hidden: MutableRefObject<Set<s
     },
   });
   const undo = useCallback(
-    (roomId: string) => {
+    (room: ChatRoom) => {
+      const roomId = room._id;
       setStatus.mutate(
         { roomId, status: 'active' },
         {
           onSuccess: () => {
             hidden.current.delete(roomId);
+            // Put the row back before navigating so the thread renders at
+            // once instead of flashing "not available" while the list refetches.
+            qc.setQueryData<ChatRoom[]>(['chatRooms'], (rooms) => (rooms && !rooms.some((r) => r._id === roomId) ? [room, ...rooms] : rooms));
             qc.invalidateQueries({ queryKey: ['chatRooms'] });
             qc.invalidateQueries({ queryKey: ['unreadChats'] });
             navigate(`/messages/${roomId}`, { viewTransition: true });
@@ -2303,7 +2307,7 @@ function useArchiveRoom(meId: string | undefined, hidden: MutableRefObject<Set<s
           onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['chatRooms'] });
             qc.invalidateQueries({ queryKey: ['unreadChats'] });
-            toast.info(`${roomTitle(room, meId)} archived`, { action: { label: 'Undo', onClick: () => undo(roomId) }, duration: 8000 });
+            toast.info(`${roomTitle(room, meId)} archived`, { action: { label: 'Undo', onClick: () => undo(room) }, duration: 8000 });
           },
           onError: (e) => {
             hidden.current.delete(roomId);

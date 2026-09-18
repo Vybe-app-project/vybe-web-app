@@ -168,7 +168,7 @@ test('group conversations offer rename, add people and leave; receivers can dele
   assert.match(src, /function useArchiveRoom/);
   assert.match(src, /qc\.setQueryData<ChatRoom\[\]>\(\['chatRooms'\], \(rooms\) => rooms\?\.filter\(\(r\) => r\._id !== roomId\)\)/);
   assert.match(src, /if \(previous\) qc\.setQueryData\(\['chatRooms'\], previous\)/);
-  assert.match(src, /label: 'Undo', onClick: \(\) => undo\(roomId\)/);
+  assert.match(src, /label: 'Undo', onClick: \(\) => undo\(room\)/);
 });
 
 test('strangers see the friend-request callout instead of a composer and a dead Retry', () => {
