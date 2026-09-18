@@ -26,7 +26,33 @@ Web-specific essentials:
 - After a release run the live suite `~/scratch/2026-09-17-vybe-full-build/uitest/run-all.sh`
   (11 groups incl. axe in both themes).
 
-## Current-main compatibility integration — 2026-09-18
+## Final combined recovery qualification — 2026-09-18
+
+Application source `4679a9de8357793a7cc5d6143b641d4694a542e9` passed the
+**entire 362-test suite with zero failures, skips or cancellations**, including
+six Chromium suites and the real-backend browser-restart scenario. The exact
+backend was clean-pinned to `f9d0c53888ef625f2894d64777ef1e78b5152e1b`.
+
+The local API committed a workout, its acknowledgement was deliberately
+dropped, Chromium was closed and restarted, and explicit recovery reused the
+same request payload/key. The server returned 200 for the replay, one log
+remained in Mongo, and the IndexedDB draft was cleared. No production account,
+credential, connection string or request was used.
+
+The task-owned replica set used the already installed Mongo image on loopback
+27189 (`a656Recovery`), bounded to two CPUs/3 GiB and 256 MiB WiredTiger.
+Each run generated a unique database/profile; cleanup and source pin checks
+passed. The owned fixture was stopped/removed; the shared replica set remained
+running. Matching dependency links and temporary caches were removed after
+verification. Logs remain in ignored `logs/recovery-e2e/`.
+
+Build/artifact verification and the exact-backend route audit passed:
+126 build files/two entry assets, 336 resolved calls, zero unmatched, shadowed
+or unresolved client bases. This qualifies the combined integration candidate;
+it is not production activation, hosted CI, native-device or full W0-W16
+completion. The designated integrator still owns deployment.
+
+## Frontend compatibility evidence before the final combined run — 2026-09-18
 
 The parent-owned isolated `aaa-a656-fleet-recovery-e2e` resolves the in-progress
 merge of `77c14ec22626834c3f159ff40cee8712d2cba313` into
@@ -49,16 +75,16 @@ Catalog exercise seconds convert to private-log minutes only when seeding a
 new draft; historic records remain minutes. Both kg/lb and `formatSeconds`
 display are retained. See `workout-drafts.md` for pinned wire evidence.
 
-No Mongo or real backend E2E is run in this compatibility task. The parent
+No Mongo or real backend E2E was run by the compatibility agent. The parent
 previously reported five real-backend/browser-restart passes against backend
-`f9d0c53888ef625f2894d64777ef1e78b5152e1b` **before** this merge and must rerun
-that gate afterward. Parent harness files remain untouched; the pure browser
+`f9d0c53888ef625f2894d64777ef1e78b5152e1b` **before** this merge; the final
+combined result above supersedes that pending gate. Parent harness files stayed untouched; the pure browser
 storage-module fixture additionally serves its new shared-reader import, and
 old UI fixtures/assertions are adapted only to intentional merged semantics.
 Parallel browser validation exposed delayed modal autofocus stealing text from
 the chosen input. The focus trap now leaves an already-focused descendant alone;
 a clock-controlled Chromium regression retains all original form assertions.
-Matching dependency links/local caches remain for the parent. No push/deploy,
+Matching dependency links/local caches were retained for the final run. No push/deploy,
 main/other-worktree edit or full-release completion is claimed.
 
 Final compatibility evidence (Node 24.19.0/npm 11.17.0):
@@ -81,7 +107,7 @@ Logs and the complete merge-file manifest are retained under ignored
 with their helpers or tightened for verified identity; behavioral assertions
 remain, with real tests for both persistence modes, offline recovery, avatar
 refresh, late responses/dedup, private-cache isolation, logout/purge, units and
-the focus race. The parent resumes ownership and reruns real E2E afterward.
+the focus race. The parent subsequently completed the real E2E gate above.
 
 ## Historical local draft-concurrency package — 2026-09-18
 
