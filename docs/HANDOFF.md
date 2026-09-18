@@ -26,7 +26,29 @@ Web-specific essentials:
 - After a release run the live suite `~/scratch/2026-09-17-vybe-full-build/uitest/run-all.sh`
   (11 groups incl. axe in both themes).
 
-## Reconciled web baseline — 2026-09-18
+## Current local draft-concurrency package — 2026-09-18
+
+`aaa-a656-fleet-workout-recovery-web` starts from the clean reconciled
+`7e5b308b755d4d794f1069b8b0003875a95ec972` below and merges preserved draft/timer
+`b8b5e3af0b9bf2bb84ac87a9e1928bc07aa2e96f`. It adds atomic IndexedDB revision
+checks, deletion tombstones and explicit stale-tab recovery without reverting
+either baseline's features. See `docs/workout-drafts.md` for concurrency,
+version-2 database migration, browser evidence and validation commands.
+
+This is another isolated frontend package, not a deployment or qualification
+of the previously gated backend. All pure/mock-API Chromium suites must pass;
+`tests/workout-drafts.local-e2e.test.mjs` remains explicitly gated while the
+independent backend QA lane owns Mongo. No existing worktree, backend, native
+font scaling, production account or deployed artifact is modified.
+
+Current evidence: Node 24.19.0 `npm run verify` passed (165 tests plus the one
+explicitly gated backend skip), and the separate freshly built full non-Mongo
+suite passed **165/165 with zero skips**. The 22-test draft Chromium suite
+covers real same-context two-tab conflicts/ABA; scan, zero-finding audit,
+contracts, typecheck/build/artifact and diff checks pass. Raw local logs are in
+`logs/fleet-draft-tab-safety/`. These are not backend or rollout completion.
+
+## Historical reconciled web baseline (7e5b308) — 2026-09-18
 
 This is a **local, isolated integration**, not a deployment or completion of
 the broader release. Branch `aaa-a656-fleet-web-reconcile`, worktree
