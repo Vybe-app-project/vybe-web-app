@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
-import { compactNumber, useDebounced, type Post, type PublicUser } from '../lib/hooks';
+import { compactNumber, displayName, followerCount, useDebounced, type Post, type PublicUser } from '../lib/hooks';
 import {
   Avatar,
+  Badge,
   Button,
   Card,
   Chip,
@@ -13,16 +14,20 @@ import {
   IconButton,
   Input,
   PageHeader,
-  SegmentedControl,
   Skeleton,
+  Tabs,
   cx,
+  formatStat,
+  humanize,
   useToast,
 } from './ui';
-import { Clock, Hash, Search as SearchIcon, X } from './icons';
+import { ChevronRight, Clock, Hash, Lock, Search as SearchIcon, Users, X, Zap } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
+import { MealTile, WorkoutTile, type MealItem, type WorkoutItem } from './ProfileTabs';
 
-type SearchType = 'all' | 'users' | 'posts' | 'hashtags';
+/** Every bucket the API's unified search returns. */
+type SearchType = 'all' | 'users' | 'posts' | 'hashtags' | 'workouts' | 'meals' | 'challenges';
 
 type Suggestion = {
   type: 'user' | 'hashtag';
@@ -30,11 +35,26 @@ type Suggestion = {
   text: string;
   subtitle?: string;
   avatar?: string;
+  isPrivate?: boolean;
 };
 
 type RecentSearch = { _id: string; query: string; type?: string; searchedAt?: string };
 
 type HashtagResult = { hashtag: string; count: number };
+
+type ChallengeResult = {
+  _id: string;
+  title: string;
+  description?: string;
+  type?: string;
+  category?: string;
+  goal?: number;
+  goalUnit?: string;
+  ownership?: 'user' | 'system';
+  image?: string;
+  stats?: { totalParticipants?: number };
+  createdBy?: PublicUser | string | null;
+};
 
 type SearchResponse = {
   query: string;
@@ -43,7 +63,9 @@ type SearchResponse = {
     users?: PublicUser[];
     posts?: Post[];
     hashtags?: HashtagResult[];
-    [k: string]: any;
+    workouts?: WorkoutItem[];
+    meals?: MealItem[];
+    challenges?: ChallengeResult[];
   };
 };
 
@@ -52,11 +74,28 @@ const TYPE_TABS: { key: SearchType; label: string }[] = [
   { key: 'users', label: 'People' },
   { key: 'posts', label: 'Posts' },
   { key: 'hashtags', label: 'Hashtags' },
+  { key: 'workouts', label: 'Workouts' },
+  { key: 'meals', label: 'Meals' },
+  { key: 'challenges', label: 'Challenges' },
 ];
 
 const isSearchType = (v: string | null): v is SearchType => !!v && TYPE_TABS.some((t) => t.key === v);
 
+/** The API rejects anything longer; the field stops there instead of round-tripping a 400. */
+export const SEARCH_QUERY_MAX = 100;
+
+/** How much of each bucket the All tab shows before "See all". */
+const ALL_TAB_PREVIEW: Record<Exclude<SearchType, 'all' | 'posts'>, number> = {
+  users: 3,
+  hashtags: 6,
+  workouts: 4,
+  meals: 4,
+  challenges: 3,
+};
+
 const INPUT_ID = 'search-input';
+const LISTBOX_ID = 'search-suggestions';
+const optionId = (index: number) => `search-suggestion-${index}`;
 const searchInput = () => document.getElementById(INPUT_ID) as HTMLInputElement | null;
 
 function HashtagList({ hashtags }: { hashtags: HashtagResult[] }) {
@@ -74,6 +113,33 @@ function HashtagList({ hashtags }: { hashtags: HashtagResult[] }) {
   );
 }
 
+function ChallengeTile({ challenge }: { challenge: ChallengeResult }) {
+  const participants = challenge.stats?.totalParticipants ?? 0;
+  const creator = challenge.createdBy && typeof challenge.createdBy === 'object' ? challenge.createdBy : null;
+  return (
+    <Card to={`/challenges?open=${challenge._id}`} linkLabel={`Open challenge ${challenge.title}`} padded={false} className="flex gap-3 p-3">
+      <span className="grid h-16 w-16 shrink-0 place-items-center rounded-md bg-brand-soft text-brand-text">
+        <Zap size={22} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-2">
+          <p className="truncate text-md font-semibold text-text-1">{challenge.title}</p>
+          {challenge.ownership === 'system' ? <Badge tone="info">Official</Badge> : null}
+        </div>
+        {challenge.description ? <p className="mt-0.5 line-clamp-2 text-xs text-text-2">{challenge.description}</p> : null}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {challenge.type ? <Badge tone="brand">{humanize(challenge.type)}</Badge> : null}
+          {challenge.category ? <Badge>{humanize(challenge.category)}</Badge> : null}
+          <span className="tabular ml-auto inline-flex items-center gap-1 text-xs text-text-2">
+            <Users size={14} /> {formatStat(participants)}
+          </span>
+        </div>
+        {creator ? <p className="mt-1 truncate text-2xs text-text-3">by {displayName(creator)}</p> : null}
+      </div>
+    </Card>
+  );
+}
+
 function SubHeading({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="mb-2 flex min-h-10 items-center justify-between gap-3">
@@ -83,8 +149,28 @@ function SubHeading({ children, action }: { children: React.ReactNode; action?: 
   );
 }
 
+function SeeAll({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button variant="ghost" size="sm" onClick={onClick} icon={<ChevronRight size={16} />}>
+      {label}
+    </Button>
+  );
+}
+
+/** Drop repeated queries (case-insensitively), keeping the most recent. */
+export function dedupeRecent<T extends { query: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = item.query.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function Search() {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
 
@@ -94,30 +180,34 @@ export default function Search() {
   const [term, setTerm] = useState(urlQuery);
   const [type, setType] = useState<SearchType>(urlType);
   const [focused, setFocused] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const blurTimer = useRef<number | null>(null);
 
   useEffect(() => setTerm(urlQuery), [urlQuery]);
   useEffect(() => setType(urlType), [urlType]);
 
   const debounced = useDebounced(term.trim(), 300);
-  const activeQuery = urlQuery.trim();
+  const activeQuery = urlQuery.trim().slice(0, SEARCH_QUERY_MAX);
 
   /* ---------------- suggestions while typing ---------------- */
   const suggestions = useQuery({
     queryKey: ['search-suggestions', debounced],
-    enabled: focused && debounced.length >= 2,
+    enabled: focused && debounced.length >= 2 && debounced.length <= SEARCH_QUERY_MAX,
     staleTime: 60_000,
     queryFn: async () => {
       const { data } = await api.get('/search/suggestions', { params: { q: debounced } });
       return (data.suggestions || []) as Suggestion[];
     },
   });
+  const options = suggestions.data || [];
+  useEffect(() => setActiveIndex(-1), [debounced, focused]);
 
   /* ---------------- recent + trending ---------------- */
   const recent = useQuery({
     queryKey: ['search-recent'],
     queryFn: async () => {
       const { data } = await api.get('/search/recent', { params: { limit: 10 } });
-      return (data.recentSearches || []) as RecentSearch[];
+      return dedupeRecent((data.recentSearches || []) as RecentSearch[]);
     },
   });
 
@@ -161,9 +251,14 @@ export default function Search() {
     if (results.isSuccess) qc.invalidateQueries({ queryKey: ['search-recent'] });
   }, [results.isSuccess, results.dataUpdatedAt, qc]);
 
-  function runSearch(value: string, nextType: SearchType = type) {
-    const trimmed = value.trim();
+  function closeSuggestions() {
     setFocused(false);
+    setActiveIndex(-1);
+  }
+
+  function runSearch(value: string, nextType: SearchType = type) {
+    const trimmed = value.trim().slice(0, SEARCH_QUERY_MAX);
+    closeSuggestions();
     searchInput()?.blur();
     if (!trimmed) {
       setParams({});
@@ -172,9 +267,57 @@ export default function Search() {
     setParams({ q: trimmed, type: nextType });
   }
 
+  function switchType(next: SearchType) {
+    setType(next);
+    setParams({ q: activeQuery, type: next });
+  }
+
+  function chooseSuggestion(s: Suggestion) {
+    closeSuggestions();
+    if (s.type === 'user') {
+      // A person in the dropdown is a destination, not a query.
+      searchInput()?.blur();
+      navigate(`/u/${s.id}`, { viewTransition: true });
+      return;
+    }
+    setTerm(s.text);
+    runSearch(s.text, 'posts');
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (activeIndex >= 0 && options[activeIndex]) {
+      chooseSuggestion(options[activeIndex]);
+      return;
+    }
     runSearch(term);
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (!showSuggestions) {
+      if (e.key === 'Escape' && term) {
+        e.preventDefault();
+        clearAll();
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex((i) => (i + 1) % options.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((i) => (i <= 0 ? options.length - 1 : i - 1));
+    } else if (e.key === 'Home' && options.length) {
+      e.preventDefault();
+      setActiveIndex(0);
+    } else if (e.key === 'End' && options.length) {
+      e.preventDefault();
+      setActiveIndex(options.length - 1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSuggestions();
+    }
+    // Enter is handled by the form submit so a highlighted option wins.
   }
 
   function clearAll() {
@@ -183,15 +326,39 @@ export default function Search() {
     searchInput()?.focus();
   }
 
-  const users = results.data?.results?.users || [];
-  const posts = results.data?.results?.posts || [];
-  const hashtags = results.data?.results?.hashtags || [];
-  const nothingFound = results.isSuccess && !users.length && !posts.length && !hashtags.length;
-  const showSuggestions = focused && debounced.length >= 2 && !!suggestions.data?.length;
+  const r = results.data?.results;
+  const users = r?.users || [];
+  const posts = r?.posts || [];
+  const hashtags = r?.hashtags || [];
+  const workouts = r?.workouts || [];
+  const meals = r?.meals || [];
+  const challenges = r?.challenges || [];
+  const nothingFound =
+    results.isSuccess && !users.length && !posts.length && !hashtags.length && !workouts.length && !meals.length && !challenges.length;
+  const showSuggestions = focused && debounced.length >= 2 && options.length > 0;
+  const all = type === 'all';
+  const preview = <T,>(list: T[], key: keyof typeof ALL_TAB_PREVIEW): { items: T[]; more: number } => {
+    if (!all) return { items: list, more: 0 };
+    const items = list.slice(0, ALL_TAB_PREVIEW[key]);
+    return { items, more: list.length - items.length };
+  };
+  const peopleShown = preview(users, 'users');
+  const hashtagsShown = preview(hashtags, 'hashtags');
+  const workoutsShown = preview(workouts, 'workouts');
+  const mealsShown = preview(meals, 'meals');
+  const challengesShown = preview(challenges, 'challenges');
+
+  // "Popular" implies signal. The API filters to followed accounts; if an
+  // older API answers with unfollowed ones, say what the list really is.
+  const trendingUsers = trending.data?.users || [];
+  const popularHeading = useMemo(
+    () => (trendingUsers.length && trendingUsers.every((u) => followerCount(u) > 0) ? 'Popular athletes' : 'People to follow'),
+    [trendingUsers],
+  );
 
   return (
     <>
-      <PageHeader title="Search" subtitle="People, posts and hashtags across Vybe." />
+      <PageHeader title="Search" subtitle="People, posts, hashtags, workouts, meals and challenges across Vybe." />
       <div className="w-full max-w-form space-y-5">
         <form onSubmit={onSubmit} role="search" className="relative">
           <Input
@@ -199,20 +366,28 @@ export default function Search() {
             type="search"
             inputMode="search"
             autoComplete="off"
+            maxLength={SEARCH_QUERY_MAX}
             leading={<SearchIcon size={18} />}
             label="Search"
             hideLabel
-            placeholder="Search people, posts and hashtags"
+            placeholder="Search people, posts, workouts, meals…"
             value={term}
             enterKeyHint="search"
             role="combobox"
             aria-autocomplete="list"
             aria-expanded={showSuggestions}
-            aria-controls="search-suggestions"
+            aria-controls={LISTBOX_ID}
+            aria-activedescendant={showSuggestions && activeIndex >= 0 ? optionId(activeIndex) : undefined}
             className={cx(!!term && 'pr-12')}
             onChange={(e) => setTerm(e.target.value)}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setTimeout(() => setFocused(false), 150)}
+            onKeyDown={onKeyDown}
+            onFocus={() => {
+              if (blurTimer.current) window.clearTimeout(blurTimer.current);
+              setFocused(true);
+            }}
+            onBlur={() => {
+              blurTimer.current = window.setTimeout(() => closeSuggestions(), 150);
+            }}
             trailing={
               term ? (
                 <IconButton size={40} label="Clear search" onClick={clearAll} className="text-text-2">
@@ -224,47 +399,59 @@ export default function Search() {
 
           {showSuggestions ? (
             <Card padded={false} className="anim-pop-in absolute z-20 mt-2 w-full overflow-hidden p-1 shadow-2">
-              <ul id="search-suggestions" role="listbox" aria-label="Suggestions">
-                {suggestions.data!.map((s) => (
-                  <li key={`${s.type}-${s.id}`} role="option" aria-selected={false}>
-                    <button
-                      type="button"
-                      className="flex min-h-11 w-full items-center gap-3 rounded-sm px-3 py-2 text-left transition-colors dur-1 hover:bg-surface-2"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setTerm(s.text);
-                        runSearch(s.text, s.type === 'hashtag' ? 'posts' : 'users');
-                      }}
-                    >
-                      {s.type === 'user' ? (
-                        <Avatar src={s.avatar} name={s.text} size="sm" />
-                      ) : (
-                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-soft text-brand-text">
-                          <Hash size={16} />
+              <ul id={LISTBOX_ID} role="listbox" aria-label="Suggestions">
+                {options.map((s, index) => {
+                  const active = index === activeIndex;
+                  return (
+                    <li key={`${s.type}-${s.id}`} id={optionId(index)} role="option" aria-selected={active}>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        className={cx(
+                          'flex min-h-11 w-full items-center gap-3 rounded-sm px-3 py-2 text-left transition-colors dur-1 hover:bg-surface-2',
+                          active && 'bg-surface-2',
+                        )}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onClick={() => chooseSuggestion(s)}
+                      >
+                        {s.type === 'user' ? (
+                          <Avatar src={s.avatar} name={s.text} size="sm" />
+                        ) : (
+                          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-soft text-brand-text">
+                            <Hash size={16} />
+                          </span>
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-text-1">{s.text}</span>
+                          {s.subtitle ? (
+                            <span className="flex items-center gap-1 text-xs text-text-2">
+                              <span className="truncate">{s.subtitle}</span>
+                              {s.isPrivate ? (
+                                <span role="img" aria-label="Private account" title="Private account" className="inline-flex shrink-0 text-text-3">
+                                  <Lock size={12} />
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : null}
                         </span>
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-text-1">{s.text}</span>
-                        {s.subtitle ? <span className="block truncate text-xs text-text-2">{s.subtitle}</span> : null}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                        {s.type === 'user' ? <ChevronRight size={16} className="shrink-0 text-text-3" aria-hidden="true" /> : null}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </Card>
           ) : null}
         </form>
 
         {activeQuery ? (
-          <SegmentedControl
+          <Tabs
             aria-label="Result type"
             tabs={TYPE_TABS.map((t) => ({ key: t.key, label: t.label }))}
             value={type}
-            onChange={(key) => {
-              const next = isSearchType(key) ? key : 'all';
-              setType(next);
-              setParams({ q: activeQuery, type: next });
-            }}
+            size="sm"
+            onChange={(key) => switchType(isSearchType(key) ? key : 'all')}
           />
         ) : null}
 
@@ -333,17 +520,17 @@ export default function Search() {
                   {trending.data?.hashtags?.length ? (
                     <HashtagList hashtags={trending.data.hashtags.map((h) => ({ hashtag: h._id, count: h.count }))} />
                   ) : null}
-                  {trending.data?.users?.length ? (
+                  {trendingUsers.length ? (
                     <div className="space-y-2">
-                      <h3 className="type-label text-text-2">Popular athletes</h3>
+                      <h3 className="type-label text-text-2">{popularHeading}</h3>
                       <div className="space-y-2">
-                        {trending.data.users.map((u) => (
+                        {trendingUsers.map((u) => (
                           <UserRow key={u._id} user={u} />
                         ))}
                       </div>
                     </div>
                   ) : null}
-                  {!trending.data?.hashtags?.length && !trending.data?.users?.length ? (
+                  {!trending.data?.hashtags?.length && !trendingUsers.length ? (
                     <EmptyState
                       size="sm"
                       title="Nothing trending yet"
@@ -374,30 +561,73 @@ export default function Search() {
           <EmptyState
             variant="no-results"
             title={`No results for “${activeQuery}”`}
-            message="Check the spelling, try fewer words, or search a hashtag instead."
-            action={{ label: 'Clear search', onClick: clearAll, variant: 'secondary' }}
+            message={
+              all
+                ? 'Check the spelling, try fewer words, or search a hashtag instead.'
+                : `Nothing in ${TYPE_TABS.find((t) => t.key === type)?.label.toLowerCase() ?? 'this tab'} matches. Try the All tab or fewer words.`
+            }
+            action={all ? { label: 'Clear search', onClick: clearAll, variant: 'secondary' } : { label: 'Search everything', onClick: () => switchType('all'), variant: 'secondary' }}
           />
         ) : null}
 
         {activeQuery && results.isSuccess && !nothingFound ? (
           <div className="space-y-8">
-            {hashtags.length ? (
+            {hashtagsShown.items.length ? (
               <section aria-labelledby="res-hashtags">
-                <SubHeading>
+                <SubHeading action={hashtagsShown.more > 0 ? <SeeAll label="See all hashtags" onClick={() => switchType('hashtags')} /> : undefined}>
                   <span id="res-hashtags">Hashtags</span>
                 </SubHeading>
-                <HashtagList hashtags={hashtags} />
+                <HashtagList hashtags={hashtagsShown.items} />
               </section>
             ) : null}
 
-            {users.length ? (
+            {peopleShown.items.length ? (
               <section aria-labelledby="res-people" className="space-y-2">
-                <SubHeading>
+                <SubHeading action={peopleShown.more > 0 ? <SeeAll label="See all people" onClick={() => switchType('users')} /> : undefined}>
                   <span id="res-people">People</span>
                 </SubHeading>
-                {users.map((u) => (
+                {peopleShown.items.map((u) => (
                   <UserRow key={u._id} user={u} />
                 ))}
+              </section>
+            ) : null}
+
+            {workoutsShown.items.length ? (
+              <section aria-labelledby="res-workouts">
+                <SubHeading action={workoutsShown.more > 0 ? <SeeAll label="See all workouts" onClick={() => switchType('workouts')} /> : undefined}>
+                  <span id="res-workouts">Workouts</span>
+                </SubHeading>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {workoutsShown.items.map((w) => (
+                    <WorkoutTile key={w._id} workout={w} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {mealsShown.items.length ? (
+              <section aria-labelledby="res-meals">
+                <SubHeading action={mealsShown.more > 0 ? <SeeAll label="See all meals" onClick={() => switchType('meals')} /> : undefined}>
+                  <span id="res-meals">Meals</span>
+                </SubHeading>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {mealsShown.items.map((m) => (
+                    <MealTile key={m._id} meal={m} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {challengesShown.items.length ? (
+              <section aria-labelledby="res-challenges">
+                <SubHeading action={challengesShown.more > 0 ? <SeeAll label="See all challenges" onClick={() => switchType('challenges')} /> : undefined}>
+                  <span id="res-challenges">Challenges</span>
+                </SubHeading>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {challengesShown.items.map((c) => (
+                    <ChallengeTile key={c._id} challenge={c} />
+                  ))}
+                </div>
               </section>
             ) : null}
 

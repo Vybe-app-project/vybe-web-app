@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   differenceInCalendarDays,
@@ -1234,7 +1235,13 @@ export default function Challenges() {
   const [categoryFilter, setCategoryFilter] = useState<'' | ChallengeCategory>('');
   const [myStatus, setMyStatus] = useState<MyStatus>('active');
   const [createOpen, setCreateOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  // Search results and shared links land on /challenges?open=<id>.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [detailId, setDetailId] = useState<string | null>(() => searchParams.get('open'));
+  useEffect(() => {
+    const open = searchParams.get('open');
+    if (open) setDetailId(open);
+  }, [searchParams]);
   const [editing, setEditing] = useState<Challenge | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Challenge | null>(null);
 
@@ -1636,7 +1643,18 @@ export default function Challenges() {
       <CreateChallengeModal open={createOpen} onClose={() => setCreateOpen(false)} />
       <ChallengeDetailModal
         challengeId={detailId}
-        onClose={() => setDetailId(null)}
+        onClose={() => {
+          setDetailId(null);
+          if (searchParams.get('open')) {
+            setSearchParams(
+              (prev) => {
+                prev.delete('open');
+                return prev;
+              },
+              { replace: true },
+            );
+          }
+        }}
         onEdit={(c) => setEditing(c)}
         onDelete={(c) => setPendingDelete(c)}
       />

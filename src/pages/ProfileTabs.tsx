@@ -28,7 +28,7 @@ export const isProfileTab = (v: string | null | undefined): v is ProfileTabKey =
   v === 'posts' || v === 'workouts' || v === 'meals';
 
 /** Shape of `GET /workouts/my` items (SocialWorkout). */
-type WorkoutItem = {
+export type WorkoutItem = {
   _id: string;
   title?: string;
   category?: string;
@@ -37,12 +37,14 @@ type WorkoutItem = {
   caloriesBurned?: number;
   createdAt?: string;
   likes?: string[];
+  /** Search results send a count instead of the id list. */
+  likeCount?: number;
   image?: { uri?: string } | string | null;
   exercises?: unknown[];
 };
 
 /** Shape of `GET /meals/recent` and `GET /meals` items (Meal model). */
-type MealItem = {
+export type MealItem = {
   _id: string;
   food_name?: string;
   image_url?: string;
@@ -142,7 +144,7 @@ function workoutImage(w: WorkoutItem): string {
   return w.image.uri || '';
 }
 
-function WorkoutTile({ workout }: { workout: WorkoutItem }) {
+export function WorkoutTile({ workout }: { workout: WorkoutItem }) {
   const img = workoutImage(workout);
   const title = workout.title || 'Workout';
   const exerciseCount = Array.isArray(workout.exercises) ? workout.exercises.length : 0;
@@ -174,7 +176,9 @@ function WorkoutTile({ workout }: { workout: WorkoutItem }) {
               {exerciseCount} {exerciseCount === 1 ? 'exercise' : 'exercises'}
             </Metric>
           ) : null}
-          {workout.likes?.length ? <Metric icon={<Heart size={14} />}>{compactStat(workout.likes.length)}</Metric> : null}
+          {workout.likes?.length || workout.likeCount ? (
+            <Metric icon={<Heart size={14} />}>{compactStat(workout.likes?.length ?? workout.likeCount ?? 0)}</Metric>
+          ) : null}
           {workout.createdAt ? (
             <time dateTime={workout.createdAt} className="ml-auto text-xs text-text-3">
               {timeAgo(workout.createdAt)}
@@ -255,7 +259,7 @@ export function ProfileWorkouts({ userId, isOwn = false, name }: PanelProps) {
 
 /* ------------------------------------------------------------------ meals */
 
-function MealTile({ meal }: { meal: MealItem }) {
+export function MealTile({ meal }: { meal: MealItem }) {
   const title = meal.food_name || 'Meal';
   const n = meal.nutrition || {};
   const when = meal.publishedAt || meal.timestamp || meal.createdAt;
