@@ -6,6 +6,7 @@ import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
 import { Button, ErrorState, FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth } from './lib/auth';
+import { WorkoutDraftLifecycle } from './lib/WorkoutDraftLifecycle';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
@@ -188,6 +189,7 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <WorkoutDraftLifecycle />
       <ScrollToTop />
       <PwaUpdates />
       <Suspense fallback={<FullPageSpinner />}>

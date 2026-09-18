@@ -63,7 +63,7 @@ if (!playwright) {
           status = state.status;
           if (status >= 400) body = { message: status === 409 ? 'This log changed. Reload it before saving.' : 'Temporarily unavailable' };
           else {
-            const workout = { ...payload, _id: 'saved-log', revision: (payload.expectedRevision ?? 0) + 1 };
+            const workout = { ...payload, user: user._id, _id: method === 'PATCH' ? url.pathname.split('/').pop() : 'saved-log', revision: (payload.expectedRevision ?? 0) + 1 };
             state.logs = [workout];
             body = { workout };
             status = method === 'POST' ? 201 : 200;
@@ -113,7 +113,7 @@ if (!playwright) {
           assert.equal(state.saves[0].payload.exercises[0].setRecords[1].weightUnit, 'lb');
           assert.equal(state.saves[0].payload.exercises[0].sets, undefined);
           state.status = 200;
-          await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+          await dialog.getByRole('button', { name: 'Retry save', exact: true }).click();
           await dialog.waitFor({ state: 'hidden' });
           assert.deepEqual(state.saves[1].payload, state.saves[0].payload);
           assert.deepEqual(errors, []);
@@ -189,7 +189,7 @@ if (!playwright) {
       try {
         await page.goto(`${base}/workouts/logs`);
         await edit(page);
-        const dialog = page.getByRole('dialog');
+        const dialog = page.getByRole('dialog', { name: 'Edit session', exact: true });
         await dialog.getByLabel('Exercise 1 set 1 reps', { exact: true }).fill('7');
         state.logs = [{ ...fixture(), revision: 4 }];
         state.status = 409;
@@ -197,9 +197,12 @@ if (!playwright) {
         await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
         await dialog.getByText('This log changed. Reload it before saving.', { exact: true }).waitFor();
         await refreshed;
+        assert.equal(state.saves[0].payload.exercises[0].setRecords[0].reps, 7);
         assert.equal(await dialog.getByLabel('Exercise 1 set 1 reps', { exact: true }).inputValue(), '7');
         assert.equal(state.saves[0].payload.expectedRevision, 3);
-        await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await dialog.getByRole('button', { name: 'Discard draft', exact: true }).click();
+        await page.getByRole('dialog', { name: 'Discard local workout draft?', exact: true })
+          .getByRole('button', { name: 'Discard draft', exact: true }).click();
         await dialog.waitFor({ state: 'hidden' });
         await edit(page);
         assert.equal(await dialog.getByLabel('Exercise 1 set 1 reps', { exact: true }).inputValue(), '5');
