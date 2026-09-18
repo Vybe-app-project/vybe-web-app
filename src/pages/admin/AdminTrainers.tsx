@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { adminApi, errMsg } from '../../lib/api';
 import {
   Avatar,
@@ -16,10 +15,14 @@ import {
   Textarea,
   cx,
   humanize,
+  plural,
   useToast,
 } from '../../components/ui';
 import { Award, Check, X, Mail, ExternalLink } from '../../components/icons';
-import { AdminPageHeader, Pager } from './AdminLayout';
+import { AdminPageHeader, Pager, Stamp } from './AdminLayout';
+
+/** The server requires this many characters of reason to reject (trainerController). */
+const REJECT_NOTE_MIN = 5;
 
 type ApplicationStatus = 'pending' | 'approved' | 'rejected';
 
@@ -76,7 +79,12 @@ function DecisionModal({
   const qc = useQueryClient();
   const { success } = useToast();
   const [note, setNote] = useState('');
+  const [touched, setTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const rejecting = decision === 'reject';
+  // The API refuses a rejection without a short reason (400). Say so in the
+  // label and validate before the round trip instead of after it.
+  const noteTooShort = rejecting && note.trim().length < REJECT_NOTE_MIN;
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -113,7 +121,12 @@ function DecisionModal({
             variant={approving ? 'primary' : 'danger'}
             icon={approving ? <Check size={16} /> : <X size={16} />}
             loading={mutation.isPending}
-            onClick={() => { setError(null); mutation.mutate(); }}
+            onClick={() => {
+              setError(null);
+              setTouched(true);
+              if (noteTooShort) return;
+              mutation.mutate();
+            }}
           >
             {approving ? 'Approve' : 'Reject'}
           </Button>
@@ -138,13 +151,15 @@ function DecisionModal({
         </p>
 
         <Textarea
-          label="Decision note (optional)"
+          label={rejecting ? 'Decision note (required)' : 'Decision note (optional)'}
           value={note}
           onChange={(e) => setNote(e.target.value)}
+          onBlur={() => setTouched(true)}
           maxLength={1000}
           rows={3}
-          placeholder="Shared context for the audit trail"
-          hint={`${note.length}/1000`}
+          placeholder={rejecting ? 'Tell the applicant why (this is shared with them and kept in the audit trail)' : 'Shared context for the audit trail'}
+          hint={rejecting ? `${note.length}/1000 · at least ${REJECT_NOTE_MIN} characters` : `${note.length}/1000`}
+          error={touched && noteTooShort ? `Give the applicant a short reason (at least ${REJECT_NOTE_MIN} characters).` : undefined}
         />
 
         {error ? <Callout tone="danger">{error}</Callout> : null}
@@ -185,7 +200,7 @@ export default function AdminTrainers() {
       <AdminPageHeader
         title="Trainer applications"
         subtitle="Verify credentials before granting coaching privileges."
-        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> applications</Badge>}
+        meta={<Badge tone="neutral"><span className="tabular">{plural(total, 'application')}</span></Badge>}
       />
 
       <Tabs
@@ -316,31 +331,37 @@ export default function AdminTrainers() {
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
                   <p className="tabular text-xs text-text-2">
-                    {app.submittedAt
-                      ? `Submitted ${format(new Date(app.submittedAt), 'MMM d, yyyy')}`
-                      : 'Submission date unknown'}
-                    {app.reviewedAt ? `, reviewed ${format(new Date(app.reviewedAt), 'MMM d, yyyy')}` : ''}
+                    {app.submittedAt ? <>Submitted <Stamp iso={app.submittedAt} dateOnly /></> : 'Submission date unknown'}
+                    {app.reviewedAt ? <>, reviewed <Stamp iso={app.reviewedAt} dateOnly /></> : null}
                   </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      icon={<X size={16} />}
-                      onClick={() => setTarget({ application: row, decision: 'reject' })}
-                      disabled={!isPending && app.status === 'rejected'}
-                    >
-                      Reject
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      icon={<Check size={16} />}
-                      onClick={() => setTarget({ application: row, decision: 'approve' })}
-                      disabled={!isPending && app.status === 'approved'}
-                    >
-                      Approve
-                    </Button>
-                  </div>
+                  {isPending ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        icon={<X size={16} />}
+                        onClick={() => setTarget({ application: row, decision: 'reject' })}
+                        disabled={!isPending}
+                      >
+                        Reject
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        icon={<Check size={16} />}
+                        onClick={() => setTarget({ application: row, decision: 'approve' })}
+                        disabled={!isPending}
+                      >
+                        Approve
+                      </Button>
+                    </div>
+                  ) : (
+                    // A decision is final on the server (409 "not pending"), so
+                    // the buttons are not offered; the applicant can re-apply.
+                    <p className="text-xs text-text-2">
+                      Decision recorded{app.status === 'rejected' ? '; the member can apply again.' : '.'}
+                    </p>
+                  )}
                 </div>
               </Card>
             );
@@ -357,7 +378,7 @@ export default function AdminTrainers() {
           busy={query.isFetching}
           onPrev={() => setPage((n) => Math.max(1, n - 1))}
           onNext={() => setPage((n) => Math.min(totalPages, n + 1))}
-          label={`${total.toLocaleString()} applications`}
+          label={plural(total, 'application')}
         />
       ) : null}
 

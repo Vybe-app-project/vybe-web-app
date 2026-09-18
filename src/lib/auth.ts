@@ -139,7 +139,13 @@ export const useAuth = create<AuthState>((set, get) => ({
     if (!tokenStore.getAdmin()) return set({ admin: null, adminLoading: false });
     try {
       const { data } = await adminApi.get('/admins/me');
-      set({ admin: data.admin || data, adminLoading: false });
+      // GET /admins/me answers with the same envelope as login:
+      // { success, message, data: { admin } }. Reading `data.admin || data`
+      // stored the whole envelope, so after any page reload `admin.role` was
+      // undefined and a super admin saw the "Super admin only" callout on the
+      // Administrators page. Unwrap every shape the API has used.
+      const admin = data?.data?.admin ?? data?.admin ?? data;
+      set({ admin: admin && typeof admin === 'object' ? admin : null, adminLoading: false });
     } catch {
       tokenStore.clearAdmin();
       set({ admin: null, adminLoading: false });

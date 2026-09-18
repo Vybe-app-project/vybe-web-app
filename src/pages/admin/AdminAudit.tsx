@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import type { AxiosError } from 'axios';
 import { adminApi } from '../../lib/api';
 import {
   Badge,
@@ -14,10 +14,11 @@ import {
   Select,
   Skeleton,
   cx,
+  fmtStamp,
   humanize,
 } from '../../components/ui';
-import { List, X, Refresh, Eye } from '../../components/icons';
-import { AdminPageHeader, Pager } from './AdminLayout';
+import { List, X, Refresh, Eye, Lock } from '../../components/icons';
+import { AdminPageHeader, Pager, Stamp } from './AdminLayout';
 
 type AuditEntry = {
   _id: string;
@@ -35,6 +36,8 @@ type AuditEntry = {
 type AuditResponse = {
   entries: AuditEntry[];
   pagination?: { page: number; limit: number; total: number; pages: number };
+  /** Distinct targetType values actually recorded; drives the filter options. */
+  targetTypes?: string[];
 };
 
 const LIMIT_OPTIONS = [25, 50, 100].map((n) => ({ value: String(n), label: `${n} rows` }));
@@ -42,10 +45,10 @@ const LIMIT_OPTIONS = [25, 50, 100].map((n) => ({ value: String(n), label: `${n}
 /** Server-side pattern: /^[A-Za-z][A-Za-z0-9_]{2,79}$/ */
 const ACTION_RE = /^[A-Za-z][A-Za-z0-9_]{2,79}$/;
 
-const TARGET_TYPE_OPTIONS = [
-  { value: '', label: 'All types' },
-  ...['user', 'post', 'admin', 'report', 'comment', 'support'].map((t) => ({ value: t, label: humanize(t) })),
-];
+// Options come from the API's distinct targetTypes (see below). A hard-coded
+// list used to offer "Support" while the backend records `support_message`,
+// so the filter returned nothing, and left out workout / workout_plan.
+const ALL_TYPES = { value: '', label: 'All types' };
 
 function toneForAction(action?: string): 'danger' | 'warning' | 'success' | 'info' | 'neutral' {
   const a = (action || '').toUpperCase();
@@ -66,13 +69,22 @@ function ActionBadge({ action }: { action?: string }) {
   );
 }
 
-const stamp = (iso?: string) => (iso ? format(new Date(iso), 'MMM d, yyyy HH:mm:ss') : '—');
+const stamp = (iso?: string) => fmtStamp(iso, { seconds: true });
+
+/** Drop empty strings / nulls so a block never shows `requestId: ""`. */
+function compactObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, v]) => v !== '' && v !== null && v !== undefined,
+  );
+  return entries.length ? Object.fromEntries(entries) : null;
+}
 
 function EntryModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
-  const blocks: Array<[string, unknown]> = [
-    ['Target snapshot', entry.targetSnapshot],
-    ['Metadata', entry.metadata],
-    ['Request', entry.request],
+  const blocks: Array<[string, Record<string, unknown> | null]> = [
+    ['Target snapshot', compactObject(entry.targetSnapshot)],
+    ['Metadata', compactObject(entry.metadata)],
+    ['Request', compactObject(entry.request)],
   ];
   const facts: Array<[string, string, boolean]> = [
     ['Actor', entry.actorSnapshot?.fullName || entry.actorSnapshot?.email || '—', false],
@@ -80,6 +92,7 @@ function EntryModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void
     ['Actor model', entry.actorModel || '—', false],
     ['Target ID', entry.targetId || '—', true],
     ['Timestamp', stamp(entry.createdAt), false],
+    ['UTC', entry.createdAt ? fmtStamp(entry.createdAt, { seconds: true, timeZone: 'UTC' }) : '—', false],
     ['Entry ID', entry._id, true],
   ];
   return (
@@ -103,7 +116,7 @@ function EntryModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void
         </dl>
 
         {blocks.map(([label, value]) =>
-          value && typeof value === 'object' && Object.keys(value as object).length > 0 ? (
+          value ? (
             <div key={label}>
               <p className="type-label mb-1.5 text-text-2">{label}</p>
               <pre className="admin-pre">{JSON.stringify(value, null, 2)}</pre>
@@ -144,12 +157,22 @@ export default function AdminAudit() {
       return {
         entries: Array.isArray(data?.entries) ? data.entries : [],
         pagination: data?.pagination,
+        targetTypes: Array.isArray(data?.targetTypes) ? data.targetTypes.filter((t: unknown) => typeof t === 'string') : [],
       };
     },
     placeholderData: keepPreviousData,
+    // A 403 is a stable answer (role), not a transient failure.
+    retry: (count, e) => (e as AxiosError)?.response?.status !== 403 && count < 2,
   });
 
+  const forbidden = query.isError && (query.error as AxiosError)?.response?.status === 403;
+
   const entries = query.data?.entries ?? [];
+  const targetTypeOptions = useMemo(() => {
+    const known = new Set(query.data?.targetTypes ?? []);
+    if (targetType) known.add(targetType);
+    return [ALL_TYPES, ...[...known].sort().map((t) => ({ value: t, label: humanize(t) }))];
+  }, [query.data?.targetTypes, targetType]);
   const p = query.data?.pagination;
   const total = p?.total ?? entries.length;
   const totalPages = Math.max(1, p?.pages ?? 1);
@@ -180,6 +203,7 @@ export default function AdminAudit() {
         }
       />
 
+      {forbidden ? null : (
       <Card>
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[240px] flex-1">
@@ -198,7 +222,7 @@ export default function AdminAudit() {
           <div className="min-w-[180px]">
             <Select
               label="Target type"
-              options={TARGET_TYPE_OPTIONS}
+              options={targetTypeOptions}
               value={targetType}
               onChange={(v) => { setTargetType(v); setPage(1); }}
             />
@@ -218,9 +242,19 @@ export default function AdminAudit() {
           ) : null}
         </div>
       </Card>
+      )}
 
       <Card padded={false} className="overflow-hidden">
-        {query.isError ? (
+        {forbidden ? (
+          // Not an error to retry: the signed-in role simply cannot read it.
+          <EmptyState
+            variant="no-results"
+            icon={<Lock size={24} />}
+            title="Super admin access only"
+            message="The audit log is limited to super administrators. Ask a super admin if you need an entry reviewed."
+            action={{ label: 'Back to dashboard', to: '/admin', variant: 'secondary' }}
+          />
+        ) : query.isError ? (
           <ErrorState
             error={query.error}
             retry={() => void query.refetch()}
@@ -250,7 +284,7 @@ export default function AdminAudit() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="admin-table min-w-[880px]">
+            <table className="admin-table admin-table--actions min-w-[880px]">
               <thead>
                 <tr>
                   <th scope="col">When</th>
@@ -263,8 +297,8 @@ export default function AdminAudit() {
               <tbody className={cx(query.isFetching && 'admin-fetching')}>
                 {entries.map((e) => (
                   <tr key={e._id}>
-                    <td className="tabular whitespace-nowrap text-text-2">
-                      <time dateTime={e.createdAt}>{stamp(e.createdAt)}</time>
+                    <td className="whitespace-nowrap text-text-2">
+                      <Stamp iso={e.createdAt} seconds />
                     </td>
                     <td><ActionBadge action={e.action} /></td>
                     <td>

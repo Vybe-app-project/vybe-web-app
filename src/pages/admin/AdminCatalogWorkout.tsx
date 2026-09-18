@@ -19,9 +19,10 @@ import {
   humanize,
   useOnline,
   useToast,
+  plural,
 } from '../../components/ui';
 import { ArrowDown, ArrowUp, ArrowLeft, Check, Dumbbell, Plus, Trash } from '../../components/icons';
-import { AdminPageHeader } from './AdminLayout';
+import { AdminPageHeader, Stamp } from './AdminLayout';
 import {
   CATALOG_CATEGORIES,
   CATALOG_LEVELS,
@@ -40,7 +41,6 @@ import {
   HashtagsField,
   SaveErrorCallout,
   WholeNumberInput,
-  fmtDateTime,
   useUnsavedChangesWarning,
 } from './catalogFields';
 import {
@@ -50,7 +50,6 @@ import {
   isMissingRecordError,
   isObjectId,
   newExerciseDraft,
-  plural,
   seedableRecord,
   validateWorkoutDraft,
   workoutSession,
@@ -600,8 +599,8 @@ export default function AdminCatalogWorkout() {
                   facts={[
                     { label: 'Scheduled in', value: plural(detail.data?.usedByPlans ?? 0, 'plan') },
                     { label: 'Engagement', value: `${plural(baseline.likesCount, 'like')}, ${plural(baseline.commentsCount, 'comment')}` },
-                    { label: 'Created', value: fmtDateTime(baseline.createdAt) },
-                    { label: 'Last updated', value: fmtDateTime(baseline.updatedAt) },
+                    { label: 'Created', value: <Stamp iso={baseline.createdAt} /> },
+                    { label: 'Last updated', value: <Stamp iso={baseline.updatedAt} /> },
                     { label: 'Workout ID', value: baseline._id, mono: true },
                   ]}
                 />

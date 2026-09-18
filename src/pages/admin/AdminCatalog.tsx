@@ -16,6 +16,7 @@ import {
   Tabs,
   cx,
   useToast,
+  plural,
 } from '../../components/ui';
 import { Dumbbell, Edit, Layers, Plus, Search, Trash, X } from '../../components/icons';
 import { AdminPageHeader, Pager } from './AdminLayout';
@@ -38,7 +39,6 @@ import {
   pageCount,
   parseListState,
   planEditorPath,
-  plural,
   rangeLabel,
   workoutEditorPath,
   type CatalogListState,
@@ -79,7 +79,7 @@ function WorkoutsTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="admin-table min-w-[880px]">
+      <table className="admin-table admin-table--actions min-w-[880px]">
         <caption className="sr-only">Premade workouts</caption>
         <thead>
           <tr>
@@ -150,7 +150,7 @@ function PlansTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="admin-table min-w-[820px]">
+      <table className="admin-table admin-table--actions min-w-[820px]">
         <caption className="sr-only">Premade workout plans</caption>
         <thead>
           <tr>

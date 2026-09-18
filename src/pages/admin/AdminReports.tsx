@@ -5,7 +5,6 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import type { AxiosError } from 'axios';
 import { adminApi, errMsg, mediaUrl } from '../../lib/api';
 import {
@@ -21,11 +20,14 @@ import {
   Tabs,
   Textarea,
   cx,
+  ensureSentence,
+  fmtStamp,
   humanize,
+  plural,
   useToast,
 } from '../../components/ui';
 import { Flag, Check, Trash, Shield } from '../../components/icons';
-import { AdminPageHeader, Pager } from './AdminLayout';
+import { AdminPageHeader, Pager, Stamp } from './AdminLayout';
 
 /* --------------------------------------------------------------- types */
 
@@ -37,6 +39,39 @@ type ModerationAction =
   | 'restore_user';
 
 type ReportStatus = 'pending' | 'reviewed' | 'actioned' | 'dismissed';
+
+/**
+ * What reportController.targetPreview() sends. `title` is the headline
+ * (username for accounts, "<Category> post" for posts, the meal or workout
+ * title otherwise), `body` the text (display name, caption, description),
+ * `imageUrl` the first image already signed. When the target is gone the
+ * API replays the snapshot stored at report time with `removed: true`.
+ */
+type TargetPreview = {
+  id?: string | null;
+  type?: string;
+  exists?: boolean;
+  removed?: boolean;
+  title?: string;
+  body?: string;
+  imageUrl?: string | null;
+  ownerId?: string;
+  visibility?: 'public' | 'private';
+  createdAt?: string | null;
+};
+
+type ReportOwner = {
+  _id?: string;
+  username?: string;
+  fullName?: string;
+  avatar?: string;
+  email?: string;
+  /** publicOwner(): true while moderation has the account suspended. */
+  suspended?: boolean;
+  suspensionReason?: string;
+  suspendedAt?: string | null;
+  available?: boolean;
+};
 
 type Report = {
   _id: string;
@@ -51,17 +86,8 @@ type Report = {
   moderationNote?: string;
   reviewedBy?: { fullName?: string; email?: string } | null;
   reporter?: { username?: string; fullName?: string; avatar?: string; email?: string } | null;
-  targetOwner?: {
-    _id?: string;
-    username?: string;
-    fullName?: string;
-    avatar?: string;
-    email?: string;
-    isActive?: boolean;
-    isDeleted?: boolean;
-    moderationSuspension?: { active?: boolean; reason?: string } | null;
-  } | null;
-  targetPreview?: Record<string, any> | null;
+  targetOwner?: ReportOwner | null;
+  targetPreview?: TargetPreview | null;
 };
 
 type ReportsResponse = {
@@ -76,6 +102,7 @@ const ACTIONS: Array<{
   value: ModerationAction;
   label: string;
   description: string;
+  successMessage: string;
   requiresNote: boolean;
   destructive: boolean;
 }> = [
@@ -83,6 +110,7 @@ const ACTIONS: Array<{
     value: 'mark_reviewed',
     label: 'Mark reviewed',
     description: 'Acknowledge the report without enforcement. A note is optional.',
+    successMessage: 'Marked as reviewed',
     requiresNote: false,
     destructive: false,
   },
@@ -90,6 +118,7 @@ const ACTIONS: Array<{
     value: 'dismiss',
     label: 'Dismiss',
     description: 'Close the report as not actionable. A note is optional.',
+    successMessage: 'Report dismissed',
     requiresNote: false,
     destructive: false,
   },
@@ -97,6 +126,7 @@ const ACTIONS: Array<{
     value: 'remove_content',
     label: 'Remove content',
     description: 'Take down the reported content. A short reason is required.',
+    successMessage: 'Content removed',
     requiresNote: true,
     destructive: true,
   },
@@ -104,6 +134,7 @@ const ACTIONS: Array<{
     value: 'suspend_user',
     label: 'Suspend account',
     description: 'Suspend the owner of the reported content. A short reason is required.',
+    successMessage: 'Account suspended',
     requiresNote: true,
     destructive: true,
   },
@@ -111,10 +142,31 @@ const ACTIONS: Array<{
     value: 'restore_user',
     label: 'Restore account',
     description: 'Lift a suspension previously applied to this account.',
+    successMessage: 'Account restored',
     requiresNote: false,
     destructive: false,
   },
 ];
+
+/**
+ * Why an action cannot apply to this report right now. The server answers
+ * 409 for each of these; saying so up front saves the round trip and the
+ * "conflict" callout for a state the moderator can already see.
+ */
+function unavailableReason(action: ModerationAction, report: Report): string | null {
+  const preview = report.targetPreview;
+  const owner = report.targetOwner;
+  const gone = preview?.removed === true || preview?.exists === false;
+  if (report.status === 'actioned' && report.moderationAction === action) return 'Already applied';
+  if (report.status === 'actioned' && action !== 'restore_user') return 'Report already actioned';
+  if (action === 'remove_content') {
+    if (report.targetType === 'user') return 'Not available for account reports';
+    if (gone) return 'Content already removed';
+  }
+  if (action === 'suspend_user' && owner?.suspended) return 'Owner is already suspended';
+  if (action === 'restore_user' && owner && !owner.suspended) return 'Owner is not suspended';
+  return null;
+}
 
 const STATUS_TABS = [
   { key: 'pending', label: 'Pending' },
@@ -133,24 +185,10 @@ const STATUS_TONE: Record<ReportStatus, 'warning' | 'info' | 'success' | 'neutra
 
 const LIMIT = 20;
 
-const when = (iso?: string | null, withTime = true) =>
-  iso ? format(new Date(iso), withTime ? 'MMM d, yyyy HH:mm' : 'MMM d, yyyy') : '—';
-
 /* --------------------------------------------------------- preview cell */
 
-function TargetPreview({ report }: { report: Report }) {
+function TargetPreviewCard({ report }: { report: Report }) {
   const preview = report.targetPreview ?? null;
-  const text =
-    preview?.content ??
-    preview?.text ??
-    preview?.caption ??
-    preview?.message ??
-    preview?.bio ??
-    '';
-  const image =
-    preview?.thumbnail ??
-    preview?.url ??
-    (Array.isArray(preview?.medias) ? preview?.medias[0]?.thumbnail || preview?.medias[0]?.url : null);
 
   if (!preview) {
     return (
@@ -160,20 +198,61 @@ function TargetPreview({ report }: { report: Report }) {
     );
   }
 
+  const gone = preview.removed === true || preview.exists === false;
+  const isUser = (preview.type ?? report.targetType) === 'user';
+  const title = (preview.title ?? '').trim();
+  const body = (preview.body ?? '').trim();
+  const image = preview.imageUrl ? String(preview.imageUrl) : '';
+
   return (
-    <div className="flex gap-3 rounded-sm border border-line bg-surface-2 p-2.5">
-      {image ? (
+    <div
+      className={cx(
+        'admin-preview flex gap-3 rounded-sm border p-2.5',
+        gone ? 'border-line-strong bg-surface-1' : 'border-line bg-surface-2',
+      )}
+      data-removed={gone ? 'true' : undefined}
+    >
+      {isUser ? (
+        <Avatar src={image || undefined} name={body || title} size="md" />
+      ) : image ? (
         <img
-          src={mediaUrl(String(image))}
+          src={mediaUrl(image)}
           alt=""
           loading="lazy"
-          className="h-14 w-14 shrink-0 rounded-xs border border-line object-cover"
+          className={cx(
+            'h-14 w-14 shrink-0 rounded-xs border border-line object-cover',
+            gone && 'opacity-60 grayscale',
+          )}
         />
       ) : null}
       <div className="min-w-0 flex-1">
-        <p className="line-clamp-3 text-sm leading-relaxed text-text-1">
-          {String(text).trim() || <span className="text-text-3 italic">No text content</span>}
-        </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {title ? (
+            <p className="type-label truncate text-text-2">{isUser ? `@${title}` : title}</p>
+          ) : null}
+          {gone ? (
+            <Badge tone="neutral" size="sm">Content removed</Badge>
+          ) : preview.visibility === 'private' ? (
+            <Badge tone="neutral" size="sm">Private</Badge>
+          ) : null}
+        </div>
+        {gone ? (
+          <p className="mt-0.5 text-sm text-text-2">
+            Content no longer available.{body ? ' Snapshot from the time of the report:' : ''}
+          </p>
+        ) : null}
+        {body ? (
+          <p
+            className={cx(
+              'line-clamp-3 text-sm leading-relaxed',
+              gone ? 'text-text-3 italic' : 'text-text-1',
+            )}
+          >
+            {body}
+          </p>
+        ) : !gone ? (
+          <p className="text-sm text-text-3 italic">{isUser ? 'No display name' : 'No caption'}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -212,6 +291,8 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
   const chosen = ACTIONS.find((a) => a.value === action) ?? null;
   const noteRequired = chosen?.requiresNote ?? false;
 
+  const refreshQueue = () => void qc.invalidateQueries({ queryKey: ['admin', 'reports'] });
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (!action) throw new Error('Choose a moderation action');
@@ -224,8 +305,8 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
       return data;
     },
     onSuccess: () => {
-      success(chosen ? `Report ${chosen.label.toLowerCase()}` : 'Report updated');
-      void qc.invalidateQueries({ queryKey: ['admin', 'reports'] });
+      success(chosen?.successMessage ?? 'Report updated');
+      refreshQueue();
       onClose();
     },
     onError: (e) => {
@@ -294,7 +375,7 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
             {report.reporter?.username
               ? `@${report.reporter.username}`
               : report.reporter?.fullName || 'a member'}
-            {report.createdAt ? ` on ${when(report.createdAt)}` : ''}
+            {report.createdAt ? ` on ${fmtStamp(report.createdAt)}` : ''}
           </p>
         </div>
 
@@ -303,14 +384,18 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
           <div className="grid gap-2 sm:grid-cols-2">
             {ACTIONS.map((a) => {
               const active = action === a.value;
+              const unavailable = unavailableReason(a.value, report);
               return (
                 <button
                   key={a.value}
                   type="button"
                   aria-pressed={active}
+                  aria-disabled={unavailable ? true : undefined}
+                  disabled={Boolean(unavailable)}
                   data-tone={a.destructive ? 'danger' : 'brand'}
+                  title={unavailable ?? undefined}
                   onClick={() => { setAction(a.value); setFormError(null); }}
-                  className="admin-option"
+                  className={cx('admin-option', unavailable && 'cursor-not-allowed opacity-60')}
                 >
                   <span
                     className={cx(
@@ -320,6 +405,9 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
                   >
                     {a.destructive ? <Trash size={16} /> : <Check size={16} />}
                     {a.label}
+                    {unavailable ? (
+                      <Badge tone="neutral" size="sm" className="ml-auto">{unavailable}</Badge>
+                    ) : null}
                   </span>
                   <span className="mt-1 block text-xs leading-relaxed text-text-2">{a.description}</span>
                 </button>
@@ -343,9 +431,19 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
         />
 
         {conflict ? (
-          <Callout tone="warning" title="Moderation conflict">
-            {conflict} Refresh the queue and confirm the current state before retrying. Your change
-            was not applied.
+          <Callout
+            tone="warning"
+            title="Moderation conflict"
+            action={
+              <Button size="sm" variant="secondary" onClick={() => { refreshQueue(); onClose(); }}>
+                Refresh queue
+              </Button>
+            }
+          >
+            <p>{ensureSentence(conflict)}</p>
+            <p className="mt-1">
+              Refresh the queue and confirm the current state before retrying. Your change was not applied.
+            </p>
           </Callout>
         ) : null}
 
@@ -384,12 +482,22 @@ export default function AdminReports() {
 
   const tabs = useMemo(() => STATUS_TABS.map((t) => ({ key: t.key, label: t.label })), []);
 
+  // The count badge names what is counted: "3 pending" on the queue, "12
+  // reports" on All, "4 dismissed" on a status tab, rather than "N in queue"
+  // for every tab.
+  const countLabel =
+    status === 'pending'
+      ? `${total.toLocaleString()} pending`
+      : status === 'all'
+        ? plural(total, 'report')
+        : `${total.toLocaleString()} ${humanize(status).toLowerCase()}`;
+
   return (
     <div className="space-y-5">
       <AdminPageHeader
         title="Reports"
         subtitle="Every decision needs a concrete enforcement action; destructive actions also need a written reason."
-        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> in queue</Badge>}
+        meta={<Badge tone="neutral"><span className="tabular">{countLabel}</span></Badge>}
       />
 
       <Tabs
@@ -439,7 +547,8 @@ export default function AdminReports() {
         <div className={cx('space-y-3', query.isFetching && 'admin-fetching')}>
           {reports.map((r) => {
             const owner = r.targetOwner;
-            const suspended = Boolean(owner?.moderationSuspension?.active);
+            const suspended = owner?.suspended === true;
+            const gone = r.targetPreview?.removed === true || r.targetPreview?.exists === false;
             return (
               <Card key={r._id}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -449,11 +558,17 @@ export default function AdminReports() {
                     {r.status ? (
                       <Badge tone={STATUS_TONE[r.status] ?? 'neutral'}>{humanize(r.status)}</Badge>
                     ) : null}
-                    {suspended ? <Badge tone="warning">Owner suspended</Badge> : null}
+                    {suspended ? (
+                      <Badge
+                        tone="warning"
+                        title={owner?.suspensionReason ? `Reason: ${owner.suspensionReason}` : undefined}
+                      >
+                        Owner suspended
+                      </Badge>
+                    ) : null}
+                    {gone ? <Badge tone="neutral">Content removed</Badge> : null}
                   </div>
-                  <time className="tabular text-xs text-text-2" dateTime={r.createdAt}>
-                    {when(r.createdAt)}
-                  </time>
+                  <Stamp iso={r.createdAt} className="text-xs text-text-2" />
                 </div>
 
                 {r.detail ? (
@@ -461,7 +576,7 @@ export default function AdminReports() {
                 ) : null}
 
                 <div className="mt-3">
-                  <TargetPreview report={r} />
+                  <TargetPreviewCard report={r} />
                 </div>
 
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -477,7 +592,7 @@ export default function AdminReports() {
                     <p className="mt-1 text-xs text-text-1">
                       {r.moderationAction ? humanize(r.moderationAction) : 'Not recorded'}
                       {r.reviewedBy?.fullName ? ` by ${r.reviewedBy.fullName}` : ''}
-                      {r.reviewedAt ? ` on ${when(r.reviewedAt)}` : ''}
+                      {r.reviewedAt ? ` on ${fmtStamp(r.reviewedAt)}` : ''}
                     </p>
                     {r.moderationNote ? (
                       <p className="mt-1 text-xs text-text-2 italic">“{r.moderationNote}”</p>
@@ -505,7 +620,7 @@ export default function AdminReports() {
           busy={query.isFetching}
           onPrev={() => setPage((n) => Math.max(1, n - 1))}
           onNext={() => setPage((n) => n + 1)}
-          label={`${total.toLocaleString()} reports`}
+          label={plural(total, 'report')}
         />
       ) : null}
 

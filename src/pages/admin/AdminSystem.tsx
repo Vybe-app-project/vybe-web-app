@@ -1,10 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
-import { format } from 'date-fns';
 import { adminApi, ORIGIN_BASE, errMsg } from '../../lib/api';
 import {
   Badge,
+  Button,
   Card,
   CardHeader,
   EmptyState,
@@ -16,9 +15,10 @@ import {
   StatTile,
   cx,
   humanize,
+  plural,
 } from '../../components/ui';
 import { Server, Refresh, Check, X, Alert, BarChart, Zap } from '../../components/icons';
-import { AdminPageHeader } from './AdminLayout';
+import { AdminPageHeader, Stamp } from './AdminLayout';
 
 /* --------------------------------------------------------------- types */
 
@@ -39,13 +39,23 @@ type PerfEntry = {
 type PerfResponse = { success?: boolean; stats?: Record<string, PerfEntry> };
 
 const POLL_MS = 10_000;
+/** Rows shown before "Show all"; the table is sorted by volume so this is the top 25. */
+const TOP_ROUTES = 25;
 
-/**
- * /health and /ready are mounted at the server root, NOT under /api, so they
- * are fetched with a bare axios client against the origin. They are public,
- * which also means a 401 here must not bounce the admin session.
+/*
+ * The probes are read under the API prefix (/api/system/health and
+ * /api/system/ready, literal below so scripts/audit-api-contracts.cjs can
+ * resolve them against the backend route inventory). The root /health and
+ * /ready are NOT proxied on the product origin: Caddy serves the SPA there,
+ * so the console received index.html, failed to find `status`, and reported a
+ * healthy API as "Unreachable / Not ready / Database disconnected" every ten
+ * seconds.
  */
-const originApi = axios.create({ baseURL: ORIGIN_BASE || '/', timeout: 8000 });
+
+/** A probe answer is an object with a status; HTML (or anything else) means the path is not the API. */
+function asProbe<T extends object>(data: unknown): T | null {
+  return data && typeof data === 'object' && !Array.isArray(data) ? (data as T) : null;
+}
 
 /**
  * The provider capability booleans the API derives from its environment
@@ -137,25 +147,26 @@ function Latency({ value }: { value: number }) {
 /* ---------------------------------------------------------------- page */
 
 export default function AdminSystem() {
-  const health = useQuery<Health>({
+  const [showAllRoutes, setShowAllRoutes] = useState(false);
+
+  const health = useQuery<Health | null>({
     queryKey: ['system', 'health'],
-    queryFn: async () => (await originApi.get('/health')).data ?? {},
+    queryFn: async () => asProbe<Health>((await adminApi.get('/system/health')).data),
     refetchInterval: POLL_MS,
     refetchIntervalInBackground: false,
     retry: false,
     staleTime: 0,
   });
 
-  const ready = useQuery<Ready>({
+  const ready = useQuery<Ready | null>({
     queryKey: ['system', 'ready'],
-    // /ready answers 503 when the DB is down; that body is still meaningful.
+    // The readiness probe answers 503 when the DB is down; that body is still meaningful.
     queryFn: async () => {
       try {
-        const { data } = await originApi.get('/ready');
-        return data ?? {};
+        return asProbe<Ready>((await adminApi.get('/system/ready')).data);
       } catch (e: any) {
-        const body = e?.response?.data;
-        if (body && typeof body === 'object') return body as Ready;
+        const body = asProbe<Ready>(e?.response?.data);
+        if (body) return body;
         throw e;
       }
     },
@@ -180,6 +191,11 @@ export default function AdminSystem() {
     staleTime: 0,
   });
 
+  // `null` data after a successful fetch means the path answered with
+  // something that is not the probe (an HTML page): report "not exposed"
+  // rather than a false alarm.
+  const healthNotExposed = health.isSuccess && health.data === null;
+  const readyNotExposed = ready.isSuccess && ready.data === null;
   const liveOk = health.isError ? false : health.data ? health.data.status === 'OK' : null;
   const readyOk = ready.data ? ready.data.status === 'ready' : ready.isError ? false : null;
   const dbConnected = ready.data
@@ -236,6 +252,7 @@ export default function AdminSystem() {
   }, [capabilities]);
 
   const requiredProviders = ready.data?.providers;
+  const visibleRows = showAllRoutes ? rows : rows.slice(0, TOP_ROUTES);
   const anyFetching = health.isFetching || ready.isFetching || perf.isFetching || caps.isFetching;
 
   return (
@@ -263,35 +280,61 @@ export default function AdminSystem() {
       {/* Status */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
-          <CardHeader title="Liveness" subtitle={<span className="admin-code">GET /health</span>} />
+          <CardHeader title="Liveness" subtitle={<span className="admin-code">GET /api/system/health</span>} />
           {health.isLoading ? (
             <Skeleton className="h-7 w-32 rounded-full" />
           ) : (
             <>
-              <StatusPill ok={liveOk} label={liveOk ? 'Healthy' : liveOk === null ? 'Unknown' : 'Unreachable'} />
+              <StatusPill
+                ok={liveOk}
+                label={
+                  liveOk
+                    ? 'Healthy'
+                    : healthNotExposed
+                      ? 'Probe not exposed on this origin'
+                      : liveOk === null
+                        ? 'Unknown'
+                        : 'Unreachable'
+                }
+              />
               <p className="tabular mt-3 text-xs text-text-2">
                 {health.isError
                   ? errMsg(health.error, 'The API did not respond.')
-                  : health.data?.timestamp
-                    ? `Reported at ${format(new Date(health.data.timestamp), 'HH:mm:ss')}`
-                    : 'No timestamp reported'}
+                  : healthNotExposed
+                    ? 'The path answered, but not with the API probe. Check the edge routing for /api/system/*.'
+                    : health.data?.timestamp
+                      ? <>Reported at <Stamp iso={health.data.timestamp} seconds /></>
+                      : 'No timestamp reported'}
               </p>
             </>
           )}
         </Card>
 
         <Card>
-          <CardHeader title="Readiness" subtitle={<span className="admin-code">GET /ready</span>} />
+          <CardHeader title="Readiness" subtitle={<span className="admin-code">GET /api/system/ready</span>} />
           {ready.isLoading ? (
             <Skeleton className="h-7 w-32 rounded-full" />
           ) : (
             <>
               <div className="flex flex-wrap gap-2">
-                <StatusPill ok={readyOk} label={readyOk ? 'Ready' : readyOk === null ? 'Unknown' : 'Not ready'} />
                 <StatusPill
-                  ok={dbConnected}
-                  label={dbConnected ? 'Database connected' : dbConnected === null ? 'Database unknown' : 'Database disconnected'}
+                  ok={readyOk}
+                  label={
+                    readyOk
+                      ? 'Ready'
+                      : readyNotExposed
+                        ? 'Probe not exposed on this origin'
+                        : readyOk === null
+                          ? 'Unknown'
+                          : 'Not ready'
+                  }
                 />
+                {readyNotExposed ? null : (
+                  <StatusPill
+                    ok={dbConnected}
+                    label={dbConnected ? 'Database connected' : dbConnected === null ? 'Database unknown' : 'Database disconnected'}
+                  />
+                )}
               </div>
               {requiredProviders && Object.keys(requiredProviders).length > 0 ? (
                 <div className="mt-3">
@@ -456,9 +499,18 @@ export default function AdminSystem() {
 
       {/* Per-route table */}
       <Card padded={false} className="overflow-hidden">
-        <div className="border-b border-line px-4 py-3">
-          <h3 className="text-md font-semibold text-text-1">Latency by route</h3>
-          <p className="mt-0.5 text-xs text-text-2">Sorted by request volume. Refreshes every 30 seconds.</p>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-4 py-3">
+          <div>
+            <h3 className="text-md font-semibold text-text-1">Latency by route</h3>
+            <p className="mt-0.5 text-xs text-text-2">
+              One row per route template, sorted by request volume. Refreshes every 30 seconds.
+            </p>
+          </div>
+          {rows.length > TOP_ROUTES ? (
+            <Button size="sm" variant="ghost" onClick={() => setShowAllRoutes((v) => !v)} aria-expanded={showAllRoutes}>
+              {showAllRoutes ? `Show top ${TOP_ROUTES}` : `Show all ${plural(rows.length, 'route')}`}
+            </Button>
+          ) : null}
         </div>
 
         {perf.isLoading ? (
@@ -476,7 +528,7 @@ export default function AdminSystem() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="admin-table min-w-[720px]">
+            <table className="admin-table min-w-[640px]">
               <thead>
                 <tr>
                   <th scope="col">Route</th>
@@ -488,9 +540,11 @@ export default function AdminSystem() {
                 </tr>
               </thead>
               <tbody className={cx(perf.isFetching && 'admin-fetching')}>
-                {rows.map((r) => (
+                {visibleRows.map((r) => (
                   <tr key={r.key}>
-                    <td className="admin-code text-text-1">{r.key}</td>
+                    <td className="text-text-1">
+                      <span className="admin-code block max-w-[28rem] truncate" title={r.key}>{r.key}</span>
+                    </td>
                     <td className="num">{r.count.toLocaleString()}</td>
                     <td className="num"><Latency value={r.avgTime} /></td>
                     <td className="num text-text-2">{ms(r.minTime)}</td>

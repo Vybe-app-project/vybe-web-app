@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
+import { fmtStamp, isoStamp } from '../../lib/format';
 import {
   Avatar,
   Badge,
@@ -46,6 +47,8 @@ const NAV: Array<{
   label: string;
   Icon: ComponentType<{ size?: number | string; className?: string }>;
   end?: boolean;
+  /** Only super administrators can open it; hidden from other staff once the role is known. */
+  superOnly?: boolean;
 }> = [
   { to: '/admin', label: 'Dashboard', Icon: Dashboard, end: true },
   { to: '/admin/users', label: 'Users', Icon: Users },
@@ -55,7 +58,7 @@ const NAV: Array<{
   { to: '/admin/trainers', label: 'Trainers', Icon: Award },
   { to: '/admin/catalog', label: 'Catalog', Icon: Dumbbell },
   { to: '/admin/admins', label: 'Admins', Icon: Shield },
-  { to: '/admin/audit', label: 'Audit log', Icon: List },
+  { to: '/admin/audit', label: 'Audit log', Icon: List, superOnly: true },
   { to: '/admin/system', label: 'System', Icon: Server },
 ];
 
@@ -160,6 +163,30 @@ export function Pager({
   );
 }
 
+/**
+ * A timestamp with its zone and the ISO form as a tooltip, so two staff in
+ * different zones read the same record identically (see lib/format.ts).
+ */
+export function Stamp({
+  iso,
+  seconds = false,
+  dateOnly = false,
+  className,
+}: {
+  iso?: string | number | Date | null;
+  seconds?: boolean;
+  dateOnly?: boolean;
+  className?: string;
+}) {
+  const value = isoStamp(iso);
+  if (!value) return <span className={cx('tabular', className)}>—</span>;
+  return (
+    <time className={cx('tabular', className)} dateTime={value} title={value}>
+      {fmtStamp(iso, { seconds, dateOnly })}
+    </time>
+  );
+}
+
 /** GET /admins/me -> { success, data: { admin } } */
 export function useCurrentAdmin() {
   return useQuery<AdminIdentity>({
@@ -185,6 +212,10 @@ export default function AdminLayout() {
   const me: AdminIdentity = data ?? storeAdmin ?? {};
   const isSuper = me.role === 'SUPER_ADMIN';
   const roleLabel = me.role ? String(me.role).replace(/_/g, ' ').toLowerCase() : 'staff';
+  // Super-admin-only sections are hidden from other staff once the role is
+  // known; while it loads everything stays visible so a super admin never
+  // sees entries appear late.
+  const visibleNav = NAV.filter((item) => !item.superOnly || !me.role || isSuper);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => { setOpen(false); }, [location.pathname]);
@@ -217,7 +248,7 @@ export default function AdminLayout() {
       </div>
 
       <nav aria-label="Console sections" className="flex-1 space-y-0.5 overflow-y-auto p-3">
-        {NAV.map(({ to, label, Icon, end }) => (
+        {visibleNav.map(({ to, label, Icon, end }) => (
           <NavLink key={to} to={to} end={end === true} className="admin-nav-link">
             <Icon size={18} className="shrink-0" />
             <span className="truncate">{label}</span>

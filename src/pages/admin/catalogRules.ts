@@ -796,5 +796,3 @@ export function rangeLabel(page: number, limit: number, total: number, noun: str
   const to = Math.min(page * limit, total);
   return `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()} ${noun}`;
 }
-
-export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;

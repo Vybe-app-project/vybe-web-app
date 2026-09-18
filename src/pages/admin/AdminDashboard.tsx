@@ -31,6 +31,7 @@ import {
   VIZ,
   chartTheme,
   formatStat,
+  plural,
 } from '../../components/ui';
 import {
   Users,
@@ -70,6 +71,10 @@ type MoreAnalytics = {
     category?: string;
     createdAt?: string;
     author?: { name?: string; fullName?: string; username?: string; avatar?: string };
+    /** Counters from the engagement-ranked aggregation; arrays are the legacy shape. */
+    likeCount?: number;
+    commentCount?: number;
+    engagement?: number;
     likes?: unknown[];
     comments?: unknown[];
   }>;
@@ -92,6 +97,15 @@ const num = (v: unknown): number | null =>
 const fmtCount = (v: number | null): string => (v === null ? '—' : v.toLocaleString());
 
 /** Series come back in a few shapes across API versions; normalise defensively. */
+/**
+ * The API zero-fills the 30-day growth series, so an idle window arrives as 30
+ * rows of 0 rather than an empty array; both deserve the 'nothing in the last
+ * 30 days' copy instead of a flat line hugging the axis.
+ */
+function isFlatZero(series: Array<{ value: number }>): boolean {
+  return series.every((point) => !point.value);
+}
+
 function toSeries(raw: unknown, valueKeys: string[]): Array<{ label: string; value: number }> {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -125,21 +139,25 @@ function ChartCard({
   subtitle,
   children,
   empty,
+  emptyTitle = 'No data for this window',
+  emptyMessage = 'This fills in as activity is recorded.',
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
   empty: boolean;
+  emptyTitle?: string;
+  emptyMessage?: string;
 }) {
   return (
-    <Card>
+    <Card className="min-w-0 overflow-hidden">
       <CardHeader title={title} subtitle={subtitle} />
       {empty ? (
         <EmptyState
           variant="no-results"
           icon={<BarChartIcon size={24} />}
-          title="No data for this window"
-          message="The analytics endpoint is not reporting this metric yet. It fills in as activity is recorded."
+          title={emptyTitle}
+          message={emptyMessage}
           size="sm"
         />
       ) : (
@@ -199,7 +217,7 @@ function DashboardSkeleton() {
       <StatGrid>
         {Array.from({ length: 8 }).map((_, i) => <SkeletonTile key={i} />)}
       </StatGrid>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
         {Array.from({ length: 2 }).map((_, i) => (
           <Card key={i}>
             <Skeleton className="h-4 w-40" />
@@ -323,18 +341,36 @@ export default function AdminDashboard() {
       </StatGrid>
 
       {/* Time series */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="User growth" subtitle="New accounts over time" empty={userGrowth.length === 0}>
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
+        <ChartCard
+          title="User growth"
+          subtitle="New accounts per day, last 30 days"
+          empty={isFlatZero(userGrowth)}
+          emptyTitle="No sign-ups in the last 30 days"
+          emptyMessage="New accounts appear here per day as members register."
+        >
           <GrowthChart data={userGrowth} name="Users" color={seriesAt(0)} gradientId="admin-users-fill" />
         </ChartCard>
-        <ChartCard title="Posts over time" subtitle="Content published per period" empty={postGrowth.length === 0}>
+        <ChartCard
+          title="Posts over time"
+          subtitle="Posts published per day, last 30 days"
+          empty={isFlatZero(postGrowth)}
+          emptyTitle="No posts in the last 30 days"
+          emptyMessage="Published posts appear here per day as members share them."
+        >
           <GrowthChart data={postGrowth} name="Posts" color={seriesAt(1)} gradientId="admin-posts-fill" />
         </ChartCard>
       </div>
 
       {/* Breakdowns */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Content mix" subtitle="Share of records by type" empty={contentMix.length === 0}>
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
+        <ChartCard
+          title="Content mix"
+          subtitle="Share of records by type"
+          empty={contentMix.length === 0}
+          emptyTitle="Nothing to compare yet"
+          emptyMessage="The mix appears once posts, workouts, meals or gyms exist."
+        >
           <PieChart>
             <Pie
               data={contentMix}
@@ -359,7 +395,13 @@ export default function AdminDashboard() {
           </PieChart>
         </ChartCard>
 
-        <ChartCard title="Engagement" subtitle="Recently active accounts against the total" empty={engagement.length === 0}>
+        <ChartCard
+          title="Engagement"
+          subtitle="Members who signed in recently against the total"
+          empty={engagement.length === 0}
+          emptyTitle="No activity recorded yet"
+          emptyMessage="Counts update as members sign in."
+        >
           <BarChart data={engagement} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
             <CartesianGrid {...chartTheme.cartesianGrid} strokeDasharray="3 3" />
             <XAxis dataKey="name" {...chartTheme.axisProps} />
@@ -375,8 +417,8 @@ export default function AdminDashboard() {
       </div>
 
       {/* Secondary analytics */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader title="Most active authors" subtitle="By published post count" />
           {more.isLoading ? (
             <div className="space-y-3" aria-busy="true">
@@ -415,7 +457,7 @@ export default function AdminDashboard() {
                     {u.email ? <p className="truncate text-xs text-text-2">{u.email}</p> : null}
                   </div>
                   <Badge tone="info">
-                    <span className="tabular">{u.postCount.toLocaleString()}</span> posts
+                    <span className="tabular">{plural(u.postCount, 'post')}</span>
                   </Badge>
                 </li>
               ))}
@@ -423,8 +465,8 @@ export default function AdminDashboard() {
           )}
         </Card>
 
-        <Card>
-          <CardHeader title="Trending posts" subtitle="Highest engagement in the last 7 days" />
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader title="Trending posts" subtitle="Most likes and comments in the last 7 days" />
           {more.isLoading ? (
             <div className="space-y-3" aria-busy="true">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -450,12 +492,16 @@ export default function AdminDashboard() {
           ) : (
             <ul className="divide-y divide-line">
               {trending.map((p, i) => {
-                const author =
-                  p.author?.name || p.author?.fullName || p.author?.username || 'Unknown author';
-                const likes = Array.isArray(p.likes) ? p.likes.length : null;
-                const comments = Array.isArray(p.comments) ? p.comments.length : null;
+                const handle = p.author?.username ? `@${p.author.username}` : undefined;
+                const author = p.author?.fullName || p.author?.name || handle || 'Unknown author';
+                const likes =
+                  typeof p.likeCount === 'number' ? p.likeCount : Array.isArray(p.likes) ? p.likes.length : null;
+                const comments =
+                  typeof p.commentCount === 'number'
+                    ? p.commentCount
+                    : Array.isArray(p.comments) ? p.comments.length : null;
                 return (
-                  <li key={p._id ?? i} className="flex items-start gap-3 py-2.5">
+                  <li key={p._id ?? i} className="flex min-w-0 items-start gap-3 py-2.5">
                     <Avatar src={p.author?.avatar} name={author} size="sm" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-text-1">
@@ -463,14 +509,15 @@ export default function AdminDashboard() {
                       </p>
                       <p className="mt-0.5 truncate text-xs text-text-2">
                         {author}
+                        {handle && handle !== author ? ` ${handle}` : ''}
                         {p.category ? `, ${p.category}` : ''}
                         {p.createdAt ? ` — ${format(new Date(p.createdAt), 'MMM d, yyyy')}` : ''}
                       </p>
                     </div>
                     {likes !== null || comments !== null ? (
-                      <div className="tabular shrink-0 text-right text-xs text-text-2">
-                        {likes !== null ? <div>{likes.toLocaleString()} likes</div> : null}
-                        {comments !== null ? <div>{comments.toLocaleString()} comments</div> : null}
+                      <div className="tabular w-24 shrink-0 text-right text-xs text-text-2">
+                        {likes !== null ? <div>{plural(likes, 'like')}</div> : null}
+                        {comments !== null ? <div>{plural(comments, 'comment')}</div> : null}
                       </div>
                     ) : null}
                   </li>
