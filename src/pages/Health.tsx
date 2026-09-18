@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { format, isValid, parseISO } from 'date-fns';
+import { format, isValid, parseISO, subDays } from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import {
   Button,
@@ -97,6 +97,10 @@ type NutritionAnalytics = HealthAnalytics['nutritionStats'] & {
   nutritionBalance: { protein: number; carbs: number; fat: number };
   topFoods: Record<string, { count: number; totalCalories: number; avgCalories: number }>;
 };
+
+// How much manual daily-entry history the Health page requests. The API
+// caps a range at 365 days; 60 covers the charts without a large payload.
+const ENTRY_HISTORY_DAYS = 60;
 
 type DailyEntry = {
   date: string;
@@ -289,10 +293,18 @@ export default function Health() {
   });
 
   const entries = useQuery({
-    queryKey: ['health', 'entries'],
+    queryKey: ['health', 'entries', ENTRY_HISTORY_DAYS],
     queryFn: async (): Promise<DailyEntry[]> => {
+      // GET /health/entries takes an explicit startDate/endDate range and has
+      // no `limit` parameter. Sending `limit` produced a 400 on every load, so
+      // the daily-entry history never appeared. The server caps the span at
+      // 365 days and rejects a reversed range.
+      const today = new Date();
       const { data } = await api.get<{ entries: DailyEntry[] }>('/health/entries', {
-        params: { limit: 60 },
+        params: {
+          startDate: format(subDays(today, ENTRY_HISTORY_DAYS - 1), 'yyyy-MM-dd'),
+          endDate: format(today, 'yyyy-MM-dd'),
+        },
       });
       return data.entries;
     },
