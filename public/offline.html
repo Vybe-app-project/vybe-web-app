@@ -11,19 +11,25 @@
     <title>You're offline · Vybe</title>
     <style>
       :root { color-scheme: light; --bg: #f6f9f8; --surface: #ffffff; --line: #dce5e1; --text-1: #0b1e2b; --text-2: #4b6470; --brand: #00b08e; --on-brand: #04101b; }
+      /* Dark: the stored in-app choice (set by /offline.js) wins; the system
+         preference applies only when the script did not run. */
+      html[data-theme="dark"] { color-scheme: dark; --bg: #04101b; --surface: #071a2a; --line: rgba(255,255,255,.08); --text-1: #f2f7f5; --text-2: #a9bcc6; --brand: #00d4aa; }
       @media (prefers-color-scheme: dark) {
-        :root { color-scheme: dark; --bg: #04101b; --surface: #071a2a; --line: rgba(255,255,255,.08); --text-1: #f2f7f5; --text-2: #a9bcc6; --brand: #00d4aa; }
+        html:not([data-theme]) { color-scheme: dark; --bg: #04101b; --surface: #071a2a; --line: rgba(255,255,255,.08); --text-1: #f2f7f5; --text-2: #a9bcc6; --brand: #00d4aa; }
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; min-height: 100%; }
-      body { display: grid; place-items: center; padding: 24px; background: var(--bg); color: var(--text-1); font: 15px/1.5 -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+      body { display: grid; place-items: center; padding: 24px; background: var(--bg); color: var(--text-1); font: 16px/1.5 -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
       main { width: 100%; max-width: 26rem; text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 40px 24px 28px; }
       svg { display: block; margin: 0 auto 20px; color: var(--brand); }
       h1 { margin: 0 0 8px; font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.01em; }
       p { margin: 0 0 24px; color: var(--text-2); }
-      button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: var(--brand); color: var(--on-brand); font: inherit; font-weight: 600; cursor: pointer; }
-      button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-      a { color: var(--text-2); }
+      .actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; }
+      button, .link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 20px; border: 0; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+      button { background: var(--brand); color: var(--on-brand); }
+      .link { color: var(--text-2); }
+      .link:hover { text-decoration: underline; text-underline-offset: 3px; }
+      button:focus-visible, .link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
     </style>
   </head>
   <body>
@@ -35,11 +41,12 @@
         <path d="M 9.1 16.5 L 12 9.1 L 14.9 16.5" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <h1>You're offline</h1>
-      <p>Vybe needs a connection for this page. Anything you already opened is still available once you're back online.</p>
-      <button type="button" onclick="location.reload()">Try again</button>
+      <p>Vybe needs a connection for this page. Anything you already opened is still available, and this page reloads by itself when you're back online.</p>
+      <div class="actions">
+        <button type="button" id="retry">Try again</button>
+        <a class="link" href="/">Back to Vybe</a>
+      </div>
     </main>
-    <script>
-      addEventListener('online', function () { location.reload(); });
-    </script>
+    <script src="/offline.js"></script>
   </body>
 </html>
