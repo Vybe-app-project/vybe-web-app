@@ -107,6 +107,16 @@ export function errMsg(e: unknown, fallback = 'Something went wrong'): string {
   return fallback;
 }
 
+/** Per-field messages from a 400 (`{ errors: { username: '…' } }`), when the API sent them. */
+export function fieldErrorsOf(e: unknown): Record<string, string> {
+  const d = (e as AxiosError<{ errors?: unknown }>)?.response?.data as { errors?: unknown } | undefined;
+  const errors = d?.errors;
+  if (!errors || typeof errors !== 'object' || Array.isArray(errors)) return {};
+  return Object.fromEntries(
+    Object.entries(errors as Record<string, unknown>).filter(([, v]) => typeof v === 'string' && v),
+  ) as Record<string, string>;
+}
+
 /** Resolve possibly-relative media paths returned by the API. */
 export function mediaUrl(u?: string | null): string {
   if (!u) return '';

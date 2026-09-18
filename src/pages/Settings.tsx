@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg, tokenStore } from '../lib/api';
+import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
   NOTIFICATION_SETTING_KEYS,
+  displayName,
   isPasswordValid,
   passwordRules,
   pickNotificationSettings,
@@ -15,6 +16,7 @@ import {
   type PublicUser,
 } from '../lib/hooks';
 import {
+  Avatar,
   Button,
   Callout,
   Card,
@@ -24,13 +26,15 @@ import {
   Input,
   PageHeader,
   Skeleton,
+  SkeletonRow,
   Switch,
   Textarea,
   ThemeControl,
   cx,
   useToast,
 } from './ui';
-import { ChevronRight, ExternalLink, FileText, LifeBuoy, LogOut, Shield } from './icons';
+import { ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Shield } from './icons';
+import { ROW_LINK } from './UserRow';
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
 
@@ -175,7 +179,23 @@ function AccountSection() {
       setForm({ fullName: user.fullName || '', username: user.username || '', bio: user.bio || '' });
       toast.success('Account details saved');
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save your account details.')),
+    onError: (e) => {
+      const message = errMsg(e, 'Could not save your account details.');
+      const field = fieldErrorsOf(e);
+      // "Username is already taken" belongs under the field, with focus
+      // there; a toast alone left the input looking valid.
+      if (field.username || /username/i.test(message)) {
+        setErrors((x) => ({ ...x, username: field.username || message }));
+        document.getElementById('set-username')?.focus();
+        return;
+      }
+      if (field.fullName) {
+        setErrors((x) => ({ ...x, fullName: field.fullName }));
+        document.getElementById('set-name')?.focus();
+        return;
+      }
+      toast.error(message);
+    },
   });
 
   function submit(e: FormEvent) {
@@ -523,6 +543,175 @@ function EmailPreferencesSection() {
   );
 }
 
+/* ------------------------------------------------------------------ privacy */
+
+function useMe() {
+  const authUser = useAuth((s) => s.user);
+  return useQuery({
+    queryKey: ['me'],
+    queryFn: async () => {
+      const { data } = await api.get('/users/me');
+      return (data.user || data) as PublicUser;
+    },
+    initialData: (authUser as PublicUser) ?? undefined,
+  });
+}
+
+/**
+ * Account privacy. The mobile app has had this switch since launch; on the web
+ * the only way to go private was a raw API call, and the Friends page's
+ * "Privacy settings" call to action landed on a page without it.
+ */
+function PrivacySection() {
+  const setUser = useAuth((s) => s.setUser);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const meQuery = useMe();
+  const isPrivate = meQuery.data?.settings?.privacy === 'private';
+
+  const save = useMutation({
+    mutationFn: async (nextPrivate: boolean) => {
+      const { data } = await api.put('/users/settings', { privacy: nextPrivate ? 'private' : 'public' });
+      return (data.user || data) as PublicUser;
+    },
+    onMutate: (nextPrivate) => {
+      const previous = meQuery.data;
+      if (previous) {
+        qc.setQueryData(['me'], { ...previous, settings: { ...previous.settings, privacy: nextPrivate ? 'private' : 'public' } });
+      }
+      return previous;
+    },
+    onSuccess: (user, nextPrivate) => {
+      setUser(user as any);
+      qc.setQueryData(['me'], user);
+      qc.invalidateQueries({ queryKey: ['me'] });
+      qc.invalidateQueries({ queryKey: ['followRequests'] });
+      toast.success(nextPrivate ? 'Your account is now private' : 'Your account is now public');
+    },
+    onError: (e, _next, previous) => {
+      if (previous) qc.setQueryData(['me'], previous);
+      toast.error(errMsg(e, 'Could not update your privacy setting.'));
+    },
+  });
+
+  return (
+    <SettingsCard
+      id="privacy"
+      title="Privacy"
+      description="Who can see what you share."
+    >
+      {meQuery.isLoading && !meQuery.data ? (
+        <RowsSkeleton rows={1} height="h-12" />
+      ) : (
+        <>
+          <ToggleRow
+            title="Private account"
+            hint="Only approved followers see your posts, workouts and meals. New followers must ask first."
+            checked={isPrivate}
+            disabled={save.isPending || !meQuery.data}
+            onChange={(checked) => save.mutate(checked)}
+          />
+          <p className="mt-2 flex items-start gap-2 text-xs text-text-3">
+            <Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              {isPrivate
+                ? 'People who already follow you keep access. Requests wait for you under Friends › Follow requests.'
+                : 'Anyone on Vybe can see your profile and follow you without asking.'}
+              {' '}
+              <Link to="/friends?tab=follows" viewTransition className="font-semibold text-text-2 hover:underline">
+                Follow requests
+              </Link>
+            </span>
+          </p>
+        </>
+      )}
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ blocked accounts */
+
+/**
+ * The way back from a block. Blocking removed every trace of the person
+ * (profile 404, hidden from search), so without this list a block could not
+ * be undone from the app at all.
+ */
+function BlockedAccountsSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const blocked = useQuery({
+    queryKey: ['blocked'],
+    queryFn: async () => {
+      const { data } = await api.get('/users/blocked');
+      return (data.users || []) as PublicUser[];
+    },
+  });
+
+  const unblock = useMutation({
+    mutationFn: async (user: PublicUser) => {
+      await api.post('/users/unblock', { userId: user._id });
+      return user;
+    },
+    onMutate: (user) => {
+      const previous = blocked.data;
+      qc.setQueryData<PublicUser[]>(['blocked'], (list) => (list || []).filter((u) => u._id !== user._id));
+      return previous;
+    },
+    onSuccess: (user) => {
+      toast.success(`${displayName(user)} unblocked`);
+      qc.invalidateQueries({ queryKey: ['blocked'] });
+      qc.invalidateQueries({ queryKey: ['user', user._id] });
+      qc.invalidateQueries({ queryKey: ['feed'] });
+      qc.invalidateQueries({ queryKey: ['search'] });
+    },
+    onError: (e, _user, previous) => {
+      if (previous) qc.setQueryData(['blocked'], previous);
+      toast.error(errMsg(e, 'Could not unblock this account.'));
+    },
+  });
+
+  return (
+    <SettingsCard
+      id="blocked"
+      title="Blocked accounts"
+      description="People you have blocked cannot see your profile or message you, and you will not see them. Unblocking does not restore a follow or friendship."
+      padded={false}
+    >
+      {blocked.isLoading ? (
+        <div className="space-y-1 px-2 pb-2" aria-busy="true">
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      ) : blocked.isError ? (
+        <ErrorState title="Blocked accounts unavailable" error={blocked.error} retry={() => void blocked.refetch()} className="py-6" />
+      ) : !blocked.data?.length ? (
+        <p className="px-3 pb-3 text-sm text-text-2">You haven’t blocked anyone. Block someone from the ⋯ menu on their profile.</p>
+      ) : (
+        <ul className="divide-y divide-line" aria-label="Blocked accounts">
+          {blocked.data.map((u) => (
+            <li key={u._id} className="flex min-h-16 items-center gap-3 px-3 py-2.5 sm:px-4">
+              <Avatar src={u.avatar} name={displayName(u)} size={44} />
+              <div className="min-w-0 flex-1">
+                <p className={cx(ROW_LINK, 'hover:no-underline')}>{displayName(u)}</p>
+                <p className="truncate text-xs text-text-2">@{u.username}</p>
+              </div>
+              <Button
+                variant="secondary"
+                loading={unblock.isPending && unblock.variables?._id === u._id}
+                disabled={unblock.isPending}
+                onClick={() => unblock.mutate(u)}
+                aria-label={`Unblock ${displayName(u)}`}
+              >
+                Unblock
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SettingsCard>
+  );
+}
+
 /* ------------------------------------------------------------------ about / legal */
 
 const ABOUT_LINKS: Array<{ label: string; hint: string; icon: ReactNode; to?: string; href?: string }> = [
@@ -637,6 +826,22 @@ function DangerZone() {
 
 export default function Settings() {
   const logout = useAuth((s) => s.logout);
+  const { hash } = useLocation();
+
+  // Deep links such as /settings#privacy (from the Friends page) scroll the
+  // card into view and move focus to it once the sections have rendered.
+  useEffect(() => {
+    const id = hash.replace(/^#/, '');
+    if (!id) return;
+    const t = window.setTimeout(() => {
+      const card = document.getElementById(`${id}-title`)?.closest('[role="region"]') as HTMLElement | null;
+      if (!card) return;
+      card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      card.setAttribute('tabindex', '-1');
+      card.focus({ preventScroll: true });
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [hash]);
 
   return (
     <>
@@ -656,10 +861,12 @@ export default function Settings() {
       />
       <div className="w-full max-w-form space-y-4">
         <AccountSection />
+        <PrivacySection />
         <AppearanceSection />
         <PasswordSection />
         <NotificationsSection />
         <EmailPreferencesSection />
+        <BlockedAccountsSection />
         <AboutSection />
         <DangerZone />
       </div>
