@@ -23,6 +23,9 @@ for (const relative of [
   'privacy-policy.html',
   'terms-and-conditions.html',
   'account-deletion.html',
+  'legal.css',
+  'legal.js',
+  'fonts/archivo-latin-wdth-normal.woff2',
   'healthz.json',
   'robots.txt',
 ]) {
@@ -37,6 +40,16 @@ assert.ok(assetRefs.some((asset) => asset.endsWith('.js')), 'index has no JavaSc
 assert.ok(assetRefs.some((asset) => asset.endsWith('.css')), 'index has no stylesheet');
 for (const asset of assetRefs) {
   assert.ok(fs.existsSync(path.join(dist, asset.slice(1))), `missing referenced asset: ${asset}`);
+}
+
+// The legal pages are static HTML outside the Vite graph; their shared shell
+// must reference the shipped stylesheet and carry no inline style or script.
+for (const relative of ['privacy-policy.html', 'terms-and-conditions.html', 'account-deletion.html']) {
+  const page = fs.readFileSync(path.join(dist, relative), 'utf8');
+  assert.match(page, /<link rel="stylesheet" href="\/legal\.css" \/>/, `${relative} does not link /legal.css`);
+  assert.match(page, /<script src="\/theme\.js"><\/script>/, `${relative} does not load /theme.js`);
+  assert.doesNotMatch(page, /<style[\s>]/i, `${relative} carries an inline <style> block`);
+  assert.doesNotMatch(page, /<script(?![^>]*\ssrc=)[^>]*>/i, `${relative} carries an inline <script>`);
 }
 
 const files = filesBelow(dist);
