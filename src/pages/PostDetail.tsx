@@ -1,6 +1,6 @@
-import { useId, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useId, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
@@ -24,6 +24,7 @@ import {
   Input,
   Menu,
   PageHeader,
+  SegmentedControl,
   SkeletonRow,
   Spinner,
   cx,
@@ -44,6 +45,21 @@ type CommentsPage = {
   hasNextPage: boolean;
 };
 
+type CommentSort = 'desc' | 'asc';
+
+const COMMENT_SORTS = [
+  { value: 'desc', label: 'Newest' },
+  { value: 'asc', label: 'Oldest' },
+];
+
+/** Both mean "there is nothing to load here": 404 for absent/private, 400 for a malformed id. */
+const isGone = (error: unknown) => {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  return status === 400 || status === 404;
+};
+
+const COMMENTS_ANCHOR = 'comments';
+
 /* ------------------------------------------------------------------ */
 /* Comment row                                                         */
 /* ------------------------------------------------------------------ */
@@ -53,11 +69,13 @@ function CommentRow({
   postId,
   postAuthorId,
   onReport,
+  onRemoved,
 }: {
   comment: PostComment;
   postId: string;
   postAuthorId?: string;
   onReport: (userId: string, label: string) => void;
+  onRemoved: (commentId: string) => void;
 }) {
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
@@ -102,8 +120,10 @@ function CommentRow({
     onSuccess: () => {
       toast.success('Comment deleted');
       setConfirm(false);
+      onRemoved(comment._id);
       qc.invalidateQueries({ queryKey: ['post-comments', postId] });
       qc.invalidateQueries({ queryKey: ['post', postId] });
+      qc.invalidateQueries({ queryKey: ['feed'] });
     },
     onError: (e) => {
       toast.error(e, 'Could not delete this comment.');
@@ -196,44 +216,65 @@ function CommentRow({
 
 export default function PostDetail() {
   const { postId = '' } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const toast = useToast();
   const composerId = useId();
   const [text, setText] = useState('');
+  const [sort, setSort] = useState<CommentSort>('desc');
   const { report, reportModal } = useReportModal();
 
   const postQuery = useQuery({
     queryKey: ['post', postId],
     enabled: !!postId,
-    retry: (count, err) => (err as { response?: { status?: number } } | null)?.response?.status !== 404 && count < 2,
+    // A 400 (malformed id) can never succeed on retry any more than a 404 can.
+    retry: (count, err) => !isGone(err) && count < 2,
     queryFn: async () => {
       const { data } = await api.get(`/posts/${postId}`);
       return (data.post || data) as Post;
     },
   });
 
+  const commentsKey = ['post-comments', postId, sort];
   const commentsQuery = useInfiniteQuery({
-    queryKey: ['post-comments', postId],
+    queryKey: commentsKey,
     enabled: !!postId && !!postQuery.data,
     initialPageParam: 1,
     queryFn: async ({ pageParam }) => {
       const { data } = await api.get(`/posts/post/${postId}/comments/all/fetch/filter`, {
-        params: { page: pageParam, limit: 20 },
+        params: { page: pageParam, limit: 20, sort },
       });
       return data as CommentsPage;
     },
     getNextPageParam: (last, all) => (last.hasNextPage ? all.length + 1 : undefined),
   });
 
+  /** Keep the cached post's comment list in step so the card's counter moves with the header. */
+  const patchPostComments = (update: (comments: PostComment[]) => PostComment[]) => {
+    qc.setQueryData<Post>(['post', postId], (old) => (old ? { ...old, comments: update(old.comments || []) } : old));
+  };
+
   const addComment = useMutation({
     mutationFn: async (value: string) => {
       const { data } = await api.post('/posts/comment', { postId, text: value });
-      return data;
+      return data as { comment?: PostComment };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setText('');
       toast.success('Comment posted');
+      const created = data?.comment;
+      if (created?._id) {
+        patchPostComments((comments) => [...comments, created]);
+        qc.setQueryData<InfiniteData<CommentsPage>>(commentsKey, (old) => {
+          if (!old?.pages.length) return old;
+          const pages = old.pages.map((p) => ({ ...p, total: (p.total || 0) + 1, comments: [...p.comments] }));
+          if (sort === 'desc') pages[0].comments.unshift(created);
+          else if (!pages[pages.length - 1].hasNextPage) pages[pages.length - 1].comments.push(created);
+          return { ...old, pages };
+        });
+      }
       qc.invalidateQueries({ queryKey: ['post-comments', postId] });
       qc.invalidateQueries({ queryKey: ['post', postId] });
       qc.invalidateQueries({ queryKey: ['feed'] });
@@ -241,19 +282,52 @@ export default function PostDetail() {
     onError: (e) => toast.error(e, 'Could not post your comment.'),
   });
 
+  const onCommentRemoved = (commentId: string) => {
+    patchPostComments((comments) => comments.filter((c) => c._id !== commentId));
+    qc.setQueryData<InfiniteData<CommentsPage>>(commentsKey, (old) =>
+      old
+        ? {
+            ...old,
+            pages: old.pages.map((p) => ({
+              ...p,
+              total: Math.max(0, (p.total || 0) - 1),
+              comments: p.comments.filter((c) => c._id !== commentId),
+            })),
+          }
+        : old,
+    );
+  };
+
   const sentinelRef = useInfiniteScroll(() => {
     if (commentsQuery.hasNextPage && !commentsQuery.isFetchingNextPage) commentsQuery.fetchNextPage();
   }, !!commentsQuery.hasNextPage);
 
   const comments = commentsQuery.data?.pages.flatMap((p) => p.comments || []) ?? [];
   const total = commentsQuery.data?.pages[0]?.total ?? comments.length;
-  const notFound = (postQuery.error as { response?: { status?: number } } | null)?.response?.status === 404;
+  const gone = postQuery.isError && isGone(postQuery.error);
+  const post = !postQuery.isError ? postQuery.data : undefined;
+
+  // "View all N comments" links carry #comments. ScrollToTop resets on every
+  // pathname change, so the anchor is honoured once the card is on the page.
+  useEffect(() => {
+    if (!post || location.hash !== `#${COMMENTS_ANCHOR}`) return;
+    const id = window.setTimeout(() => {
+      document.getElementById(COMMENTS_ANCHOR)?.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [post, location.hash]);
 
   const focusComposer = () => {
     const el = document.getElementById(composerId);
     if (!el) return;
     el.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     el.focus({ preventScroll: true });
+  };
+
+  const leaveAfterDelete = () => {
+    qc.removeQueries({ queryKey: ['post', postId] });
+    qc.removeQueries({ queryKey: ['post-comments', postId] });
+    navigate('/', { replace: true });
   };
 
   return (
@@ -273,7 +347,7 @@ export default function PostDetail() {
         {postQuery.isLoading ? <PostCardSkeleton /> : null}
 
         {postQuery.isError ? (
-          notFound ? (
+          gone ? (
             <EmptyState
               variant="no-results"
               title="This post isn’t available"
@@ -285,24 +359,36 @@ export default function PostDetail() {
           )
         ) : null}
 
-        {postQuery.data ? (
+        {post ? (
           <PostCard
-            post={postQuery.data}
+            post={post}
             linkToDetail={false}
             hideComposer
+            expandMedia
             onComment={focusComposer}
+            onDeleted={leaveAfterDelete}
             invalidate={[['post', postId], ['feed']]}
           />
         ) : null}
 
-        {postQuery.data ? (
-          <Card>
-            <div className="flex items-center gap-2">
+        {post ? (
+          <Card id={COMMENTS_ANCHOR} className="scroll-mt-[calc(var(--topbar-h)+1rem)] lg:scroll-mt-6">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="type-heading text-lg text-text-1">Comments</h2>
               {total > 0 ? (
                 <Badge tone="neutral" className="tabular">
                   {formatStat(total, { compact: true })}
                 </Badge>
+              ) : null}
+              {total > 1 ? (
+                <SegmentedControl
+                  aria-label="Sort comments"
+                  size="sm"
+                  tabs={COMMENT_SORTS}
+                  value={sort}
+                  onChange={(v) => setSort(v as CommentSort)}
+                  className="ml-auto"
+                />
               ) : null}
             </div>
 
@@ -323,6 +409,7 @@ export default function PostDetail() {
                 placeholder="Add a comment…"
                 maxLength={1000}
                 autoComplete="off"
+                enterKeyHint="send"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 disabled={addComment.isPending}
@@ -349,8 +436,9 @@ export default function PostDetail() {
                   key={comment._id}
                   comment={comment}
                   postId={postId}
-                  postAuthorId={postQuery.data?.author?._id}
+                  postAuthorId={post.author?._id}
                   onReport={(userId, label) => report({ targetType: 'user', targetId: userId, targetLabel: label })}
+                  onRemoved={onCommentRemoved}
                 />
               ))}
             </ul>

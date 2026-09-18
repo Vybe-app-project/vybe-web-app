@@ -30,7 +30,8 @@ import { Calendar, Check, Copy, Flag, Lock, MapPin, MessageCircle, ShareUp, Shie
 import { FollowButton, UserBadges } from './UserRow';
 import { useReportModal } from './Report';
 import { PAGE, ProfileCover } from './Profile';
-import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { PUBLIC_PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { HighlightsRow } from './StoryTray';
 
 type FriendStatus = 'none' | 'requested' | 'incoming' | 'friends' | 'pending' | string;
 
@@ -51,7 +52,8 @@ export default function UserProfile() {
   const { report, reportModal } = useReportModal();
 
   const tabParam = params.get('tab');
-  const tab: ProfileTabKey = isProfileTab(tabParam) ? tabParam : 'posts';
+  // Saved posts are private to their owner; that tab does not exist here.
+  const tab: ProfileTabKey = isProfileTab(tabParam) && tabParam !== 'saved' ? tabParam : 'posts';
   const setTab = (next: string) => {
     setParams(
       (prev) => {
@@ -352,6 +354,8 @@ export default function UserProfile() {
         </div>
       </Card>
 
+      {canViewContent ? <HighlightsRow userId={user._id} author={user} /> : null}
+
       <StatGrid>
         <StatTile label="Posts" value={formatStat(postCount(user))} onClick={canViewContent ? () => setTab('posts') : undefined} />
         <StatTile label="Followers" value={formatStat(followerCount(user))} />
@@ -377,7 +381,7 @@ export default function UserProfile() {
         <section className="space-y-4" aria-label={`${name}’s activity`}>
           <Tabs
             aria-label="Profile content"
-            tabs={PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
+            tabs={PUBLIC_PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
             value={tab}
             onChange={setTab}
           />

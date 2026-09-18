@@ -40,7 +40,8 @@ import {
 } from './ui';
 import { Award, Calendar, Camera, ChevronRight, Edit, MapPin, Settings as SettingsIcon, ShareUp, Users } from './icons';
 import { UserBadges } from './UserRow';
-import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileSaved, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
+import { HighlightsRow } from './StoryTray';
 
 const tzOffset = () => new Date().getTimezoneOffset();
 
@@ -449,6 +450,8 @@ export default function Profile() {
         </div>
       </Card>
 
+      <HighlightsRow userId={me._id} isOwn author={me} />
+
       <StatGrid>
         <StatTile label="Posts" value={formatStat(postCount(me))} onClick={() => setTab('posts')} />
         <StatTile label="Followers" value={formatStat(followerCount(me))} to="/friends" />
@@ -469,6 +472,7 @@ export default function Profile() {
           {tab === 'posts' && <ProfilePosts userId={me._id} isOwn />}
           {tab === 'workouts' && <ProfileWorkouts userId={me._id} isOwn />}
           {tab === 'meals' && <ProfileMeals userId={me._id} isOwn />}
+          {tab === 'saved' && <ProfileSaved />}
         </div>
       </section>
 

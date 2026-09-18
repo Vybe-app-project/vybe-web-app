@@ -234,6 +234,12 @@ img, video { max-width: 100%; }
   transition: border-color var(--duration-1) var(--ease-out), background-color var(--duration-1) var(--ease-out);
   @media (pointer: coarse) { min-height: 48px; }
 }
+/* iOS Safari zooms the viewport onto any focused field under 16 px and does
+   not zoom back out, so on phones every field renders at 16 px. Desktop keeps
+   the 15 px type scale. */
+@media (max-width: 767px) {
+  .input-base { font-size: 16px; }
+}
 .input-base::placeholder { color: var(--text-3); }
 .input-base:hover:not(:disabled) { border-color: var(--text-3); }
 .input-base:focus-visible { border-color: var(--brand); }

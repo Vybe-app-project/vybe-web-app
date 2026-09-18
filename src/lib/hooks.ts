@@ -66,6 +66,9 @@ export type Post = {
   hashtags?: string[];
   likes?: string[];
   comments?: PostComment[];
+  /** Counts only — what the signed-out public shape carries instead of the arrays. */
+  likeCount?: number;
+  commentCount?: number;
   author?: PublicUser | null;
   isBookmarked?: boolean;
   createdAt: string;
@@ -77,8 +80,10 @@ export type Post = {
 export type PagedPosts = {
   posts: Post[];
   total?: number;
-  page?: number;
+  page?: number | null;
   hasNextPage?: boolean;
+  /** Keyset cursor for the next page (`GET /posts/feed?before=`). */
+  nextCursor?: string | null;
 };
 
 export type AppNotification = {
@@ -229,6 +234,9 @@ export async function uploadImage(
 }
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_VIDEO_UPLOAD_BYTES = 50 * 1024 * 1024;
+/** Attachments per post on web; the API accepts 20, the mobile composer 10. */
+export const MAX_POST_MEDIA = 10;
 
 export const ACCEPTED_IMAGE_TYPES = [
   'image/jpeg',
@@ -236,6 +244,147 @@ export const ACCEPTED_IMAGE_TYPES = [
   'image/webp',
   'image/heic',
 ];
+
+export const ACCEPTED_VIDEO_TYPES = ['video/mp4', 'video/quicktime'];
+
+/**
+ * The upload content type the API accepts for a picked file, or null. Browsers
+ * report `.mov` as video/quicktime, `.m4v` as video/x-m4v and HEIC sometimes as
+ * image/heif; some report nothing at all, so the extension is the fallback.
+ */
+export function uploadContentType(file: File): string | null {
+  const declared = (file.type || '').toLowerCase().split(';')[0];
+  const alias: Record<string, string> = {
+    'image/jpg': 'image/jpeg',
+    'image/pjpeg': 'image/jpeg',
+    'image/heif': 'image/heic',
+    'video/x-m4v': 'video/mp4',
+    'video/m4v': 'video/mp4',
+    'video/mov': 'video/quicktime',
+  };
+  const type = alias[declared] || declared;
+  if ([...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_VIDEO_TYPES].includes(type)) return type;
+  const ext = file.name.toLowerCase().split('.').pop() || '';
+  const byExt: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    mp4: 'video/mp4',
+    m4v: 'video/mp4',
+    mov: 'video/quicktime',
+  };
+  return byExt[ext] || null;
+}
+
+type PresignResponse = {
+  uploadUrl: string;
+  uploadMethod?: 'PUT' | 'POST';
+  uploadFields?: Record<string, string>;
+  publicUrl?: string;
+  storageReference?: string;
+  key: string;
+};
+
+/**
+ * Presigned upload (POST /upload/presign → PUT/POST the bytes). Used for
+ * video, which the multipart /upload/image route does not take, and for story
+ * media. Returns the storage key the API expects back as the media reference.
+ */
+export async function uploadPresigned(
+  file: Blob,
+  contentType: string,
+  purpose: 'media' = 'media',
+): Promise<{ key: string; url: string }> {
+  const { data } = await api.post('/upload/presign', { contentType, purpose, sizeBytes: file.size });
+  const p = data as PresignResponse;
+  let res: Response;
+  if (p.uploadMethod === 'POST') {
+    const form = new FormData();
+    Object.entries(p.uploadFields || {}).forEach(([k, v]) => form.append(k, v));
+    form.append('file', file);
+    res = await fetch(p.uploadUrl, { method: 'POST', body: form });
+  } else {
+    res = await fetch(p.uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: file });
+  }
+  if (!res.ok) throw new Error(`Upload failed (${res.status}). Try a smaller file or check your connection.`);
+  const key = p.storageReference || p.key;
+  return { key, url: p.publicUrl || key };
+}
+
+/** Seconds of a local video file, or null when the browser cannot read it. */
+export function readVideoDuration(file: Blob, timeoutMs = 4000): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    const done = (value: number | null) => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      video.removeAttribute('src');
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    video.preload = 'metadata';
+    video.muted = true;
+    video.onloadedmetadata = () => done(Number.isFinite(video.duration) ? video.duration : null);
+    video.onerror = () => done(null);
+    video.src = url;
+  });
+}
+
+/**
+ * First frame of a local video as a JPEG, for the card poster. Best effort:
+ * resolves null on codecs the browser will not decode (the post still goes up,
+ * the card then shows the browser's own first frame via `#t=0.1`).
+ */
+export function captureVideoPoster(file: Blob, timeoutMs = 5000): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    let settled = false;
+    const done = (value: Blob | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      video.removeAttribute('src');
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    const draw = () => {
+      try {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (!w || !h) return done(null);
+        const scale = Math.min(1, 1280 / Math.max(w, h));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return done(null);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => done(blob), 'image/jpeg', 0.85);
+      } catch {
+        done(null);
+      }
+    };
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.onloadeddata = () => {
+      // Seek past the very first frame, which is often black.
+      try {
+        video.currentTime = Math.min(0.1, Math.max(0, (video.duration || 1) / 10));
+      } catch {
+        draw();
+      }
+    };
+    video.onseeked = draw;
+    video.onerror = () => done(null);
+    video.src = url;
+  });
+}
 
 /* ------------------------------------------------------------------ *
  * Formatting helpers.

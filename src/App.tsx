@@ -4,10 +4,11 @@ import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
-import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
-import { useAuth } from './lib/auth';
+import { RouteErrorBoundary } from './components/ErrorBoundary';
 import { postLoginTarget } from './lib/authRedirect';
 import WelcomeSheet from './pages/WelcomeSheet';
+import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
+import { useAuth } from './lib/auth';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
@@ -18,6 +19,7 @@ const Feed = lazy(() => import('./pages/Feed'));
 const Discover = lazy(() => import('./pages/Discover'));
 const Search = lazy(() => import('./pages/Search'));
 const PostDetail = lazy(() => import('./pages/PostDetail'));
+const PublicPost = lazy(() => import('./pages/PublicPost'));
 const Profile = lazy(() => import('./pages/Profile'));
 const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -128,6 +130,25 @@ function SupportGate() {
   );
 }
 
+/**
+ * Shared post links (/p/:id) must open for people without an account: the
+ * link is what gets pasted into chats. Members get the full detail page in the
+ * app shell; everyone else gets the public post with a sign-in call to action,
+ * and login still bounces back here because the CTA carries the location.
+ */
+function PostGate() {
+  const { user, loading } = useAuth();
+  if (loading) return <FullPageSpinner />;
+  if (user) {
+    return (
+      <Layout>
+        <PostDetail />
+      </Layout>
+    );
+  }
+  return <PublicPost />;
+}
+
 /** Route changes should start at the top rather than inherit scroll. */
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -178,94 +199,98 @@ export default function App() {
       <ScrollToTop />
       <PwaUpdates />
       <Suspense fallback={<FullPageSpinner />}>
-        <Routes>
-          {/* Public auth */}
-          <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
-          <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
-          <Route path="/forgot-password" element={<GuestOnly><ForgotPassword /></GuestOnly>} />
-          <Route path="/reset-password" element={<ResetPassword />} />
+        <RouteErrorBoundary>
+          <Routes>
+            {/* Public auth */}
+            <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
+            <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
+            <Route path="/forgot-password" element={<GuestOnly><ForgotPassword /></GuestOnly>} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
-          {/* Public help: works signed out, wears the app shell when signed in */}
-          <Route path="/support" element={<SupportGate />} />
-          {/* The API's transactional emails link to support.html (the old static page). */}
-          <Route path="/support.html" element={<Navigate to="/support" replace />} />
+            {/* Public help: works signed out, wears the app shell when signed in */}
+            <Route path="/support" element={<SupportGate />} />
+            {/* The API's transactional emails link to support.html (the old static page). */}
+            <Route path="/support.html" element={<Navigate to="/support" replace />} />
 
-          {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
-          <Route path="/open.html" element={<OpenHandoff />} />
-          <Route path="/open" element={<OpenHandoff />} />
+            {/* Shared post links work signed out (public preview) and wear the shell when signed in */}
+            <Route path="/p/:postId" element={<PostGate />} />
 
-          {/* Admin: the three signed-out surfaces sit outside RequireAdmin */}
-          <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
-          <Route path="/admin/reset-password" element={<AdminResetPassword />} />
-          <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
-            <Route index element={<AdminDashboard />} />
-            <Route path="users" element={<AdminUsers />} />
-            <Route path="posts" element={<AdminPosts />} />
-            <Route path="reports" element={<AdminReports />} />
-            <Route path="support" element={<AdminSupport />} />
-            <Route path="trainers" element={<AdminTrainers />} />
-            {/* Premade workout / plan catalog: list, then one editor route per kind ("new" or an id). */}
-            <Route path="catalog" element={<AdminCatalog />} />
-            <Route path="catalog/workouts/new" element={<AdminCatalogWorkout />} />
-            <Route path="catalog/workouts/:workoutId" element={<AdminCatalogWorkout />} />
-            <Route path="catalog/plans/new" element={<AdminCatalogPlan />} />
-            <Route path="catalog/plans/:planId" element={<AdminCatalogPlan />} />
-            <Route path="admins" element={<AdminAdmins />} />
-            <Route path="audit" element={<AdminAudit />} />
-            <Route path="system" element={<AdminSystem />} />
-          </Route>
+            {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
+            <Route path="/open.html" element={<OpenHandoff />} />
+            <Route path="/open" element={<OpenHandoff />} />
 
-          {/* Authenticated app. The first-run sheet answers /?welcome=1 on any route. */}
-          <Route element={<RequireAuth><Layout /><WelcomeSheet /></RequireAuth>}>
-            <Route index element={<Feed />} />
-            <Route path="discover" element={<Discover />} />
-            <Route path="search" element={<Search />} />
-            <Route path="p/:postId" element={<PostDetail />} />
-            <Route path="stories" element={<Stories />} />
-            <Route path="profile" element={<Profile />} />
-            <Route path="u/:id" element={<UserProfile />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="notifications" element={<Notifications />} />
-            <Route path="messages" element={<Messages />} />
-            <Route path="messages/:roomId" element={<Messages />} />
-            <Route path="friends" element={<Friends />} />
-            <Route path="gyms" element={<Gyms />} />
-            <Route path="communities" element={<GymCommunity />} />
-            <Route path="live" element={<Livestreams />} />
-            <Route path="live/:streamId" element={<Livestreams />} />
+            {/* Admin: the three signed-out surfaces sit outside RequireAdmin */}
+            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
+            <Route path="/admin/reset-password" element={<AdminResetPassword />} />
+            <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="posts" element={<AdminPosts />} />
+              <Route path="reports" element={<AdminReports />} />
+              <Route path="support" element={<AdminSupport />} />
+              <Route path="trainers" element={<AdminTrainers />} />
+              {/* Premade workout / plan catalog: list, then one editor route per kind ("new" or an id). */}
+              <Route path="catalog" element={<AdminCatalog />} />
+              <Route path="catalog/workouts/new" element={<AdminCatalogWorkout />} />
+              <Route path="catalog/workouts/:workoutId" element={<AdminCatalogWorkout />} />
+              <Route path="catalog/plans/new" element={<AdminCatalogPlan />} />
+              <Route path="catalog/plans/:planId" element={<AdminCatalogPlan />} />
+              <Route path="admins" element={<AdminAdmins />} />
+              <Route path="audit" element={<AdminAudit />} />
+              <Route path="system" element={<AdminSystem />} />
+            </Route>
 
-            <Route path="workouts" element={<Workouts />} />
-            <Route path="workouts/logs" element={<WorkoutLogs />} />
-            <Route path="workouts/:workoutId" element={<WorkoutDetail />} />
-            <Route path="meals" element={<Meals />} />
-            <Route path="meals/templates" element={<MealTemplates />} />
-            <Route path="meals/plans" element={<WeeklyPlans />} />
-            <Route path="meals/shared/:token" element={<SharedMeal />} />
-            <Route path="meals/:id" element={<MealDetail />} />
-            <Route path="health" element={<Health />} />
-            <Route path="health/goals" element={<HealthGoals />} />
-            <Route path="health/water" element={<Water />} />
-            <Route path="health/photos" element={<ProgressPhotos />} />
-            <Route path="challenges" element={<Challenges />} />
-            <Route path="achievements" element={<Achievements />} />
+            {/* Authenticated app. The first-run sheet answers /?welcome=1 on any route. */}
+            <Route element={<RequireAuth><Layout /><WelcomeSheet /></RequireAuth>}>
+              <Route index element={<Feed />} />
+              <Route path="discover" element={<Discover />} />
+              <Route path="search" element={<Search />} />
+              <Route path="stories" element={<Stories />} />
+              <Route path="profile" element={<Profile />} />
+              <Route path="u/:id" element={<UserProfile />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="notifications" element={<Notifications />} />
+              <Route path="messages" element={<Messages />} />
+              <Route path="messages/:roomId" element={<Messages />} />
+              <Route path="friends" element={<Friends />} />
+              <Route path="gyms" element={<Gyms />} />
+              <Route path="communities" element={<GymCommunity />} />
+              <Route path="live" element={<Livestreams />} />
+              <Route path="live/:streamId" element={<Livestreams />} />
 
-            {/* Aliases and legacy paths → canonical routes */}
-            <Route path="create" element={<Navigate to="/?compose=1" replace />} />
-            <Route path="post/:postId" element={<RedirectPost />} />
-            <Route path="feed" element={<Navigate to="/" replace />} />
-            <Route path="explore" element={<Navigate to="/discover" replace />} />
-            <Route path="inbox" element={<Navigate to="/messages" replace />} />
-            <Route path="meal-templates" element={<Navigate to="/meals/templates" replace />} />
-            <Route path="health-goals" element={<Navigate to="/health/goals" replace />} />
-            <Route path="water" element={<Navigate to="/health/water" replace />} />
-            <Route path="workout-logs" element={<Navigate to="/workouts/logs" replace />} />
-            <Route path="livestreams" element={<Navigate to="/live" replace />} />
-            <Route path="livestreams/:streamId" element={<RedirectLive />} />
-          </Route>
+              <Route path="workouts" element={<Workouts />} />
+              <Route path="workouts/logs" element={<WorkoutLogs />} />
+              <Route path="workouts/:workoutId" element={<WorkoutDetail />} />
+              <Route path="meals" element={<Meals />} />
+              <Route path="meals/templates" element={<MealTemplates />} />
+              <Route path="meals/plans" element={<WeeklyPlans />} />
+              <Route path="meals/shared/:token" element={<SharedMeal />} />
+              <Route path="meals/:id" element={<MealDetail />} />
+              <Route path="health" element={<Health />} />
+              <Route path="health/goals" element={<HealthGoals />} />
+              <Route path="health/water" element={<Water />} />
+              <Route path="health/photos" element={<ProgressPhotos />} />
+              <Route path="challenges" element={<Challenges />} />
+              <Route path="achievements" element={<Achievements />} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+              {/* Aliases and legacy paths → canonical routes */}
+              <Route path="create" element={<Navigate to="/?compose=1" replace />} />
+              <Route path="post/:postId" element={<RedirectPost />} />
+              <Route path="feed" element={<Navigate to="/" replace />} />
+              <Route path="explore" element={<Navigate to="/discover" replace />} />
+              <Route path="inbox" element={<Navigate to="/messages" replace />} />
+              <Route path="meal-templates" element={<Navigate to="/meals/templates" replace />} />
+              <Route path="health-goals" element={<Navigate to="/health/goals" replace />} />
+              <Route path="water" element={<Navigate to="/health/water" replace />} />
+              <Route path="workout-logs" element={<Navigate to="/workouts/logs" replace />} />
+              <Route path="livestreams" element={<Navigate to="/live" replace />} />
+              <Route path="livestreams/:streamId" element={<RedirectLive />} />
+            </Route>
+
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </RouteErrorBoundary>
       </Suspense>
     </ToastProvider>
   );

@@ -46,6 +46,7 @@ export function ReportModal({
   onReported?: () => void;
 }) {
   const toast = useToast();
+  const what = (targetLabel || humanize(targetType)).toLowerCase();
   const [reason, setReason] = useState(REPORT_REASONS[0].value);
   const [detail, setDetail] = useState('');
   const [detailError, setDetailError] = useState<string | undefined>();
@@ -70,10 +71,19 @@ export function ReportModal({
       onReported?.();
       onClose();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not send the report. Try again in a moment.')),
+    onError: (e) => {
+      // A second report of the same thing is not an error the user can act
+      // on: the first one is already in the moderation queue.
+      if ((e as { response?: { status?: number } } | null)?.response?.status === 409) {
+        toast.info(`You’ve already reported this ${what}. Our team is reviewing it.`);
+        onReported?.();
+        onClose();
+        return;
+      }
+      toast.error(errMsg(e, 'Could not send the report. Try again in a moment.'));
+    },
   });
 
-  const what = (targetLabel || humanize(targetType)).toLowerCase();
   const needsDetail = reason === 'other';
 
   function send() {
