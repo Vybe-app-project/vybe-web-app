@@ -275,3 +275,33 @@
 @media (prefers-reduced-motion: reduce) {
   .admin-nav-link, .admin-table tbody tr, .admin-fetching, .admin-option { transition: none; }
 }
+
+/*
+ * Pinned actions column. Data tables are wider than a phone, and the row's
+ * primary action (Delete / Edit / Details) used to sit off-screen at the far
+ * right; the last column now stays in view while the rest scrolls beneath it.
+ */
+.admin-table--actions th:last-child,
+.admin-table--actions td:last-child {
+  position: sticky;
+  right: 0;
+  background: var(--surface-1);
+  box-shadow: -10px 0 12px -12px rgba(0, 0, 0, 0.45);
+}
+.admin-table--actions thead th:last-child { background: var(--surface-2); z-index: 2; }
+.admin-table--actions tbody tr:hover td:last-child { background: var(--surface-2); }
+
+/* Card list: the <md rendering of a data table (Users, Posts). */
+.admin-cards { list-style: none; margin: 0; padding: 0; }
+.admin-cards > li { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.admin-cards > li:last-child { border-bottom: 0; }
+.admin-cards .admin-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Preview of reported content that has since been removed. */
+.admin-preview[data-removed='true'] { border-style: dashed; }

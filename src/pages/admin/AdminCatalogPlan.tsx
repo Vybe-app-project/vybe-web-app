@@ -21,6 +21,7 @@ import {
   humanize,
   useOnline,
   useToast,
+  plural,
 } from '../../components/ui';
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Flame, Layers, Plus, Search, Trash, X } from '../../components/icons';
 import { AdminPageHeader, Pager } from './AdminLayout';
@@ -67,7 +68,6 @@ import {
   planSession,
   planSessionBody,
   planWeeks,
-  plural,
   rangeLabel,
   reslotEntry,
   seedableRecord,

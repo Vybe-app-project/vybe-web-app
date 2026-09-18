@@ -14,10 +14,12 @@ import {
   EmptyState,
   ErrorState,
   Input,
+  Menu,
   Modal,
   Select,
   Skeleton,
   cx,
+  useIsCompact,
   useToast,
 } from '../../components/ui';
 import { Shield, Plus, Trash, Edit, Lock, Users, Eye } from '../../components/icons';
@@ -57,6 +59,7 @@ export default function AdminAdmins() {
   const qc = useQueryClient();
   const toast = useToast();
   const { admin: currentAdmin, adminLogout } = useAuth();
+  const compact = useIsCompact();
 
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<Admin | null>(null);
@@ -231,12 +234,23 @@ export default function AdminAdmins() {
               {admins.map((a) => {
                 const isSelf = a._id === me?._id;
                 const name = a.fullName || 'Unnamed';
+                const startEdit = () => {
+                  setEditing(a);
+                  setEditForm({
+                    fullName: a.fullName ?? '',
+                    email: a.email ?? '',
+                    role: a.role ?? 'ADMIN',
+                  });
+                };
                 return (
-                  <li key={a._id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  // Three inline buttons squeezed the text to ~20 px on a phone
+                  // ("V." / "a.."). The text block is the one flexible track;
+                  // under md the actions collapse into an overflow menu.
+                  <li key={a._id} className="flex items-center gap-3 px-4 py-3">
                     <Avatar name={a.fullName || a.email} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate font-semibold text-text-1">{name}</span>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="min-w-0 truncate font-semibold text-text-1">{name}</span>
                         <Badge tone={a.role === 'SUPER_ADMIN' ? 'warning' : 'neutral'} size="sm">
                           {roleLabel(a.role)}
                         </Badge>
@@ -244,7 +258,25 @@ export default function AdminAdmins() {
                       </div>
                       <div className="truncate text-xs text-text-2">{a.email}</div>
                     </div>
-                    <div className="flex gap-1">
+                    {compact ? (
+                      <Menu
+                        label={`Actions for ${name}`}
+                        items={[
+                          { key: 'view', label: 'View', icon: <Eye size={16} />, onSelect: () => setViewingId(a._id) },
+                          { key: 'edit', label: 'Edit', icon: <Edit size={16} />, onSelect: startEdit },
+                          {
+                            key: 'remove',
+                            label: 'Remove',
+                            icon: <Trash size={16} />,
+                            danger: true,
+                            disabled: isSelf,
+                            description: isSelf ? 'You cannot remove your own account' : undefined,
+                            onSelect: () => setDeleting(a),
+                          },
+                        ]}
+                      />
+                    ) : (
+                    <div className="flex shrink-0 gap-1">
                       <Button variant="ghost" size="sm" icon={<Eye size={16} />} onClick={() => setViewingId(a._id)} aria-label={`View ${name}`}>
                         View
                       </Button>
@@ -253,14 +285,7 @@ export default function AdminAdmins() {
                         size="sm"
                         icon={<Edit size={16} />}
                         aria-label={`Edit ${name}`}
-                        onClick={() => {
-                          setEditing(a);
-                          setEditForm({
-                            fullName: a.fullName ?? '',
-                            email: a.email ?? '',
-                            role: a.role ?? 'ADMIN',
-                          });
-                        }}
+                        onClick={startEdit}
                       >
                         Edit
                       </Button>
@@ -276,6 +301,7 @@ export default function AdminAdmins() {
                         Remove
                       </Button>
                     </div>
+                    )}
                   </li>
                 );
               })}

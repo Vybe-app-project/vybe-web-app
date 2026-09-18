@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 import { adminApi } from '../../lib/api';
 import {
+  Avatar,
   Badge,
   Button,
   Card,
@@ -12,10 +14,11 @@ import {
   Skeleton,
   Tabs,
   cx,
+  plural,
   useToast,
 } from '../../components/ui';
 import { LifeBuoy, Check, Refresh, Trash, Mail } from '../../components/icons';
-import { AdminPageHeader, Pager } from './AdminLayout';
+import { AdminPageHeader, Pager, Stamp } from './AdminLayout';
 
 type SupportStatus = 'open' | 'resolved';
 
@@ -28,6 +31,8 @@ type SupportMessage = {
   status?: SupportStatus;
   createdAt?: string;
   resolvedAt?: string | null;
+  /** The account this message belongs to (by session, or by registered email), when there is one. */
+  member?: { _id?: string; username?: string; fullName?: string; avatar?: string } | null;
 };
 
 type SupportResponse = {
@@ -99,7 +104,7 @@ export default function AdminSupport() {
       <AdminPageHeader
         title="Support inbox"
         subtitle="Contact-form submissions from members and visitors. Reply by email, then mark the thread resolved."
-        meta={<Badge tone="neutral"><span className="tabular">{total.toLocaleString()}</span> messages</Badge>}
+        meta={<Badge tone="neutral"><span className="tabular">{plural(total, 'message')}</span></Badge>}
       />
 
       <Tabs
@@ -173,7 +178,20 @@ export default function AdminSupport() {
                     <Badge tone={resolved ? 'success' : 'warning'} dot>
                       {resolved ? 'Resolved' : 'Open'}
                     </Badge>
-                    {m.userId ? <Badge tone="info">Member</Badge> : <Badge tone="neutral">Guest</Badge>}
+                    {m.member || m.userId ? (
+                      <Link
+                        to={`/admin/users?search=${encodeURIComponent(m.member?.username || m.email || '')}`}
+                        className="inline-flex min-h-6 items-center rounded-xs focus-visible:outline-2"
+                        aria-label={`Open member ${m.member?.username ? `@${m.member.username}` : m.email || ''} in Users`}
+                      >
+                        <Badge tone="info" className="gap-1.5">
+                          <Avatar src={m.member?.avatar} name={m.member?.fullName || m.member?.username || m.fullName} size={16} />
+                          Member{m.member?.username ? ` · @${m.member.username}` : ''}
+                        </Badge>
+                      </Link>
+                    ) : (
+                      <Badge tone="neutral">Guest</Badge>
+                    )}
                   </div>
                 </div>
 
@@ -185,15 +203,13 @@ export default function AdminSupport() {
                   <p className="tabular text-xs text-text-2">
                     {m.createdAt ? (
                       <>
-                        <time dateTime={m.createdAt}>{format(new Date(m.createdAt), 'MMM d, yyyy HH:mm')}</time>
+                        <Stamp iso={m.createdAt} />
                         {' '}({formatDistanceToNow(new Date(m.createdAt), { addSuffix: true })})
                       </>
                     ) : (
                       'Received date unknown'
                     )}
-                    {resolved && m.resolvedAt
-                      ? `, resolved ${format(new Date(m.resolvedAt), 'MMM d, yyyy')}`
-                      : ''}
+                    {resolved && m.resolvedAt ? <>, resolved <Stamp iso={m.resolvedAt} dateOnly /></> : null}
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
@@ -236,7 +252,7 @@ export default function AdminSupport() {
           busy={query.isFetching}
           onPrev={() => setPage((n) => Math.max(1, n - 1))}
           onNext={() => setPage((n) => Math.min(totalPages, n + 1))}
-          label={`${total.toLocaleString()} messages`}
+          label={plural(total, 'message')}
         />
       ) : null}
 

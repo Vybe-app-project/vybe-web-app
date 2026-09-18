@@ -19,6 +19,7 @@ import {
   humanize,
   useOnline,
   useToast,
+  plural,
 } from '../../components/ui';
 import { ArrowDown, ArrowUp, ArrowLeft, Check, Dumbbell, Plus, Trash } from '../../components/icons';
 import { AdminPageHeader } from './AdminLayout';
@@ -50,7 +51,6 @@ import {
   isMissingRecordError,
   isObjectId,
   newExerciseDraft,
-  plural,
   seedableRecord,
   validateWorkoutDraft,
   workoutSession,

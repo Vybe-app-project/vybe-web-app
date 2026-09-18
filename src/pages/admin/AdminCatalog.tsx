@@ -16,6 +16,7 @@ import {
   Tabs,
   cx,
   useToast,
+  plural,
 } from '../../components/ui';
 import { Dumbbell, Edit, Layers, Plus, Search, Trash, X } from '../../components/icons';
 import { AdminPageHeader, Pager } from './AdminLayout';
@@ -38,7 +39,6 @@ import {
   pageCount,
   parseListState,
   planEditorPath,
-  plural,
   rangeLabel,
   workoutEditorPath,
   type CatalogListState,

@@ -66,6 +66,8 @@ const ACRONYMS: Record<string, string> = {
 };
 
 /** `strength_training` → "Strength training", `hiit` → "HIIT". */
+export { plural, fmtStamp, isoStamp, ensureSentence } from '../lib/format';
+
 export function humanize(value?: string | null): string {
   if (!value) return '';
   const words = String(value)
