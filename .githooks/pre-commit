@@ -28,7 +28,7 @@ if ! command -v node >/dev/null 2>&1; then
   # Fail closed. Node is required to work on this repository at all, so a
   # missing node means a broken environment, not a reason to skip the check.
   echo "pre-commit: node not found, cannot run the supply-chain scan." >&2
-  echo "Install Node 20 or bypass explicitly with --no-verify." >&2
+  echo "Install the Node 24 LTS version in .node-version; do not skip this scan." >&2
   exit 1
 fi
 

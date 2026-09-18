@@ -52,6 +52,21 @@ printf -v quoted_commit '%q' "$commit_sha"
 printf -v quoted_release_root '%q' "$release_root"
 printf -v quoted_health_url '%q' "$health_url"
 
+# Capture the release base before uploading; the remote transaction checks it
+# again under the deployment lock so another release cannot be overwritten.
+expected_current="$(ssh "$VYBE_OVH_HOST" \
+  "if test -L $quoted_release_root/current; then basename \"\$(readlink $quoted_release_root/current)\"; elif test -e $quoted_release_root/current; then echo 'current release is not a symlink' >&2; exit 1; else printf 'none\n'; fi")"
+if [[ "$expected_current" != "none" && ! "$expected_current" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "could not identify the current production release" >&2
+  exit 1
+fi
+if [[ "$expected_current" != "none" ]] \
+  && ! git merge-base --is-ancestor "$expected_current" "$commit_sha"; then
+  echo "release source does not contain current production commit $expected_current; integrate it first, or use the explicit rollback command" >&2
+  exit 1
+fi
+printf -v quoted_expected_current '%q' "$expected_current"
+
 # The remote steps need root: the incoming directory lives under /opt and the
 # release root under /srv, and deploy-web-remote.sh refuses to run otherwise.
 # The SSH user is an ordinary account with passwordless sudo, so every remote
@@ -67,7 +82,7 @@ scp -q "$archive" "$VYBE_OVH_HOST:$remote_archive"
 # Every interpolated remote value is printf-%q escaped above.
 # shellcheck disable=SC2029
 ssh "$VYBE_OVH_HOST" \
-  "sudo -n env VYBE_WEB_RELEASE_ROOT=$quoted_release_root VYBE_WEB_HEALTH_URL=$quoted_health_url bash -s -- $quoted_archive $quoted_checksum $quoted_commit" \
+  "sudo -n env VYBE_WEB_RELEASE_ROOT=$quoted_release_root VYBE_WEB_HEALTH_URL=$quoted_health_url bash -s -- $quoted_archive $quoted_checksum $quoted_commit $quoted_expected_current" \
   <"$repo_root/scripts/deploy-web-remote.sh"
 
 echo "release=$commit_sha sha256=$checksum"

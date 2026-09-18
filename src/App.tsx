@@ -4,7 +4,7 @@ import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-do
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
-import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
+import { Button, ErrorState, FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth } from './lib/auth';
 
 /**
@@ -66,28 +66,48 @@ const AdminCatalog = lazy(() => import('./pages/admin/AdminCatalog'));
 const AdminCatalogWorkout = lazy(() => import('./pages/admin/AdminCatalogWorkout'));
 const AdminCatalogPlan = lazy(() => import('./pages/admin/AdminCatalogPlan'));
 
+function SessionUnavailable({ administrator = false }: { administrator?: boolean }) {
+  const { bootstrap, bootstrapAdmin, bootstrapError, adminBootstrapError, logout, adminLogout } = useAuth();
+  return (
+    <PublicShell title="Unable to verify your sign-in" subtitle="No need to enter your password again while Vybe reconnects.">
+      <ErrorState
+        title="Connection interrupted"
+        message={(administrator ? adminBootstrapError : bootstrapError) ?? undefined}
+        onRetry={administrator ? bootstrapAdmin : bootstrap}
+      />
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+        <Button variant="ghost" onClick={administrator ? adminLogout : logout}>Sign out instead</Button>
+        <a href="/support" className="text-sm text-brand-text hover:underline">Contact support</a>
+      </div>
+    </PublicShell>
+  );
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, bootstrapError } = useAuth();
   const location = useLocation();
   if (loading) return <FullPageSpinner />;
+  if (bootstrapError) return <SessionUnavailable />;
   // Preserve the attempted destination so login can bounce the user back.
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
   return <>{children}</>;
 }
 
 function RequireAdmin({ children }: { children: React.ReactNode }) {
-  const { admin, adminLoading, bootstrapAdmin } = useAuth();
+  const { admin, adminLoading, adminBootstrapError, bootstrapAdmin } = useAuth();
   useEffect(() => { void bootstrapAdmin(); }, [bootstrapAdmin]);
   if (adminLoading) return <FullPageSpinner />;
+  if (adminBootstrapError) return <SessionUnavailable administrator />;
   if (!admin) return <Navigate to="/admin/login" replace />;
   return <>{children}</>;
 }
 
 /** Signed-in users skip auth pages; honour the `from` location RequireAuth stored. */
 function GuestOnly({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, bootstrapError } = useAuth();
   const location = useLocation();
   if (loading) return <FullPageSpinner />;
+  if (bootstrapError) return <SessionUnavailable />;
   if (user) {
     const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
     const target = from?.pathname && from.pathname !== '/login' ? `${from.pathname}${from.search ?? ''}` : '/';
