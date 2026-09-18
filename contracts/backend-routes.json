@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "backendRevision": "758b82509771c7709a5fa1e91d95861b0222c59a",
+  "backendRevision": "b2a21d088d46741572898d3da62daca70048a07e",
   "routes": [
     {
       "method": "GET",
@@ -783,1558 +783,1564 @@
       "order": 129
     },
     {
+      "method": "PATCH",
+      "path": "/api/admin/users/:userId/verification",
+      "file": "routes/admin.js",
+      "order": 130
+    },
+    {
       "method": "DELETE",
       "path": "/api/admin/users/:userId",
       "file": "routes/admin.js",
-      "order": 130
+      "order": 131
     },
     {
       "method": "GET",
       "path": "/api/admin/posts",
       "file": "routes/admin.js",
-      "order": 131
+      "order": 132
     },
     {
       "method": "DELETE",
       "path": "/api/admin/posts/:postId",
       "file": "routes/admin.js",
-      "order": 132
+      "order": 133
     },
     {
       "method": "GET",
       "path": "/api/admin/analytics",
       "file": "routes/admin.js",
-      "order": 133
+      "order": 134
     },
     {
       "method": "GET",
       "path": "/api/admin/reports",
       "file": "routes/admin.js",
-      "order": 134
+      "order": 135
     },
     {
       "method": "PATCH",
       "path": "/api/admin/reports/:reportId",
       "file": "routes/admin.js",
-      "order": 135
+      "order": 136
     },
     {
       "method": "GET",
       "path": "/api/admin/support",
       "file": "routes/admin.js",
-      "order": 136
-    },
-    {
-      "method": "PATCH",
-      "path": "/api/admin/support/:messageId",
-      "file": "routes/admin.js",
       "order": 137
     },
     {
-      "method": "DELETE",
+      "method": "PATCH",
       "path": "/api/admin/support/:messageId",
       "file": "routes/admin.js",
       "order": 138
     },
     {
+      "method": "DELETE",
+      "path": "/api/admin/support/:messageId",
+      "file": "routes/admin.js",
+      "order": 139
+    },
+    {
       "method": "GET",
       "path": "/api/admin/trainer-applications",
       "file": "routes/admin.js",
-      "order": 139
+      "order": 140
     },
     {
       "method": "PATCH",
       "path": "/api/admin/trainer-applications/:userId",
       "file": "routes/admin.js",
-      "order": 140
+      "order": 141
     },
     {
       "method": "GET",
       "path": "/api/admin/more-analytics",
       "file": "routes/admin.js",
-      "order": 141
-    },
-    {
-      "method": "GET",
-      "path": "/api/users/me",
-      "file": "routes/user.js",
       "order": 142
     },
     {
       "method": "GET",
-      "path": "/api/users/all/search",
+      "path": "/api/users/me",
       "file": "routes/user.js",
       "order": 143
     },
     {
       "method": "GET",
-      "path": "/api/users/random/all/quick/chat",
+      "path": "/api/users/all/search",
       "file": "routes/user.js",
       "order": 144
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/random/all/quick/chat",
+      "file": "routes/user.js",
+      "order": 145
     },
     {
       "method": "POST",
       "path": "/api/users/follow/:userId",
       "file": "routes/user.js",
-      "order": 145
+      "order": 146
     },
     {
       "method": "GET",
       "path": "/api/users/follow-requests",
       "file": "routes/user.js",
-      "order": 146
+      "order": 147
     },
     {
       "method": "POST",
       "path": "/api/users/follow-requests/:requestId/accept",
       "file": "routes/user.js",
-      "order": 147
+      "order": 148
     },
     {
       "method": "DELETE",
       "path": "/api/users/follow-requests/:requestId",
       "file": "routes/user.js",
-      "order": 148
-    },
-    {
-      "method": "PUT",
-      "path": "/api/users/me",
-      "file": "routes/user.js",
       "order": 149
     },
     {
       "method": "PUT",
-      "path": "/api/users/profile-picture",
+      "path": "/api/users/me",
       "file": "routes/user.js",
       "order": 150
     },
     {
       "method": "PUT",
-      "path": "/api/users/push-token",
+      "path": "/api/users/profile-picture",
       "file": "routes/user.js",
       "order": 151
     },
     {
-      "method": "DELETE",
+      "method": "PUT",
       "path": "/api/users/push-token",
       "file": "routes/user.js",
       "order": 152
     },
     {
+      "method": "DELETE",
+      "path": "/api/users/push-token",
+      "file": "routes/user.js",
+      "order": 153
+    },
+    {
       "method": "PUT",
       "path": "/api/users/password",
       "file": "routes/user.js",
-      "order": 153
+      "order": 154
     },
     {
       "method": "GET",
       "path": "/api/users/activity",
       "file": "routes/user.js",
-      "order": 154
+      "order": 155
     },
     {
       "method": "POST",
       "path": "/api/users/block",
       "file": "routes/user.js",
-      "order": 155
+      "order": 156
     },
     {
       "method": "POST",
       "path": "/api/users/unblock",
       "file": "routes/user.js",
-      "order": 156
+      "order": 157
     },
     {
       "method": "GET",
       "path": "/api/users/blocked",
       "file": "routes/user.js",
-      "order": 157
+      "order": 158
     },
     {
       "method": "POST",
       "path": "/api/users/report",
       "file": "routes/user.js",
-      "order": 158
+      "order": 159
     },
     {
       "method": "PUT",
       "path": "/api/users/settings",
       "file": "routes/user.js",
-      "order": 159
+      "order": 160
     },
     {
       "method": "GET",
       "path": "/api/users/coaches",
       "file": "routes/user.js",
-      "order": 160
+      "order": 161
     },
     {
       "method": "DELETE",
       "path": "/api/users/me",
       "file": "routes/user.js",
-      "order": 161
-    },
-    {
-      "method": "GET",
-      "path": "/api/users/email-preferences",
-      "file": "routes/user.js",
       "order": 162
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/users/email-preferences",
       "file": "routes/user.js",
       "order": 163
     },
     {
-      "method": "GET",
-      "path": "/api/users/badges",
+      "method": "PUT",
+      "path": "/api/users/email-preferences",
       "file": "routes/user.js",
       "order": 164
     },
     {
       "method": "GET",
-      "path": "/api/users/streak",
+      "path": "/api/users/badges",
       "file": "routes/user.js",
       "order": 165
     },
     {
-      "method": "POST",
+      "method": "GET",
       "path": "/api/users/streak",
       "file": "routes/user.js",
       "order": 166
     },
     {
-      "method": "GET",
-      "path": "/api/users/leaderboard",
+      "method": "POST",
+      "path": "/api/users/streak",
       "file": "routes/user.js",
       "order": 167
     },
     {
       "method": "GET",
-      "path": "/api/users/statistics/conn/all/social/populate/:profileUserId/connections",
+      "path": "/api/users/leaderboard",
       "file": "routes/user.js",
       "order": 168
     },
     {
       "method": "GET",
-      "path": "/api/users/coaches/feed/filter/all",
+      "path": "/api/users/statistics/conn/all/social/populate/:profileUserId/connections",
       "file": "routes/user.js",
       "order": 169
     },
     {
       "method": "GET",
-      "path": "/api/users/:id",
+      "path": "/api/users/coaches/feed/filter/all",
       "file": "routes/user.js",
       "order": 170
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/:id",
+      "file": "routes/user.js",
+      "order": 171
     },
     {
       "method": "POST",
       "path": "/api/support/message",
       "file": "routes/support.js",
-      "order": 171
+      "order": 172
     },
     {
       "method": "POST",
       "path": "/api/reports",
       "file": "routes/report.js",
-      "order": 172
+      "order": 173
     },
     {
       "method": "POST",
       "path": "/api/messages/send",
       "file": "routes/message.js",
-      "order": 173
+      "order": 174
     },
     {
       "method": "POST",
       "path": "/api/messages/create-group",
       "file": "routes/message.js",
-      "order": 174
+      "order": 175
     },
     {
       "method": "POST",
       "path": "/api/messages/share-post",
       "file": "routes/message.js",
-      "order": 175
+      "order": 176
     },
     {
       "method": "GET",
       "path": "/api/messages/conversation/:userId",
       "file": "routes/message.js",
-      "order": 176
+      "order": 177
     },
     {
       "method": "GET",
       "path": "/api/messages/rooms/:roomId",
       "file": "routes/message.js",
-      "order": 177
+      "order": 178
     },
     {
       "method": "PUT",
       "path": "/api/messages/read",
       "file": "routes/message.js",
-      "order": 178
+      "order": 179
     },
     {
       "method": "GET",
       "path": "/api/messages/unread",
       "file": "routes/message.js",
-      "order": 179
+      "order": 180
     },
     {
       "method": "GET",
       "path": "/api/messages/me/all/recent/rooms",
       "file": "routes/message.js",
-      "order": 180
+      "order": 181
     },
     {
       "method": "PUT",
       "path": "/api/messages/rooms/:roomId/status",
       "file": "routes/message.js",
-      "order": 181
+      "order": 182
     },
     {
       "method": "PATCH",
       "path": "/api/messages/rooms/:roomId",
       "file": "routes/message.js",
-      "order": 182
+      "order": 183
     },
     {
       "method": "POST",
       "path": "/api/messages/rooms/:roomId/leave",
       "file": "routes/message.js",
-      "order": 183
+      "order": 184
     },
     {
       "method": "POST",
       "path": "/api/messages/rooms/:roomId/participants",
       "file": "routes/message.js",
-      "order": 184
+      "order": 185
     },
     {
       "method": "DELETE",
       "path": "/api/messages/:messageId",
       "file": "routes/message.js",
-      "order": 185
+      "order": 186
     },
     {
       "method": "GET",
       "path": "/api/messages/me/all/chats/rooms/unread/count",
       "file": "routes/message.js",
-      "order": 186
+      "order": 187
     },
     {
       "method": "GET",
       "path": "/api/chatStats/chatroom/:chatRoomId/medias",
       "file": "routes/chatStats.js",
-      "order": 187
+      "order": 188
     },
     {
       "method": "GET",
       "path": "/api/rooms/:roomId",
       "file": "routes/rooms.js",
-      "order": 188
+      "order": 189
     },
     {
       "method": "GET",
       "path": "/api/search",
       "file": "routes/search.js",
-      "order": 189
+      "order": 190
     },
     {
       "method": "GET",
       "path": "/api/search/suggestions",
       "file": "routes/search.js",
-      "order": 190
-    },
-    {
-      "method": "GET",
-      "path": "/api/search/recent",
-      "file": "routes/search.js",
       "order": 191
     },
     {
-      "method": "DELETE",
+      "method": "GET",
       "path": "/api/search/recent",
       "file": "routes/search.js",
       "order": 192
     },
     {
-      "method": "GET",
-      "path": "/api/search/trending",
+      "method": "DELETE",
+      "path": "/api/search/recent",
       "file": "routes/search.js",
       "order": 193
     },
     {
       "method": "GET",
+      "path": "/api/search/trending",
+      "file": "routes/search.js",
+      "order": 194
+    },
+    {
+      "method": "GET",
       "path": "/api/share/preview/u/:id",
       "file": "routes/share.js",
-      "order": 194
+      "order": 195
     },
     {
       "method": "GET",
       "path": "/api/share/preview/p/:id",
       "file": "routes/share.js",
-      "order": 195
+      "order": 196
     },
     {
       "method": "POST",
       "path": "/api/admins/login",
       "file": "routes/admins.js",
-      "order": 196
+      "order": 197
     },
     {
       "method": "POST",
       "path": "/api/admins/request-reset",
       "file": "routes/admins.js",
-      "order": 197
+      "order": 198
     },
     {
       "method": "POST",
       "path": "/api/admins/reset-password",
       "file": "routes/admins.js",
-      "order": 198
+      "order": 199
     },
     {
       "method": "POST",
       "path": "/api/admins/logout",
       "file": "routes/admins.js",
-      "order": 199
+      "order": 200
     },
     {
       "method": "PUT",
       "path": "/api/admins/change-password",
       "file": "routes/admins.js",
-      "order": 200
+      "order": 201
     },
     {
       "method": "POST",
       "path": "/api/admins/add",
       "file": "routes/admins.js",
-      "order": 201
+      "order": 202
     },
     {
       "method": "GET",
       "path": "/api/admins",
       "file": "routes/admins.js",
-      "order": 202
+      "order": 203
     },
     {
       "method": "GET",
       "path": "/api/admins/me",
       "file": "routes/admins.js",
-      "order": 203
+      "order": 204
     },
     {
       "method": "GET",
       "path": "/api/admins/audit-log",
       "file": "routes/admins.js",
-      "order": 204
-    },
-    {
-      "method": "GET",
-      "path": "/api/admins/:id",
-      "file": "routes/admins.js",
       "order": 205
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/admins/:id",
       "file": "routes/admins.js",
       "order": 206
     },
     {
-      "method": "DELETE",
+      "method": "PUT",
       "path": "/api/admins/:id",
       "file": "routes/admins.js",
       "order": 207
     },
     {
+      "method": "DELETE",
+      "path": "/api/admins/:id",
+      "file": "routes/admins.js",
+      "order": 208
+    },
+    {
       "method": "GET",
       "path": "/api/searching/suggest",
       "file": "routes/searching.js",
-      "order": 208
+      "order": 209
     },
     {
       "method": "POST",
       "path": "/api/searching/exclude/:targetId",
       "file": "routes/searching.js",
-      "order": 209
+      "order": 210
     },
     {
       "method": "GET",
       "path": "/api/searching/search/all",
       "file": "routes/searching.js",
-      "order": 210
+      "order": 211
     },
     {
       "method": "POST",
       "path": "/api/gyms/community/join",
       "file": "routes/gymCommunity.js",
-      "order": 211
+      "order": 212
     },
     {
       "method": "GET",
       "path": "/api/gyms/community/:gymId/membership-requests",
       "file": "routes/gymCommunity.js",
-      "order": 212
+      "order": 213
     },
     {
       "method": "POST",
       "path": "/api/gyms/community/:gymId/membership-requests/:requestId/approve",
       "file": "routes/gymCommunity.js",
-      "order": 213
+      "order": 214
     },
     {
       "method": "DELETE",
       "path": "/api/gyms/community/:gymId/membership-requests/:requestId",
       "file": "routes/gymCommunity.js",
-      "order": 214
+      "order": 215
     },
     {
       "method": "PATCH",
       "path": "/api/gyms/community/:gymId/members/:userId/role",
       "file": "routes/gymCommunity.js",
-      "order": 215
+      "order": 216
     },
     {
       "method": "DELETE",
       "path": "/api/gyms/community/:gymId/members/:userId",
       "file": "routes/gymCommunity.js",
-      "order": 216
+      "order": 217
     },
     {
       "method": "DELETE",
       "path": "/api/gyms/community/delete/:id",
       "file": "routes/gymCommunity.js",
-      "order": 217
+      "order": 218
     },
     {
       "method": "DELETE",
       "path": "/api/gyms/community/:id",
       "file": "routes/gymCommunity.js",
-      "order": 218
+      "order": 219
     },
     {
       "method": "POST",
       "path": "/api/gyms/community/leave/:gymId",
       "file": "routes/gymCommunity.js",
-      "order": 219
+      "order": 220
     },
     {
       "method": "DELETE",
       "path": "/api/gyms/community/:gymId/membership",
       "file": "routes/gymCommunity.js",
-      "order": 220
+      "order": 221
     },
     {
       "method": "GET",
       "path": "/api/gyms/community/:gymId/members",
       "file": "routes/gymCommunity.js",
-      "order": 221
+      "order": 222
     },
     {
       "method": "GET",
       "path": "/api/gyms/community",
       "file": "routes/gymCommunity.js",
-      "order": 222
+      "order": 223
     },
     {
       "method": "GET",
       "path": "/api/gyms/community/my-communities",
       "file": "routes/gymCommunity.js",
-      "order": 223
+      "order": 224
     },
     {
       "method": "GET",
       "path": "/api/gyms/community/matching/exp/all/some/filtering/explore",
       "file": "routes/gymCommunity.js",
-      "order": 224
+      "order": 225
     },
     {
       "method": "GET",
       "path": "/api/gyms/community/explore",
       "file": "routes/gymCommunity.js",
-      "order": 225
+      "order": 226
     },
     {
       "method": "GET",
       "path": "/api/gyms/community/:gymId",
       "file": "routes/gymCommunity.js",
-      "order": 226
-    },
-    {
-      "method": "PUT",
-      "path": "/api/gyms/community/place/:placeId",
-      "file": "routes/gymCommunity.js",
       "order": 227
     },
     {
-      "method": "GET",
+      "method": "PUT",
       "path": "/api/gyms/community/place/:placeId",
       "file": "routes/gymCommunity.js",
       "order": 228
     },
     {
       "method": "GET",
-      "path": "/api/gyms/community/gym/connections/all/:gymId/connections",
+      "path": "/api/gyms/community/place/:placeId",
       "file": "routes/gymCommunity.js",
       "order": 229
     },
     {
       "method": "GET",
-      "path": "/api/gyms/community/:gymId/connections",
+      "path": "/api/gyms/community/gym/connections/all/:gymId/connections",
       "file": "routes/gymCommunity.js",
       "order": 230
+    },
+    {
+      "method": "GET",
+      "path": "/api/gyms/community/:gymId/connections",
+      "file": "routes/gymCommunity.js",
+      "order": 231
     },
     {
       "method": "POST",
       "path": "/api/gyms/add",
       "file": "routes/gym.js",
-      "order": 231
+      "order": 232
     },
     {
       "method": "GET",
       "path": "/api/gyms",
       "file": "routes/gym.js",
-      "order": 232
+      "order": 233
     },
     {
       "method": "GET",
       "path": "/api/gyms/google-places",
       "file": "routes/gym.js",
-      "order": 233
+      "order": 234
     },
     {
       "method": "GET",
       "path": "/api/gyms/place-search",
       "file": "routes/gym.js",
-      "order": 234
+      "order": 235
     },
     {
       "method": "GET",
       "path": "/api/gyms/reverse-geocode",
       "file": "routes/gym.js",
-      "order": 235
+      "order": 236
     },
     {
       "method": "GET",
       "path": "/api/gyms/place-photo",
       "file": "routes/gym.js",
-      "order": 236
+      "order": 237
     },
     {
       "method": "GET",
       "path": "/api/gyms/nearby",
       "file": "routes/gym.js",
-      "order": 237
+      "order": 238
     },
     {
       "method": "GET",
       "path": "/api/gyms/:gymId",
       "file": "routes/gym.js",
-      "order": 238
-    },
-    {
-      "method": "POST",
-      "path": "/api/gyms/:gymId/review",
-      "file": "routes/gym.js",
       "order": 239
     },
     {
-      "method": "DELETE",
+      "method": "POST",
       "path": "/api/gyms/:gymId/review",
       "file": "routes/gym.js",
       "order": 240
     },
     {
-      "method": "GET",
-      "path": "/api/gyms/:gymId/reviews",
+      "method": "DELETE",
+      "path": "/api/gyms/:gymId/review",
       "file": "routes/gym.js",
       "order": 241
     },
     {
       "method": "GET",
-      "path": "/api/achievements",
-      "file": "routes/achievements.js",
+      "path": "/api/gyms/:gymId/reviews",
+      "file": "routes/gym.js",
       "order": 242
     },
     {
       "method": "GET",
-      "path": "/api/achievements/user",
+      "path": "/api/achievements",
       "file": "routes/achievements.js",
       "order": 243
     },
     {
       "method": "GET",
-      "path": "/api/achievements/category/:category",
+      "path": "/api/achievements/user",
       "file": "routes/achievements.js",
       "order": 244
     },
     {
       "method": "GET",
-      "path": "/api/achievements/rarity/:rarity",
+      "path": "/api/achievements/category/:category",
       "file": "routes/achievements.js",
       "order": 245
     },
     {
       "method": "GET",
-      "path": "/api/achievements/seasonal",
+      "path": "/api/achievements/rarity/:rarity",
       "file": "routes/achievements.js",
       "order": 246
     },
     {
       "method": "GET",
-      "path": "/api/achievements/hidden",
+      "path": "/api/achievements/seasonal",
       "file": "routes/achievements.js",
       "order": 247
     },
     {
       "method": "GET",
-      "path": "/api/achievements/:achievementId",
+      "path": "/api/achievements/hidden",
       "file": "routes/achievements.js",
       "order": 248
+    },
+    {
+      "method": "GET",
+      "path": "/api/achievements/:achievementId",
+      "file": "routes/achievements.js",
+      "order": 249
     },
     {
       "method": "POST",
       "path": "/api/achievements/:achievementId/claim",
       "file": "routes/achievements.js",
-      "order": 249
+      "order": 250
     },
     {
       "method": "GET",
       "path": "/api/achievements/:achievementId/progress",
       "file": "routes/achievements.js",
-      "order": 250
-    },
-    {
-      "method": "GET",
-      "path": "/api/challenges",
-      "file": "routes/challenges.js",
       "order": 251
     },
     {
-      "method": "POST",
+      "method": "GET",
       "path": "/api/challenges",
       "file": "routes/challenges.js",
       "order": 252
     },
     {
-      "method": "GET",
-      "path": "/api/challenges/search",
+      "method": "POST",
+      "path": "/api/challenges",
       "file": "routes/challenges.js",
       "order": 253
     },
     {
       "method": "GET",
-      "path": "/api/challenges/user",
+      "path": "/api/challenges/search",
       "file": "routes/challenges.js",
       "order": 254
     },
     {
       "method": "GET",
-      "path": "/api/challenges/created",
+      "path": "/api/challenges/user",
       "file": "routes/challenges.js",
       "order": 255
     },
     {
       "method": "GET",
-      "path": "/api/challenges/:challengeId",
+      "path": "/api/challenges/created",
       "file": "routes/challenges.js",
       "order": 256
     },
     {
-      "method": "PATCH",
+      "method": "GET",
       "path": "/api/challenges/:challengeId",
       "file": "routes/challenges.js",
       "order": 257
     },
     {
-      "method": "DELETE",
+      "method": "PATCH",
       "path": "/api/challenges/:challengeId",
       "file": "routes/challenges.js",
       "order": 258
     },
     {
-      "method": "POST",
-      "path": "/api/challenges/:challengeId/join",
+      "method": "DELETE",
+      "path": "/api/challenges/:challengeId",
       "file": "routes/challenges.js",
       "order": 259
     },
     {
       "method": "POST",
-      "path": "/api/challenges/:challengeId/leave",
+      "path": "/api/challenges/:challengeId/join",
       "file": "routes/challenges.js",
       "order": 260
+    },
+    {
+      "method": "POST",
+      "path": "/api/challenges/:challengeId/leave",
+      "file": "routes/challenges.js",
+      "order": 261
     },
     {
       "method": "PUT",
       "path": "/api/challenges/:challengeId/progress",
       "file": "routes/challenges.js",
-      "order": 261
+      "order": 262
     },
     {
       "method": "POST",
       "path": "/api/challenges/:challengeId/auto-update",
       "file": "routes/challenges.js",
-      "order": 262
+      "order": 263
     },
     {
       "method": "GET",
       "path": "/api/challenges/:challengeId/leaderboard",
       "file": "routes/challenges.js",
-      "order": 263
+      "order": 264
     },
     {
       "method": "GET",
       "path": "/api/challenges/:challengeId/stats",
       "file": "routes/challenges.js",
-      "order": 264
+      "order": 265
     },
     {
       "method": "GET",
       "path": "/api/livestreams/capabilities",
       "file": "routes/livestreams.js",
-      "order": 265
+      "order": 266
     },
     {
       "method": "GET",
       "path": "/api/livestreams/mine",
       "file": "routes/livestreams.js",
-      "order": 266
+      "order": 267
     },
     {
       "method": "GET",
       "path": "/api/livestreams/scheduled",
       "file": "routes/livestreams.js",
-      "order": 267
+      "order": 268
     },
     {
       "method": "GET",
       "path": "/api/livestreams/featured",
       "file": "routes/livestreams.js",
-      "order": 268
+      "order": 269
     },
     {
       "method": "GET",
       "path": "/api/livestreams/category/:category",
       "file": "routes/livestreams.js",
-      "order": 269
-    },
-    {
-      "method": "GET",
-      "path": "/api/livestreams",
-      "file": "routes/livestreams.js",
       "order": 270
     },
     {
-      "method": "POST",
+      "method": "GET",
       "path": "/api/livestreams",
       "file": "routes/livestreams.js",
       "order": 271
     },
     {
-      "method": "GET",
-      "path": "/api/livestreams/:streamId",
+      "method": "POST",
+      "path": "/api/livestreams",
       "file": "routes/livestreams.js",
       "order": 272
     },
     {
-      "method": "PATCH",
+      "method": "GET",
       "path": "/api/livestreams/:streamId",
       "file": "routes/livestreams.js",
       "order": 273
     },
     {
-      "method": "PUT",
-      "path": "/api/livestreams/:streamId/start",
+      "method": "PATCH",
+      "path": "/api/livestreams/:streamId",
       "file": "routes/livestreams.js",
       "order": 274
     },
     {
       "method": "PUT",
-      "path": "/api/livestreams/:streamId/end",
+      "path": "/api/livestreams/:streamId/start",
       "file": "routes/livestreams.js",
       "order": 275
     },
     {
       "method": "PUT",
-      "path": "/api/livestreams/:streamId/cancel",
+      "path": "/api/livestreams/:streamId/end",
       "file": "routes/livestreams.js",
       "order": 276
     },
     {
-      "method": "POST",
-      "path": "/api/livestreams/:streamId/join",
+      "method": "PUT",
+      "path": "/api/livestreams/:streamId/cancel",
       "file": "routes/livestreams.js",
       "order": 277
     },
     {
       "method": "POST",
-      "path": "/api/livestreams/:streamId/leave",
+      "path": "/api/livestreams/:streamId/join",
       "file": "routes/livestreams.js",
       "order": 278
     },
     {
       "method": "POST",
-      "path": "/api/livestreams/:streamId/like",
+      "path": "/api/livestreams/:streamId/leave",
       "file": "routes/livestreams.js",
       "order": 279
     },
     {
-      "method": "GET",
-      "path": "/api/livestreams/:streamId/comments",
+      "method": "POST",
+      "path": "/api/livestreams/:streamId/like",
       "file": "routes/livestreams.js",
       "order": 280
     },
     {
-      "method": "POST",
+      "method": "GET",
       "path": "/api/livestreams/:streamId/comments",
       "file": "routes/livestreams.js",
       "order": 281
     },
     {
-      "method": "DELETE",
-      "path": "/api/livestreams/:streamId/comments/:commentId",
+      "method": "POST",
+      "path": "/api/livestreams/:streamId/comments",
       "file": "routes/livestreams.js",
       "order": 282
     },
     {
-      "method": "POST",
-      "path": "/api/livestreams/:streamId/comment",
+      "method": "DELETE",
+      "path": "/api/livestreams/:streamId/comments/:commentId",
       "file": "routes/livestreams.js",
       "order": 283
     },
     {
       "method": "POST",
-      "path": "/api/livestreams/:streamId/gift",
+      "path": "/api/livestreams/:streamId/comment",
       "file": "routes/livestreams.js",
       "order": 284
     },
     {
       "method": "POST",
-      "path": "/api/livestreams/:streamId/moderators",
+      "path": "/api/livestreams/:streamId/gift",
       "file": "routes/livestreams.js",
       "order": 285
+    },
+    {
+      "method": "POST",
+      "path": "/api/livestreams/:streamId/moderators",
+      "file": "routes/livestreams.js",
+      "order": 286
     },
     {
       "method": "DELETE",
       "path": "/api/livestreams/:streamId/moderators/:userId",
       "file": "routes/livestreams.js",
-      "order": 286
+      "order": 287
     },
     {
       "method": "POST",
       "path": "/api/livestreams/:streamId/viewers",
       "file": "routes/livestreams.js",
-      "order": 287
+      "order": 288
     },
     {
       "method": "DELETE",
       "path": "/api/livestreams/:streamId/viewers/:userId",
       "file": "routes/livestreams.js",
-      "order": 288
-    },
-    {
-      "method": "POST",
-      "path": "/api/livestreams/:streamId/ban/:userId",
-      "file": "routes/livestreams.js",
       "order": 289
     },
     {
-      "method": "DELETE",
+      "method": "POST",
       "path": "/api/livestreams/:streamId/ban/:userId",
       "file": "routes/livestreams.js",
       "order": 290
     },
     {
-      "method": "GET",
-      "path": "/api/story",
-      "file": "routes/stories.js",
+      "method": "DELETE",
+      "path": "/api/livestreams/:streamId/ban/:userId",
+      "file": "routes/livestreams.js",
       "order": 291
     },
     {
-      "method": "POST",
+      "method": "GET",
       "path": "/api/story",
       "file": "routes/stories.js",
       "order": 292
     },
     {
+      "method": "POST",
+      "path": "/api/story",
+      "file": "routes/stories.js",
+      "order": 293
+    },
+    {
       "method": "GET",
       "path": "/api/story/archive",
       "file": "routes/stories.js",
-      "order": 293
+      "order": 294
     },
     {
       "method": "POST",
       "path": "/api/story/discard-media",
       "file": "routes/stories.js",
-      "order": 294
+      "order": 295
     },
     {
       "method": "GET",
       "path": "/api/story/user/:userId",
       "file": "routes/stories.js",
-      "order": 295
+      "order": 296
     },
     {
       "method": "GET",
       "path": "/api/story/hashtag/:hashtag",
       "file": "routes/stories.js",
-      "order": 296
+      "order": 297
     },
     {
       "method": "GET",
       "path": "/api/story/highlights/:userId",
       "file": "routes/stories.js",
-      "order": 297
+      "order": 298
     },
     {
       "method": "POST",
       "path": "/api/story/highlights",
       "file": "routes/stories.js",
-      "order": 298
+      "order": 299
     },
     {
       "method": "GET",
       "path": "/api/story/highlights/:highlightId/detail",
       "file": "routes/stories.js",
-      "order": 299
+      "order": 300
     },
     {
       "method": "PATCH",
       "path": "/api/story/highlights/:highlightId",
       "file": "routes/stories.js",
-      "order": 300
+      "order": 301
     },
     {
       "method": "DELETE",
       "path": "/api/story/highlights/:highlightId",
       "file": "routes/stories.js",
-      "order": 301
+      "order": 302
     },
     {
       "method": "POST",
       "path": "/api/story/highlights/:highlightId/add-story",
       "file": "routes/stories.js",
-      "order": 302
+      "order": 303
     },
     {
       "method": "DELETE",
       "path": "/api/story/highlights/:highlightId/stories/:storyId",
       "file": "routes/stories.js",
-      "order": 303
+      "order": 304
     },
     {
       "method": "GET",
       "path": "/api/story/:storyId",
       "file": "routes/stories.js",
-      "order": 304
+      "order": 305
     },
     {
       "method": "GET",
       "path": "/api/story/:storyId/responses",
       "file": "routes/stories.js",
-      "order": 305
+      "order": 306
     },
     {
       "method": "PUT",
       "path": "/api/story/:storyId/view",
       "file": "routes/stories.js",
-      "order": 306
+      "order": 307
     },
     {
       "method": "POST",
       "path": "/api/story/:storyId/reaction",
       "file": "routes/stories.js",
-      "order": 307
+      "order": 308
     },
     {
       "method": "POST",
       "path": "/api/story/:storyId/reply",
       "file": "routes/stories.js",
-      "order": 308
+      "order": 309
     },
     {
       "method": "DELETE",
       "path": "/api/story/:storyId",
       "file": "routes/stories.js",
-      "order": 309
+      "order": 310
     },
     {
       "method": "POST",
       "path": "/api/onboarding",
       "file": "routes/onBoradingUser.js",
-      "order": 310
+      "order": 311
     },
     {
       "method": "GET",
       "path": "/api/onboarding/info",
       "file": "routes/onBoradingUser.js",
-      "order": 311
-    },
-    {
-      "method": "POST",
-      "path": "/api/food",
-      "file": "routes/food.js",
       "order": 312
     },
     {
-      "method": "GET",
+      "method": "POST",
       "path": "/api/food",
       "file": "routes/food.js",
       "order": 313
     },
     {
       "method": "GET",
-      "path": "/api/food/search",
+      "path": "/api/food",
       "file": "routes/food.js",
       "order": 314
     },
     {
       "method": "GET",
-      "path": "/api/food/:id",
+      "path": "/api/food/search",
       "file": "routes/food.js",
       "order": 315
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/food/:id",
       "file": "routes/food.js",
       "order": 316
     },
     {
-      "method": "DELETE",
+      "method": "PUT",
       "path": "/api/food/:id",
       "file": "routes/food.js",
       "order": 317
     },
     {
+      "method": "DELETE",
+      "path": "/api/food/:id",
+      "file": "routes/food.js",
+      "order": 318
+    },
+    {
       "method": "POST",
       "path": "/api/favorites/foods/:foodId",
       "file": "routes/favorites.js",
-      "order": 318
+      "order": 319
     },
     {
       "method": "GET",
       "path": "/api/favorites/foods",
       "file": "routes/favorites.js",
-      "order": 319
+      "order": 320
     },
     {
       "method": "POST",
       "path": "/api/favorites/meals/:mealId",
       "file": "routes/favorites.js",
-      "order": 320
+      "order": 321
     },
     {
       "method": "GET",
       "path": "/api/favorites/meals",
       "file": "routes/favorites.js",
-      "order": 321
+      "order": 322
     },
     {
       "method": "GET",
       "path": "/api/favorites/recent",
       "file": "routes/favorites.js",
-      "order": 322
-    },
-    {
-      "method": "POST",
-      "path": "/api/meal-templates",
-      "file": "routes/mealTemplate.js",
       "order": 323
     },
     {
-      "method": "GET",
+      "method": "POST",
       "path": "/api/meal-templates",
       "file": "routes/mealTemplate.js",
       "order": 324
     },
     {
       "method": "GET",
-      "path": "/api/meal-templates/:id",
+      "path": "/api/meal-templates",
       "file": "routes/mealTemplate.js",
       "order": 325
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/meal-templates/:id",
       "file": "routes/mealTemplate.js",
       "order": 326
     },
     {
-      "method": "DELETE",
+      "method": "PUT",
       "path": "/api/meal-templates/:id",
       "file": "routes/mealTemplate.js",
       "order": 327
     },
     {
-      "method": "POST",
-      "path": "/api/meal-templates/:id/log",
+      "method": "DELETE",
+      "path": "/api/meal-templates/:id",
       "file": "routes/mealTemplate.js",
       "order": 328
     },
     {
       "method": "POST",
-      "path": "/api/meal-templates/from-meals",
+      "path": "/api/meal-templates/:id/log",
       "file": "routes/mealTemplate.js",
       "order": 329
     },
     {
       "method": "POST",
-      "path": "/api/meal-templates/:id/share-profile",
+      "path": "/api/meal-templates/from-meals",
       "file": "routes/mealTemplate.js",
       "order": 330
     },
     {
       "method": "POST",
-      "path": "/api/meal-templates/:id/unshare-profile",
+      "path": "/api/meal-templates/:id/share-profile",
       "file": "routes/mealTemplate.js",
       "order": 331
     },
     {
       "method": "POST",
-      "path": "/api/meal-templates/:id/share-token",
+      "path": "/api/meal-templates/:id/unshare-profile",
       "file": "routes/mealTemplate.js",
       "order": 332
     },
     {
-      "method": "DELETE",
+      "method": "POST",
       "path": "/api/meal-templates/:id/share-token",
       "file": "routes/mealTemplate.js",
       "order": 333
     },
     {
-      "method": "GET",
-      "path": "/api/meal-templates/shared/:token",
+      "method": "DELETE",
+      "path": "/api/meal-templates/:id/share-token",
       "file": "routes/mealTemplate.js",
       "order": 334
     },
     {
-      "method": "POST",
-      "path": "/api/meal-templates/:id/share-friends",
+      "method": "GET",
+      "path": "/api/meal-templates/shared/:token",
       "file": "routes/mealTemplate.js",
       "order": 335
     },
     {
       "method": "POST",
-      "path": "/api/meal-templates/:id/like",
+      "path": "/api/meal-templates/:id/share-friends",
       "file": "routes/mealTemplate.js",
       "order": 336
     },
     {
       "method": "POST",
-      "path": "/api/meal-templates/:id/save",
+      "path": "/api/meal-templates/:id/like",
       "file": "routes/mealTemplate.js",
       "order": 337
     },
     {
       "method": "POST",
-      "path": "/api/meal-templates/:id/copy",
+      "path": "/api/meal-templates/:id/save",
       "file": "routes/mealTemplate.js",
       "order": 338
     },
     {
-      "method": "GET",
-      "path": "/api/meal-templates/feed/shared",
+      "method": "POST",
+      "path": "/api/meal-templates/:id/copy",
       "file": "routes/mealTemplate.js",
       "order": 339
     },
     {
       "method": "GET",
-      "path": "/api/meal-templates/feed/saved",
+      "path": "/api/meal-templates/feed/shared",
       "file": "routes/mealTemplate.js",
       "order": 340
     },
     {
       "method": "GET",
-      "path": "/api/meal-templates/user/:userId/shared",
+      "path": "/api/meal-templates/feed/saved",
       "file": "routes/mealTemplate.js",
       "order": 341
     },
     {
-      "method": "POST",
-      "path": "/api/weekly-plans",
-      "file": "routes/weeklyMealPlan.js",
+      "method": "GET",
+      "path": "/api/meal-templates/user/:userId/shared",
+      "file": "routes/mealTemplate.js",
       "order": 342
     },
     {
-      "method": "GET",
+      "method": "POST",
       "path": "/api/weekly-plans",
       "file": "routes/weeklyMealPlan.js",
       "order": 343
     },
     {
       "method": "GET",
-      "path": "/api/weekly-plans/active",
+      "path": "/api/weekly-plans",
       "file": "routes/weeklyMealPlan.js",
       "order": 344
     },
     {
       "method": "GET",
-      "path": "/api/weekly-plans/:id",
+      "path": "/api/weekly-plans/active",
       "file": "routes/weeklyMealPlan.js",
       "order": 345
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/weekly-plans/:id",
       "file": "routes/weeklyMealPlan.js",
       "order": 346
     },
     {
-      "method": "DELETE",
+      "method": "PUT",
       "path": "/api/weekly-plans/:id",
       "file": "routes/weeklyMealPlan.js",
       "order": 347
     },
     {
-      "method": "POST",
-      "path": "/api/weekly-plans/:id/meal",
+      "method": "DELETE",
+      "path": "/api/weekly-plans/:id",
       "file": "routes/weeklyMealPlan.js",
       "order": 348
     },
     {
-      "method": "DELETE",
+      "method": "POST",
       "path": "/api/weekly-plans/:id/meal",
       "file": "routes/weeklyMealPlan.js",
       "order": 349
     },
     {
-      "method": "POST",
-      "path": "/api/weekly-plans/:id/share-profile",
+      "method": "DELETE",
+      "path": "/api/weekly-plans/:id/meal",
       "file": "routes/weeklyMealPlan.js",
       "order": 350
     },
     {
       "method": "POST",
-      "path": "/api/weekly-plans/:id/unshare-profile",
+      "path": "/api/weekly-plans/:id/share-profile",
       "file": "routes/weeklyMealPlan.js",
       "order": 351
     },
     {
       "method": "POST",
-      "path": "/api/weekly-plans/:id/share-token",
+      "path": "/api/weekly-plans/:id/unshare-profile",
       "file": "routes/weeklyMealPlan.js",
       "order": 352
     },
     {
-      "method": "DELETE",
+      "method": "POST",
       "path": "/api/weekly-plans/:id/share-token",
       "file": "routes/weeklyMealPlan.js",
       "order": 353
     },
     {
-      "method": "GET",
-      "path": "/api/weekly-plans/shared/:token",
+      "method": "DELETE",
+      "path": "/api/weekly-plans/:id/share-token",
       "file": "routes/weeklyMealPlan.js",
       "order": 354
     },
     {
-      "method": "POST",
-      "path": "/api/weekly-plans/:id/like",
+      "method": "GET",
+      "path": "/api/weekly-plans/shared/:token",
       "file": "routes/weeklyMealPlan.js",
       "order": 355
     },
     {
       "method": "POST",
-      "path": "/api/weekly-plans/:id/save",
+      "path": "/api/weekly-plans/:id/like",
       "file": "routes/weeklyMealPlan.js",
       "order": 356
     },
     {
       "method": "POST",
-      "path": "/api/weekly-plans/:id/copy",
+      "path": "/api/weekly-plans/:id/save",
       "file": "routes/weeklyMealPlan.js",
       "order": 357
     },
     {
       "method": "POST",
-      "path": "/api/weekly-plans/:id/activate",
+      "path": "/api/weekly-plans/:id/copy",
       "file": "routes/weeklyMealPlan.js",
       "order": 358
     },
     {
       "method": "POST",
-      "path": "/api/weekly-plans/log-today",
+      "path": "/api/weekly-plans/:id/activate",
       "file": "routes/weeklyMealPlan.js",
       "order": 359
     },
     {
-      "method": "GET",
-      "path": "/api/weekly-plans/feed/discover",
+      "method": "POST",
+      "path": "/api/weekly-plans/log-today",
       "file": "routes/weeklyMealPlan.js",
       "order": 360
     },
     {
       "method": "GET",
-      "path": "/api/weekly-plans/feed/saved",
+      "path": "/api/weekly-plans/feed/discover",
       "file": "routes/weeklyMealPlan.js",
       "order": 361
     },
     {
       "method": "GET",
-      "path": "/api/weekly-plans/user/:userId/plans",
+      "path": "/api/weekly-plans/feed/saved",
       "file": "routes/weeklyMealPlan.js",
       "order": 362
     },
     {
-      "method": "POST",
-      "path": "/api/progress-photos",
-      "file": "routes/progressPhoto.js",
+      "method": "GET",
+      "path": "/api/weekly-plans/user/:userId/plans",
+      "file": "routes/weeklyMealPlan.js",
       "order": 363
     },
     {
-      "method": "GET",
+      "method": "POST",
       "path": "/api/progress-photos",
       "file": "routes/progressPhoto.js",
       "order": 364
     },
     {
       "method": "GET",
-      "path": "/api/progress-photos/comparison",
+      "path": "/api/progress-photos",
       "file": "routes/progressPhoto.js",
       "order": 365
     },
     {
       "method": "GET",
-      "path": "/api/progress-photos/:id",
+      "path": "/api/progress-photos/comparison",
       "file": "routes/progressPhoto.js",
       "order": 366
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/progress-photos/:id",
       "file": "routes/progressPhoto.js",
       "order": 367
     },
     {
-      "method": "DELETE",
+      "method": "PUT",
       "path": "/api/progress-photos/:id",
       "file": "routes/progressPhoto.js",
       "order": 368
     },
     {
-      "method": "POST",
-      "path": "/api/exercise",
-      "file": "routes/exercise.js",
+      "method": "DELETE",
+      "path": "/api/progress-photos/:id",
+      "file": "routes/progressPhoto.js",
       "order": 369
     },
     {
-      "method": "GET",
+      "method": "POST",
       "path": "/api/exercise",
       "file": "routes/exercise.js",
       "order": 370
     },
     {
       "method": "GET",
-      "path": "/api/exercise/:id",
+      "path": "/api/exercise",
       "file": "routes/exercise.js",
       "order": 371
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/exercise/:id",
       "file": "routes/exercise.js",
       "order": 372
     },
     {
-      "method": "DELETE",
+      "method": "PUT",
       "path": "/api/exercise/:id",
       "file": "routes/exercise.js",
       "order": 373
     },
     {
+      "method": "DELETE",
+      "path": "/api/exercise/:id",
+      "file": "routes/exercise.js",
+      "order": 374
+    },
+    {
       "method": "POST",
       "path": "/api/contacts/find",
       "file": "routes/contacts.js",
-      "order": 374
+      "order": 375
     },
     {
       "method": "POST",
       "path": "/api/water/log",
       "file": "routes/water.js",
-      "order": 375
+      "order": 376
     },
     {
       "method": "GET",
       "path": "/api/water/today",
       "file": "routes/water.js",
-      "order": 376
+      "order": 377
     },
     {
       "method": "PUT",
       "path": "/api/water/goal",
       "file": "routes/water.js",
-      "order": 377
+      "order": 378
     },
     {
       "method": "DELETE",
       "path": "/api/water/:logId",
       "file": "routes/water.js",
-      "order": 378
+      "order": 379
     },
     {
       "method": "GET",
       "path": "/api/health/analytics",
       "file": "routes/health.js",
-      "order": 379
+      "order": 380
     },
     {
       "method": "GET",
       "path": "/api/health/workout-analytics",
       "file": "routes/health.js",
-      "order": 380
+      "order": 381
     },
     {
       "method": "GET",
       "path": "/api/health/nutrition-analytics",
       "file": "routes/health.js",
-      "order": 381
-    },
-    {
-      "method": "GET",
-      "path": "/api/health/entries",
-      "file": "routes/health.js",
       "order": 382
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/health/entries",
       "file": "routes/health.js",
       "order": 383
     },
     {
-      "method": "DELETE",
-      "path": "/api/health/entries/:date",
+      "method": "PUT",
+      "path": "/api/health/entries",
       "file": "routes/health.js",
       "order": 384
     },
     {
-      "method": "GET",
-      "path": "/api/health-goals",
-      "file": "routes/healthGoals.js",
+      "method": "DELETE",
+      "path": "/api/health/entries/:date",
+      "file": "routes/health.js",
       "order": 385
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/health-goals",
       "file": "routes/healthGoals.js",
       "order": 386
     },
     {
+      "method": "PUT",
+      "path": "/api/health-goals",
+      "file": "routes/healthGoals.js",
+      "order": 387
+    },
+    {
       "method": "POST",
       "path": "/api/health-goals/recalculate",
       "file": "routes/healthGoals.js",
-      "order": 387
+      "order": 388
     },
     {
       "method": "GET",
       "path": "/api/health-goals/daily-summary",
       "file": "routes/healthGoals.js",
-      "order": 388
+      "order": 389
     }
   ]
 }
