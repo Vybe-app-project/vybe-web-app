@@ -1,29 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { liveVideoEnabled, useCapabilities } from '../lib/capabilities';
 import type { PublicUser } from '../lib/hooks';
+import { pathOf, preload, preloadWhenIdle, selectNavigating, usePendingNavigation } from '../lib/navigation';
 import {
   Avatar,
   Brand,
   BrandMark,
   Button,
-  ButtonLink,
   Chip,
   CountBadge,
   IconButton,
   Menu,
   Modal,
+  PageSkeleton,
   SearchField,
   Skeleton,
   Tabs,
   cx,
+  fadeClass,
   formatStat,
   useOnline,
   usePageChromeStore,
+  useScrollEdges,
 } from './ui';
 import type { MenuItem } from './ui';
 import {
@@ -46,6 +50,7 @@ import {
   LifeBuoy,
   LogOut,
   Palette,
+  Plus,
   Radio,
   Scale,
   Settings,
@@ -80,6 +85,13 @@ export type RouteMeta = {
   /** Feed-width content with the desktop right rail. */
   rail?: boolean;
   hideTabs?: boolean;
+  /**
+   * Routes rendered by the same page component share a chunk key so moving
+   * between them (a chat room, a stream) keeps the page mounted; every other
+   * route gets a fresh Suspense boundary so its skeleton shows while the
+   * chunk downloads instead of the previous page being held on screen.
+   */
+  chunk?: string;
 };
 
 /**
@@ -93,12 +105,12 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/search', title: 'Search', tab: 'home', nav: '/discover', hub: 'explore' },
   { pattern: '/stories', title: 'Stories', tab: 'home', nav: '/stories', hub: 'explore' },
   { pattern: '/live', title: 'Live', tab: 'home', nav: '/live', hub: 'explore' },
-  { pattern: '/live/:streamId', title: 'Live', tab: 'home', nav: '/live', parent: '/live' },
+  { pattern: '/live/:streamId', title: 'Live', tab: 'home', nav: '/live', parent: '/live', chunk: '/live' },
   { pattern: '/p/:postId', title: 'Post', tab: 'home', nav: '/', parent: '/', rail: true },
   { pattern: '/u/:id', title: 'Profile', tab: 'home', nav: '/', parent: '/' },
   { pattern: '/notifications', title: 'Notifications', tab: 'home', nav: '/notifications', hub: 'inbox' },
   { pattern: '/messages', title: 'Messages', tab: 'home', nav: '/messages', hub: 'inbox' },
-  { pattern: '/messages/:roomId', title: 'Messages', tab: 'home', nav: '/messages', parent: '/messages', hideTabs: true },
+  { pattern: '/messages/:roomId', title: 'Messages', tab: 'home', nav: '/messages', parent: '/messages', hideTabs: true, chunk: '/messages' },
   { pattern: '/profile', title: 'Profile', tab: 'you', nav: '/profile', root: true },
   { pattern: '/friends', title: 'Friends', tab: 'you', nav: '/friends', parent: '/profile' },
   { pattern: '/settings', title: 'Settings', tab: 'you', nav: '/settings', parent: '/profile' },
@@ -218,6 +230,9 @@ const SIDEBAR: Array<{ label?: string; items: SidebarItem[] }> = [
   },
 ];
 
+/** Destinations that only make sense when the server runs the feature. */
+const LIVE_PATH = '/live';
+
 /**
  * The Log action sheet. Targets carry a query flag the destination page reads
  * to open its composer/logger immediately: `?compose=1` on Home, `?log=1` on
@@ -273,6 +288,69 @@ export function useUnreadNotifications(enabled = true) {
 
 const badgeText = (n?: number, more?: boolean): string | number | null => (!n ? null : more ? `${n}+` : n);
 
+/* ================================================================== navigation feedback */
+
+/** A plain left click that React Router will handle in this tab (not a modifier/new-tab click). */
+const willNavigateHere = (e: ReactMouseEvent) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.defaultPrevented;
+
+/**
+ * Props for any shell link: warm the destination's chunk as soon as the user
+ * shows intent, and record the pending destination on activation so the tab
+ * highlight and progress bar respond before the location commits.
+ */
+function useNavLinkProps(to: string) {
+  const { pathname } = useLocation();
+  const start = usePendingNavigation((s) => s.start);
+  const warm = () => preload(to);
+  return {
+    onPointerDown: warm,
+    onMouseEnter: warm,
+    onFocus: warm,
+    onTouchStart: warm,
+    onClick: (e: ReactMouseEvent) => {
+      const path = pathOf(to);
+      if (willNavigateHere(e) && path !== pathname) start(path);
+    },
+  };
+}
+
+/**
+ * Thin indeterminate bar under the top edge while a route's code downloads.
+ * Appears after 150 ms so a cached chunk (the common case) never flashes it.
+ */
+function NavProgress() {
+  const pending = usePendingNavigation(selectNavigating);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (!pending) {
+      setShow(false);
+      return;
+    }
+    const t = window.setTimeout(() => setShow(true), 150);
+    return () => window.clearTimeout(t);
+  }, [pending]);
+  if (!show) return null;
+  return (
+    <div role="progressbar" aria-label="Loading page" aria-busy="true" className="pointer-events-none fixed inset-x-0 top-0 z-[60] h-0.5 overflow-hidden bg-brand-soft">
+      <div className="anim-nav-progress h-full w-1/3 rounded-full bg-brand" />
+    </div>
+  );
+}
+
+/**
+ * The page region's Suspense fallback. While it is mounted the route's chunk
+ * is still downloading, so the progress bar stays up for the whole wait, not
+ * just until the location commits.
+ */
+function RouteFallback() {
+  const setChunkLoading = usePendingNavigation((s) => s.setChunkLoading);
+  useEffect(() => {
+    setChunkLoading(true);
+    return () => setChunkLoading(false);
+  }, [setChunkLoading]);
+  return <PageSkeleton />;
+}
+
 /* ================================================================== pieces */
 
 function SkipLink() {
@@ -322,11 +400,17 @@ function SearchBox({ className }: { className?: string }) {
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search people, workouts, meals…"
         className="h-10 min-h-10"
+        onFocus={() => preload('/search')}
       />
     </form>
   );
 }
 
+/**
+ * The create action. Compact (phone top bar) is a plus in the mint circle —
+ * the brand mark it used to show sat where apps put the avatar and read as a
+ * logo, not "add". The desktop button keeps its label.
+ */
 function LogButton({ className, compact = false }: { className?: string; compact?: boolean }) {
   const setOpen = useLogSheet((s) => s.setOpen);
   if (compact) {
@@ -338,13 +422,13 @@ function LogButton({ className, compact = false }: { className?: string; compact
         className={cx('inline-flex h-11 w-11 items-center justify-center', className)}
       >
         <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand text-on-brand shadow-1 transition-transform dur-1 active:scale-95">
-          <BrandMark size={20} />
+          <Plus size={22} />
         </span>
       </button>
     );
   }
   return (
-    <Button variant="primary" block onClick={() => setOpen(true)} icon={<BrandMark size={18} />} className={className}>
+    <Button variant="primary" block onClick={() => setOpen(true)} icon={<Plus size={20} />} className={className}>
       <span className="hidden xl:inline">Log</span>
     </Button>
   );
@@ -354,6 +438,7 @@ function LogSheet() {
   const open = useLogSheet((s) => s.open);
   const setOpen = useLogSheet((s) => s.setOpen);
   const { pathname } = useLocation();
+  const start = usePendingNavigation((s) => s.start);
   useEffect(() => {
     setOpen(false);
   }, [pathname, setOpen]);
@@ -365,7 +450,11 @@ function LogSheet() {
             <Link
               to={to}
               viewTransition
-              onClick={() => setOpen(false)}
+              onPointerDown={() => preload(to)}
+              onClick={(e) => {
+                setOpen(false);
+                if (willNavigateHere(e) && pathOf(to) !== pathname) start(pathOf(to));
+              }}
               className="flex min-h-16 items-center gap-4 rounded-md px-3 py-2.5 transition-colors dur-1 hover:bg-surface-2 focus-visible:bg-surface-2"
             >
               <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-text">
@@ -408,14 +497,17 @@ function AccountMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
 
 function SideLink({ item, active, badge }: { item: SidebarItem; active: boolean; badge: string | number | null }) {
   const { to, label, Icon } = item;
+  const navProps = useNavLinkProps(to);
   return (
     <Link
       to={to}
       viewTransition
       aria-current={active ? 'page' : undefined}
       title={label}
+      data-active={active ? 'true' : undefined}
+      {...navProps}
       className={cx(
-        'relative flex h-11 items-center justify-center gap-3 rounded-sm px-3 text-sm font-semibold transition-colors dur-1 xl:justify-start',
+        'relative flex h-10 items-center justify-center gap-3 rounded-sm px-3 text-sm font-semibold transition-colors dur-1 pointer-coarse:min-h-11 xl:justify-start',
         active ? 'bg-brand-soft text-brand-text' : 'text-text-2 hover:bg-surface-2 hover:text-text-1',
       )}
     >
@@ -429,8 +521,25 @@ function SideLink({ item, active, badge }: { item: SidebarItem; active: boolean;
   );
 }
 
-function Sidebar({ meta, chats, notifications }: { meta: RouteMeta; chats: string | number | null; notifications: string | number | null }) {
+/**
+ * Desktop navigation. Twenty destinations do not fit a 900 px laptop, so the
+ * list scrolls — with a painted scrollbar, an edge fade wherever more items
+ * hide, 40 px rows, no per-group rules, and Settings/Support in the account
+ * menu rather than a footer that ate another 100 px. The active item is
+ * scrolled into view on every route change so the current section is never
+ * below the fold.
+ */
+function Sidebar({ meta, chats, notifications, liveEnabled }: { meta: RouteMeta; chats: string | number | null; notifications: string | number | null; liveEnabled: boolean }) {
   const { user } = useAuth();
+  const navRef = useRef<HTMLElement>(null);
+  const edges = useScrollEdges(navRef, 'y');
+  useEffect(() => {
+    navRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [meta.nav]);
+  const groups = useMemo(
+    () => SIDEBAR.map((g) => ({ ...g, items: liveEnabled ? g.items : g.items.filter((i) => i.to !== LIVE_PATH) })),
+    [liveEnabled],
+  );
   return (
     <aside className="vt-sidebar sticky top-0 hidden h-dvh w-[4.5rem] shrink-0 flex-col border-r border-line bg-surface-1 lg:flex xl:w-60">
       <div className="flex h-16 shrink-0 items-center justify-center px-3 xl:justify-start xl:px-5">
@@ -442,10 +551,16 @@ function Sidebar({ meta, chats, notifications }: { meta: RouteMeta; chats: strin
       <div className="px-3 xl:px-4">
         <LogButton className="xl:justify-start" />
       </div>
-      <nav aria-label="Primary" className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3 xl:px-4">
-        {SIDEBAR.map((group, gi) => (
-          <div key={group.label ?? gi} className={cx(gi > 0 && 'mt-4 border-t border-line pt-3 xl:border-0 xl:pt-1')}>
-            {group.label ? <p className="type-label mb-1 hidden px-3 text-text-3 xl:block">{group.label}</p> : null}
+      <nav
+        ref={navRef}
+        aria-label="Primary"
+        data-scroll-start={edges.start || undefined}
+        data-scroll-end={edges.end || undefined}
+        className={cx('scroll-visible mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3 xl:px-4', fadeClass(edges, 'y'))}
+      >
+        {groups.map((group, gi) => (
+          <div key={group.label ?? gi} className={cx(gi > 0 && 'mt-3')}>
+            {group.label ? <p className="type-label mb-0.5 hidden px-3 text-text-3 xl:block">{group.label}</p> : null}
             <ul className="space-y-0.5">
               {group.items.map((item) => (
                 <li key={item.to}>
@@ -461,15 +576,7 @@ function Sidebar({ meta, chats, notifications }: { meta: RouteMeta; chats: strin
         ))}
       </nav>
       <div className="shrink-0 border-t border-line p-3 xl:p-4">
-        <ul className="space-y-0.5">
-          <li>
-            <SideLink item={{ to: '/settings', label: 'Settings', Icon: Settings }} active={meta.nav === '/settings'} badge={null} />
-          </li>
-          <li>
-            <SideLink item={{ to: '/support', label: 'Support', Icon: LifeBuoy }} active={meta.nav === '/support'} badge={null} />
-          </li>
-        </ul>
-        <div className="mt-3 flex items-center justify-center gap-3 xl:justify-start">
+        <div className="flex items-center justify-center gap-3 xl:justify-start">
           <AccountMenu align="start" />
           <div className="hidden min-w-0 flex-1 xl:block">
             <p className="truncate text-sm font-semibold text-text-1">{user?.fullName || user?.username}</p>
@@ -538,9 +645,13 @@ function MobileTopBar({
     <header className="vt-header safe-top sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur-xl lg:hidden">
       <div className="flex h-12 items-center gap-1 px-2">
         {isHome ? (
-          <Link to="/" viewTransition className="inline-flex h-11 items-center rounded-sm px-2" aria-label="Vybe home">
-            <Brand size="sm" />
-          </Link>
+          <>
+            {/* The wordmark is the visual title; the page still needs a level-one heading. */}
+            <h1 className="sr-only">Home</h1>
+            <Link to="/" viewTransition className="inline-flex h-11 items-center rounded-sm px-2" aria-label="Vybe home">
+              <Brand size="sm" />
+            </Link>
+          </>
         ) : (
           <>
             {showBack ? (
@@ -574,21 +685,72 @@ function MobileTopBar({
   );
 }
 
-function SectionTabs({ hub, pathname, chats, notifications }: { hub: HubKey; pathname: string; chats: string | number | null; notifications: string | number | null }) {
-  const tabs = HUBS[hub].map((t) => ({
-    key: t.to,
-    label: t.label,
-    to: t.to,
-    badge:
-      t.badge === 'chats' && chats ? <CountBadge value={chats} className="ring-0" /> : t.badge === 'notifications' && notifications ? <CountBadge value={notifications} className="ring-0" /> : undefined,
-  }));
+function SectionTabs({
+  hub,
+  pathname,
+  chats,
+  notifications,
+  liveEnabled,
+}: {
+  hub: HubKey;
+  pathname: string;
+  chats: string | number | null;
+  notifications: string | number | null;
+  liveEnabled: boolean;
+}) {
+  const start = usePendingNavigation((s) => s.start);
+  const tabs = HUBS[hub]
+    .filter((t) => liveEnabled || t.to !== LIVE_PATH)
+    .map((t) => ({
+      key: t.to,
+      label: t.label,
+      to: t.to,
+      badge:
+        t.badge === 'chats' && chats ? <CountBadge value={chats} className="ring-0" /> : t.badge === 'notifications' && notifications ? <CountBadge value={notifications} className="ring-0" /> : undefined,
+    }));
   const active = tabs.find((t) => t.key === pathname)?.key ?? tabs.find((t) => pathname.startsWith(`${t.key}/`))?.key ?? '';
+  // The siblings of the current section are the likeliest next taps.
+  useEffect(() => preloadWhenIdle(tabs.map((t) => t.to)), [hub]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="sticky top-[calc(3rem+env(safe-area-inset-top))] z-30 border-b border-line bg-bg/90 backdrop-blur-xl lg:top-14">
+    <nav aria-label="Sections" className="sticky top-[calc(3rem+env(safe-area-inset-top))] z-30 border-b border-line bg-bg/90 backdrop-blur-xl lg:top-14">
       <div className="mx-auto max-w-[1200px] px-2 md:px-4 lg:px-6">
-        <Tabs tabs={tabs} active={active} className="border-b-0" aria-label="Sections" />
+        <Tabs
+          tabs={tabs}
+          active={active}
+          className="border-b-0"
+          aria-label="Section tabs"
+          onChange={(key) => {
+            if (key !== pathname) start(key);
+          }}
+        />
       </div>
-    </div>
+    </nav>
+  );
+}
+
+function BottomTab({ tab, active, badge }: { tab: (typeof TABS)[number]; active: boolean; badge: string | number | null }) {
+  const { key, to, label, Icon } = tab;
+  const navProps = useNavLinkProps(to);
+  return (
+    <li className="flex flex-1">
+      <Link
+        to={to}
+        viewTransition
+        aria-label={label}
+        aria-current={active ? 'page' : undefined}
+        {...navProps}
+        className={cx(
+          'relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-sm text-2xs font-semibold transition-colors dur-1',
+          active ? 'text-brand-text dark:text-brand' : 'text-text-2 hover:text-text-1',
+        )}
+      >
+        <span className="relative">
+          <Icon size={24} />
+          {key === 'home' && badge ? <CountBadge value={badge} className="absolute -right-2.5 -top-1.5" /> : null}
+        </span>
+        <span>{label}</span>
+      </Link>
+    </li>
   );
 }
 
@@ -596,29 +758,9 @@ function BottomNav({ meta, homeBadge }: { meta: RouteMeta; homeBadge: string | n
   return (
     <nav aria-label="Primary" className="vt-nav safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface-1/95 backdrop-blur-xl lg:hidden">
       <ul className="mx-auto flex h-14 max-w-lg items-stretch justify-around px-1">
-        {TABS.map(({ key, to, label, Icon }) => {
-          const active = meta.tab === key;
-          return (
-            <li key={key} className="flex flex-1">
-              <Link
-                to={to}
-                viewTransition
-                aria-label={label}
-                aria-current={active ? 'page' : undefined}
-                className={cx(
-                  'relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-sm text-2xs font-semibold transition-colors dur-1',
-                  active ? 'text-brand-text dark:text-brand' : 'text-text-2 hover:text-text-1',
-                )}
-              >
-                <span className="relative">
-                  <Icon size={24} />
-                  {key === 'home' && homeBadge ? <CountBadge value={homeBadge} className="absolute -right-2.5 -top-1.5" /> : null}
-                </span>
-                <span>{label}</span>
-              </Link>
-            </li>
-          );
-        })}
+        {TABS.map((tab) => (
+          <BottomTab key={tab.key} tab={tab} active={meta.tab === tab.key} badge={homeBadge} />
+        ))}
       </ul>
     </nav>
   );
@@ -653,7 +795,18 @@ function RailError({ what, retry }: { what: string; retry: () => void }) {
   );
 }
 
+const EXPLORE_MORE: Array<{ to: string; label: string; Icon: IconComponent }> = [
+  { to: '/challenges', label: 'Challenges', Icon: Zap },
+  { to: '/live', label: 'Live', Icon: Radio },
+  { to: '/stories', label: 'Stories', Icon: Sparkles },
+  { to: '/communities', label: 'Communities', Icon: Globe },
+  { to: '/achievements', label: 'Achievements', Icon: Award },
+  { to: '/friends', label: 'Friends', Icon: Users },
+];
+
 export function DefaultRail() {
+  const capabilities = useCapabilities();
+  const liveEnabled = liveVideoEnabled(capabilities.data);
   const tags = useQuery({
     queryKey: ['trending-hashtags'],
     queryFn: async () => {
@@ -732,16 +885,15 @@ export function DefaultRail() {
 
       <RailCard title="More to explore">
         <ul className="grid grid-cols-2 gap-1">
-          {[
-            { to: '/challenges', label: 'Challenges', Icon: Zap },
-            { to: '/live', label: 'Live', Icon: Radio },
-            { to: '/stories', label: 'Stories', Icon: Sparkles },
-            { to: '/communities', label: 'Communities', Icon: Globe },
-            { to: '/achievements', label: 'Achievements', Icon: Award },
-            { to: '/friends', label: 'Friends', Icon: Users },
-          ].map(({ to, label, Icon }) => (
+          {EXPLORE_MORE.filter((e) => liveEnabled || e.to !== LIVE_PATH).map(({ to, label, Icon }) => (
             <li key={to}>
-              <Link to={to} viewTransition className="flex min-h-11 items-center gap-2 rounded-sm px-2 text-sm font-medium text-text-2 transition-colors dur-1 hover:bg-surface-2 hover:text-text-1">
+              <Link
+                to={to}
+                viewTransition
+                onPointerDown={() => preload(to)}
+                onMouseEnter={() => preload(to)}
+                className="flex min-h-11 items-center gap-2 rounded-sm px-2 text-sm font-medium text-text-2 transition-colors dur-1 hover:bg-surface-2 hover:text-text-1"
+              >
                 <Icon size={18} className="text-text-3" />
                 {label}
               </Link>
@@ -763,12 +915,35 @@ export function DefaultRail() {
 
 /* ================================================================== shell */
 
+/** Chunks worth having before the user asks: the five tab roots. */
+const TAB_ROOT_PATHS = TABS.map((t) => t.to);
+
 export default function Layout({ children }: { children?: ReactNode }) {
   const { pathname } = useLocation();
   const meta = useMemo(() => routeMeta(pathname), [pathname]);
   const storedChrome = usePageChromeStore((s) => s.chrome);
   const chrome = storedChrome && storedChrome.path === pathname ? storedChrome : null;
   const { user } = useAuth();
+
+  // Route-change feedback: the destination a nav control was activated for,
+  // until the location catches up (see lib/navigation.ts).
+  const pendingPath = usePendingNavigation((s) => s.pendingPath);
+  const finish = usePendingNavigation((s) => s.finish);
+  useEffect(() => {
+    finish();
+  }, [pathname, finish]);
+  useEffect(() => {
+    if (pendingPath === null) return;
+    // Safety net: a navigation that never commits (blocked, failed chunk) must not pin the bar.
+    const t = window.setTimeout(finish, 10_000);
+    return () => window.clearTimeout(t);
+  }, [pendingPath, finish]);
+  const navMeta = useMemo(() => (pendingPath && pendingPath !== pathname ? routeMeta(pendingPath) : meta), [pendingPath, pathname, meta]);
+
+  useEffect(() => preloadWhenIdle(TAB_ROOT_PATHS), []);
+
+  const capabilities = useCapabilities();
+  const liveEnabled = liveVideoEnabled(capabilities.data);
 
   const unreadChats = useUnreadChats(!!user);
   const unreadNotifs = useUnreadNotifications(!!user);
@@ -789,7 +964,8 @@ export default function Layout({ children }: { children?: ReactNode }) {
   return (
     <div className="min-h-dvh bg-bg text-text-1 lg:flex">
       <SkipLink />
-      <Sidebar meta={meta} chats={chats} notifications={notifications} />
+      <NavProgress />
+      <Sidebar meta={navMeta} chats={chats} notifications={notifications} liveEnabled={liveEnabled} />
 
       <div className="min-w-0 flex-1 overflow-x-clip">
         {!chrome?.hideTopBar ? (
@@ -799,11 +975,15 @@ export default function Layout({ children }: { children?: ReactNode }) {
           </>
         ) : null}
         <OfflineBanner />
-        {hub ? <SectionTabs hub={hub} pathname={pathname} chats={chats} notifications={notifications} /> : null}
+        {hub ? <SectionTabs hub={hub} pathname={pathname} chats={chats} notifications={notifications} liveEnabled={liveEnabled} /> : null}
 
+        {/* Feed-width pages centre a 600 px column from tablets up (a 720 px
+            4:5 photo was 900 px tall); the rail joins at lg. */}
         <div className={cx('mx-auto flex w-full gap-8 px-4 md:px-6 lg:px-8', feedWidth ? 'max-w-[62rem] justify-center' : 'max-w-[1200px]')}>
-          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none lg:pt-6', chrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'lg:max-w-feed')}>
-            {children ?? <Outlet />}
+          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none lg:pt-6', chrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'md:max-w-feed')}>
+            <Suspense key={meta.chunk ?? meta.pattern} fallback={<RouteFallback />}>
+              {children ?? <Outlet />}
+            </Suspense>
           </main>
           {rail ? (
             <aside aria-label="Highlights" className="hidden w-72 shrink-0 pt-6 lg:block xl:w-80">
@@ -813,7 +993,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
         </div>
       </div>
 
-      {!chrome?.hideBottomNav ? <BottomNav meta={meta} homeBadge={homeBadge} /> : null}
+      {!chrome?.hideBottomNav ? <BottomNav meta={navMeta} homeBadge={homeBadge} /> : null}
       <LogSheet />
     </div>
   );
