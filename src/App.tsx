@@ -232,6 +232,8 @@ export default function App() {
             <Route path="workouts/logs" element={<WorkoutLogs />} />
             <Route path="workouts/:workoutId" element={<WorkoutDetail />} />
             <Route path="meals" element={<Meals />} />
+            {/* Community meals live on the Meals page as a tab; keep the noun URL working. */}
+            <Route path="meals/community" element={<Navigate to="/meals?tab=community" replace />} />
             <Route path="meals/templates" element={<MealTemplates />} />
             <Route path="meals/plans" element={<WeeklyPlans />} />
             <Route path="meals/shared/:token" element={<SharedMeal />} />

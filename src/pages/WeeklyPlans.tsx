@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { OBJECT_ID, SHARE_TOKEN, shareOrCopy, shareUrls } from '../lib/share';
+import { localDayParams } from '../lib/timezone';
 import {
   Avatar,
   Badge,
@@ -31,8 +33,8 @@ import {
   useToast,
 } from './ui';
 import type { MenuItem } from './ui';
-import { Plus, Trash, Check, CalendarDays, Edit, Globe, Heart, Bookmark, Copy, Utensils, ChevronDown } from './icons';
-import { MacroLine, MEAL_TYPE_OPTIONS, MEAL_TYPES, defaultMealType, mealTypeLabel, plural } from './Meals';
+import { Plus, Trash, Check, CalendarDays, Edit, Globe, Heart, Bookmark, Copy, Utensils, ChevronDown, Link as LinkIcon, ShareUp } from './icons';
+import { FoodSearch, MacroLine, MEAL_TYPE_OPTIONS, MEAL_TYPES, defaultMealType, mealTypeLabel, plural, selectedFoodNutrition, type SelectedFood } from './Meals';
 
 /* ------------------------------------------------------------------ types */
 
@@ -118,10 +120,18 @@ const dayOf = (plan: WeeklyPlan, day: string) => (plan.days ?? []).find((d) => d
 const kcalOfDay = (d?: DayPlan) =>
   Math.round(d?.dayNutrition?.calories ?? (d?.meals ?? []).reduce((s, m) => s + (m.totalNutrition?.calories ?? 0), 0));
 
-const slotLabel = (meal: MealSlot) => {
+/** Template name, or the food names with "+N" after the second. */
+const slotLabel = (meal: MealSlot, limit = Number.POSITIVE_INFINITY) => {
   const template = typeof meal.templateId === 'object' && meal.templateId ? meal.templateId : undefined;
-  return template?.name || (meal.foods ?? []).map((f) => f.food_name).join(', ') || 'Meal';
+  if (template?.name) return template.name;
+  const names = (meal.foods ?? []).map((f) => f.food_name).filter(Boolean);
+  if (names.length === 0) return 'Meal';
+  if (names.length <= limit) return names.join(', ');
+  return `${names.slice(0, limit).join(', ')} +${names.length - limit}`;
 };
+
+type LogTodayResponse = { message?: string; meals?: { _id: string }[]; mealIds?: string[]; dateKey?: string; replaced?: boolean };
+type LogTodayConflict = { alreadyLogged?: boolean; mealIds?: string[]; message?: string };
 
 /* --------------------------------------------------------- plan modal */
 
@@ -268,9 +278,19 @@ function AddMealModal({ target, onClose }: { target: { plan: WeeklyPlan; day: Da
   const [mealType, setMealType] = useState<string>(defaultMealType());
   const [source, setSource] = useState<string>(MANUAL);
   const [foodName, setFoodName] = useState('');
+  const [servingSize, setServingSize] = useState('');
   const [macros, setMacros] = useState<Record<(typeof MACRO_FIELDS)[number]['key'], string>>({ calories: '', protein: '', carbs: '', fat: '' });
   const [foodError, setFoodError] = useState<string | undefined>();
   const [seedKey, setSeedKey] = useState('');
+
+  const fillFromCatalog = (picked: SelectedFood) => {
+    const perServing = selectedFoodNutrition({ ...picked, servings: 1 });
+    const fmt = (v?: number) => (v == null ? '' : String(Math.round(v * 10) / 10));
+    setFoodName(picked.name);
+    setServingSize(picked.servingLabel);
+    setMacros({ calories: fmt(perServing.calories), protein: fmt(perServing.protein), carbs: fmt(perServing.carbs), fat: fmt(perServing.fat) });
+    setFoodError(undefined);
+  };
 
   const seed = target ? `${target.plan._id}:${target.day}` : 'closed';
   if (seed !== seedKey) {
@@ -280,6 +300,7 @@ function AddMealModal({ target, onClose }: { target: { plan: WeeklyPlan; day: Da
       setMealType(defaultMealType());
       setSource(MANUAL);
       setFoodName('');
+      setServingSize('');
       setMacros({ calories: '', protein: '', carbs: '', fat: '' });
       setFoodError(undefined);
     }
@@ -310,6 +331,7 @@ function AddMealModal({ target, onClose }: { target: { plan: WeeklyPlan; day: Da
         body.foods = [
           {
             food_name: foodName.trim(),
+            servingSize: servingSize.trim() || undefined,
             servingsConsumed: 1,
             nutrition: {
               calories: Number(macros.calories) || 0,
@@ -389,17 +411,21 @@ function AddMealModal({ target, onClose }: { target: { plan: WeeklyPlan; day: Da
           </div>
         ) : (
           <div className="space-y-3">
-            <Input
-              label="Food"
-              placeholder="Chicken and rice"
-              value={foodName}
-              error={foodError}
-              autoComplete="off"
-              onChange={(e) => {
-                setFoodError(undefined);
-                setFoodName(e.target.value);
-              }}
-            />
+            <FoodSearch onAdd={fillFromCatalog} label="Search foods" placeholder="Greek yogurt, chicken breast, rice…" />
+            <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
+              <Input
+                label="Food"
+                placeholder="Chicken and rice"
+                value={foodName}
+                error={foodError}
+                autoComplete="off"
+                onChange={(e) => {
+                  setFoodError(undefined);
+                  setFoodName(e.target.value);
+                }}
+              />
+              <Input label="Serving size" hint="Optional" placeholder="1 cup" value={servingSize} onChange={(e) => setServingSize(e.target.value)} />
+            </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {MACRO_FIELDS.map((m) => (
                 <Input
@@ -552,6 +578,9 @@ function PlanCard({
     onError: (e) => toast.error(errMsg(e, 'Could not update sharing')),
   });
 
+  const [pendingRemove, setPendingRemove] = useState<{ day: Day; index: number; label: string } | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+
   const removeMeal = useMutation({
     mutationFn: async ({ day, index }: { day: string; index: number }) => {
       const { data } = await api.delete(`/weekly-plans/${plan._id}/meal`, { data: { dayOfWeek: day, mealIndex: index } });
@@ -562,6 +591,26 @@ function PlanCard({
       invalidate();
     },
     onError: (e) => toast.error(errMsg(e, 'Could not remove meal')),
+    onSettled: () => setPendingRemove(null),
+  });
+
+  const share = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post(`/weekly-plans/${plan._id}/share-token`);
+      return data as { token: string; expiresAt: string };
+    },
+    onSuccess: (data) => void shareOrCopy(shareUrls.plan(data.token), `${plan.name} on Vybe`, toast),
+    onError: (e) => toast.error(errMsg(e, 'Could not create a share link')),
+  });
+
+  const revoke = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.delete(`/weekly-plans/${plan._id}/share-token`);
+      return data;
+    },
+    onSuccess: () => toast.success('Share links revoked'),
+    onError: (e) => toast.error(errMsg(e, 'Could not revoke share links')),
+    onSettled: () => setConfirmRevoke(false),
   });
 
   const liked = plan.isLiked ?? Boolean(user && (plan.likes ?? []).some((v) => String(v) === user._id));
@@ -570,12 +619,14 @@ function PlanCard({
 
   const ownerMenu: MenuItem[] = [
     { label: 'Edit details', icon: <Edit size={18} />, onSelect: () => onEdit(plan) },
+    { label: 'Copy share link', description: 'Anyone with the link can view and copy it', icon: <LinkIcon size={18} />, disabled: share.isPending, onSelect: () => share.mutate() },
     {
       label: plan.sharedToProfile ? 'Remove from profile' : 'Share to profile',
       description: plan.sharedToProfile ? 'Hide it from Discover' : 'Show it in Discover and on your profile',
       icon: <Globe size={18} />,
       onSelect: () => profileShare.mutate(),
     },
+    { label: 'Revoke share links', description: 'Every link you sent stops working', icon: <ShareUp size={18} />, onSelect: () => setConfirmRevoke(true) },
     { label: 'Delete plan', icon: <Trash size={18} />, danger: true, divider: true, onSelect: () => onDelete(plan) },
   ];
 
@@ -670,7 +721,7 @@ function PlanCard({
                     <IconButton
                       label={`Remove ${slotLabel(meal)} from ${humanize(selectedDay)}`}
                       size={40}
-                      onClick={() => removeMeal.mutate({ day: selectedDay, index: i })}
+                      onClick={() => setPendingRemove({ day: selectedDay, index: i, label: slotLabel(meal) })}
                       disabled={removeMeal.isPending}
                     >
                       <Trash size={16} />
@@ -746,6 +797,26 @@ function PlanCard({
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={Boolean(pendingRemove)}
+        title="Remove this meal from the plan?"
+        message={pendingRemove ? `“${pendingRemove.label}” and its macros come off ${humanize(pendingRemove.day)}. Meals you already logged stay in your log.` : undefined}
+        confirmLabel="Remove meal"
+        destructive
+        loading={removeMeal.isPending}
+        onCancel={() => setPendingRemove(null)}
+        onConfirm={() => pendingRemove && removeMeal.mutate({ day: pendingRemove.day, index: pendingRemove.index })}
+      />
+      <ConfirmDialog
+        open={confirmRevoke}
+        title="Revoke every share link?"
+        message={`Anyone you sent a link to “${plan.name}” will see that it expired. You can create a fresh link afterwards.`}
+        confirmLabel="Revoke links"
+        destructive
+        loading={revoke.isPending}
+        onCancel={() => setConfirmRevoke(false)}
+        onConfirm={() => revoke.mutate()}
+      />
     </Card>
   );
 }
@@ -753,28 +824,31 @@ function PlanCard({
 /* ---------------------------------------------------------- shared modal */
 
 /**
- * A plan someone shared by link. Links carry a share token; a public plan
- * shared before its owner minted one carries the plan id instead, so the
- * token route is tried first and the id route second.
+ * A plan someone shared by link. Links carry a 64-hex share token; a public
+ * plan shared before its owner minted one carries the 24-hex plan id instead.
+ * The shape decides the route, so a bad link costs one request and one
+ * error, not two 404s.
  */
+export const sharedPlanKind = (token: string): 'token' | 'id' | null => {
+  if (SHARE_TOKEN.test(token)) return 'token';
+  if (OBJECT_ID.test(token)) return 'id';
+  return null;
+};
+
 function SharedPlanModal({ token, onClose }: { token: string | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const kind = token ? sharedPlanKind(token) : null;
   const shared = useQuery({
     queryKey: ['weekly-plans', 'shared-link', token],
-    enabled: Boolean(token),
+    enabled: Boolean(kind),
     retry: false,
     queryFn: async (): Promise<WeeklyPlan> => {
       const key = encodeURIComponent(token ?? '');
-      try {
-        const { data } = await api.get<WeeklyPlan>(`/weekly-plans/shared/${key}`);
-        return data;
-      } catch (e: unknown) {
-        const status = (e as { response?: { status?: number } })?.response?.status;
-        if (status !== 404) throw e;
-        const { data } = await api.get<WeeklyPlan>(`/weekly-plans/${key}`);
-        return data;
-      }
+      const { data } = kind === 'token'
+        ? await api.get<WeeklyPlan>(`/weekly-plans/shared/${key}`)
+        : await api.get<WeeklyPlan>(`/weekly-plans/${key}`);
+      return data;
     },
   });
   const copy = useMutation({
@@ -823,8 +897,8 @@ function SharedPlanModal({ token, onClose }: { token: string | null; onClose: ()
         <div className="flex justify-center py-8">
           <Spinner className="text-brand" />
         </div>
-      ) : shared.isError || !p ? (
-        <Callout tone="danger">This plan is no longer shared, or the link has expired.</Callout>
+      ) : shared.isError || !p || !kind ? (
+        <Callout tone="danger">{kind ? 'This plan is no longer shared, or the link has expired.' : 'This link is not a Vybe plan link.'}</Callout>
       ) : (
         <div className="space-y-3">
           {p.description ? <p className="text-sm text-text-2">{p.description}</p> : null}
@@ -832,14 +906,9 @@ function SharedPlanModal({ token, onClose }: { token: string | null; onClose: ()
             {DAYS.map((d) => {
               const day = dayOf(p, d);
               const meals = day?.meals ?? [];
+              // "Breakfast: Eggs and toast · Lunch: qa8 Chicken rice", never "Breakfast: food".
               const summary = meals.length
-                ? meals
-                    .map((m) => {
-                      const template = typeof m.templateId === 'object' && m.templateId ? m.templateId.name : undefined;
-                      const detail = template || (m.foods?.length ? plural(m.foods.length, 'food') : '');
-                      return detail ? `${mealTypeLabel(m.mealType)}: ${detail}` : mealTypeLabel(m.mealType);
-                    })
-                    .join(' · ')
+                ? meals.map((m) => `${mealTypeLabel(m.mealType)}: ${slotLabel(m, 2)}`).join(' · ')
                 : 'Nothing planned';
               return (
                 <li key={d} className="flex items-start justify-between gap-3 px-3 py-2.5">
@@ -935,19 +1004,54 @@ export default function WeeklyPlans() {
     },
   });
 
-  const logToday = useMutation({
-    mutationFn: async (mealType?: string) => {
-      const { data } = await api.post('/weekly-plans/log-today', mealType ? { mealType } : {});
-      return data as { message?: string };
+  // Ids written by the last "Log today" this session: drives the "Logged"
+  // state and the Undo action. The server also refuses a repeat with 409.
+  const [loggedToday, setLoggedToday] = useState<string[] | null>(null);
+  const [conflict, setConflict] = useState<{ mealType?: string; mealIds: string[] } | null>(null);
+
+  const undoLog = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => api.delete(`/meals/${id}`)));
+      return ids.length;
     },
-    onSuccess: (_data, mealType) => {
-      toast.success(mealType ? `${mealTypeLabel(mealType)} logged from your plan` : 'Today’s meals logged', {
-        action: { label: 'View meals', onClick: () => navigate('/meals', { viewTransition: true }) },
+    onSuccess: (n) => {
+      setLoggedToday(null);
+      toast.success(`Removed ${n} logged ${plural(n, 'meal')}`);
+      qc.invalidateQueries({ queryKey: ['meals'] });
+      qc.invalidateQueries({ queryKey: ['nutrition-summary'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not undo')),
+  });
+
+  const logToday = useMutation({
+    mutationFn: async ({ mealType, force }: { mealType?: string; force?: boolean }) => {
+      const { data } = await api.post<LogTodayResponse>('/weekly-plans/log-today', {
+        ...(mealType ? { mealType } : {}),
+        ...(force ? { force: true } : {}),
+        ...localDayParams(),
+      });
+      return data;
+    },
+    onSuccess: (data, { mealType }) => {
+      const ids = data.mealIds ?? (data.meals ?? []).map((m) => m._id);
+      setConflict(null);
+      setLoggedToday(ids);
+      const n = ids.length;
+      toast.success(mealType ? `${mealTypeLabel(mealType)} logged from your plan` : `Logged ${n} ${plural(n, 'meal')} from your plan`, {
+        action: ids.length ? { label: 'Undo', onClick: () => undoLog.mutate(ids) } : { label: 'View meals', onClick: () => navigate('/meals', { viewTransition: true }) },
+        duration: 8000,
       });
       qc.invalidateQueries({ queryKey: ['meals'] });
       qc.invalidateQueries({ queryKey: ['nutrition-summary'] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not log today’s meals')),
+    onError: (e, { mealType }) => {
+      const response = (e as { response?: { status?: number; data?: LogTodayConflict } })?.response;
+      if (response?.status === 409) {
+        setConflict({ mealType, mealIds: response.data?.mealIds ?? [] });
+        return;
+      }
+      toast.error(errMsg(e, 'Could not log today’s meals'));
+    },
   });
 
   const remove = useMutation({
@@ -1063,13 +1167,31 @@ export default function WeeklyPlans() {
             </Button>
           ) : current ? (
             <>
-              <Button variant="primary" icon={<Check size={18} />} disabled={todayMeals.length === 0} loading={logToday.isPending && !logToday.variables} onClick={() => logToday.mutate(undefined)}>
-                Log today
-              </Button>
+              {loggedToday ? (
+                <Button
+                  variant="secondary"
+                  icon={<Check size={18} />}
+                  loading={undoLog.isPending}
+                  onClick={() => undoLog.mutate(loggedToday)}
+                  aria-label={`Logged ${loggedToday.length} ${plural(loggedToday.length, 'meal')} today. Undo`}
+                >
+                  Logged · Undo
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  icon={<Check size={18} />}
+                  disabled={todayMeals.length === 0 || logToday.isPending}
+                  loading={logToday.isPending && !logToday.variables?.mealType}
+                  onClick={() => logToday.mutate({})}
+                >
+                  Log today
+                </Button>
+              )}
               {todayTypes.length > 1 ? (
                 <Menu
                   label="Log a single meal"
-                  items={todayTypes.map((t) => ({ label: `Log ${mealTypeLabel(t).toLowerCase()} only`, icon: <Utensils size={18} />, onSelect: () => logToday.mutate(t) }))}
+                  items={todayTypes.map((t) => ({ label: `Log ${mealTypeLabel(t).toLowerCase()} only`, icon: <Utensils size={18} />, disabled: logToday.isPending, onSelect: () => logToday.mutate({ mealType: t }) }))}
                   trigger={({ open }) => (
                     <span className={cx('btn btn-secondary [--btn-h:44px] px-3', open && 'bg-surface-3')} aria-hidden="true">
                       <ChevronDown size={18} />
@@ -1129,6 +1251,17 @@ export default function WeeklyPlans() {
       <PlanModal open={planModal.open} editing={planModal.editing} onClose={() => setPlanModal({ open: false, editing: null })} />
       <AddMealModal target={addMealTarget} onClose={() => setAddMealTarget(null)} />
       <SharedPlanModal token={sharedToken} onClose={closeShared} />
+      <ConfirmDialog
+        open={Boolean(conflict)}
+        title={conflict?.mealType ? `${mealTypeLabel(conflict.mealType)} is already logged today` : 'Today is already logged'}
+        message={`${conflict?.mealIds.length ? `${conflict.mealIds.length} ${plural(conflict.mealIds.length, 'meal')} from this plan ${conflict.mealIds.length === 1 ? 'is' : 'are'} already in today’s log.` : 'These meals are already in today’s log.'} Log them again anyway? That doubles today’s calories.`}
+        confirmLabel="Log again"
+        cancelLabel="Keep as is"
+        destructive
+        loading={logToday.isPending}
+        onCancel={() => setConflict(null)}
+        onConfirm={() => conflict && logToday.mutate({ mealType: conflict.mealType, force: true })}
+      />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title="Delete this plan?"

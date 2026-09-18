@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "backendRevision": "d8de8c05b7c5bc95f85d3480f65337c9dc9846ef",
+  "backendRevision": "d7c71455e1e75e4f4814bf99b15e872d3a0fd6ed",
   "routes": [
     {
       "method": "GET",
@@ -2151,70 +2151,76 @@
       "order": 357
     },
     {
+      "method": "PUT",
+      "path": "/api/water/goal",
+      "file": "routes/water.js",
+      "order": 358
+    },
+    {
       "method": "DELETE",
       "path": "/api/water/:logId",
       "file": "routes/water.js",
-      "order": 358
+      "order": 359
     },
     {
       "method": "GET",
       "path": "/api/health/analytics",
       "file": "routes/health.js",
-      "order": 359
+      "order": 360
     },
     {
       "method": "GET",
       "path": "/api/health/workout-analytics",
       "file": "routes/health.js",
-      "order": 360
+      "order": 361
     },
     {
       "method": "GET",
       "path": "/api/health/nutrition-analytics",
       "file": "routes/health.js",
-      "order": 361
-    },
-    {
-      "method": "GET",
-      "path": "/api/health/entries",
-      "file": "routes/health.js",
       "order": 362
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/health/entries",
       "file": "routes/health.js",
       "order": 363
     },
     {
-      "method": "DELETE",
-      "path": "/api/health/entries/:date",
+      "method": "PUT",
+      "path": "/api/health/entries",
       "file": "routes/health.js",
       "order": 364
     },
     {
-      "method": "GET",
-      "path": "/api/health-goals",
-      "file": "routes/healthGoals.js",
+      "method": "DELETE",
+      "path": "/api/health/entries/:date",
+      "file": "routes/health.js",
       "order": 365
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/health-goals",
       "file": "routes/healthGoals.js",
       "order": 366
     },
     {
+      "method": "PUT",
+      "path": "/api/health-goals",
+      "file": "routes/healthGoals.js",
+      "order": 367
+    },
+    {
       "method": "POST",
       "path": "/api/health-goals/recalculate",
       "file": "routes/healthGoals.js",
-      "order": 367
+      "order": 368
     },
     {
       "method": "GET",
       "path": "/api/health-goals/daily-summary",
       "file": "routes/healthGoals.js",
-      "order": 368
+      "order": 369
     }
   ]
 }

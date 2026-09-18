@@ -30,6 +30,7 @@ import {
   cx,
   useToast,
 } from './ui';
+import { UnitsControl } from '../components/UnitsControl';
 import { ChevronRight, ExternalLink, FileText, LifeBuoy, LogOut, Shield } from './icons';
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
@@ -273,6 +274,20 @@ function AppearanceSection() {
       description="Choose how Vybe looks. System follows your device setting and switches automatically."
     >
       <ThemeControl />
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ units */
+
+function UnitsSection() {
+  return (
+    <SettingsCard
+      id="units"
+      title="Units"
+      description="Weight, height and hydration are shown in these units everywhere on the web. Your saved goals are not changed."
+    >
+      <UnitsControl />
     </SettingsCard>
   );
 }
@@ -642,7 +657,7 @@ export default function Settings() {
     <>
       <PageHeader
         title="Settings"
-        subtitle="Account, appearance, notifications and privacy."
+        subtitle="Account, appearance, units, notifications and privacy."
         actions={
           <Button variant="ghost" icon={<LogOut size={18} />} onClick={() => logout()}>
             Sign out
@@ -657,6 +672,7 @@ export default function Settings() {
       <div className="w-full max-w-form space-y-4">
         <AccountSection />
         <AppearanceSection />
+        <UnitsSection />
         <PasswordSection />
         <NotificationsSection />
         <EmailPreferencesSection />

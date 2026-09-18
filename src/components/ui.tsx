@@ -17,6 +17,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
+  Ref,
   RefObject,
   TextareaHTMLAttributes,
 } from 'react';
@@ -846,7 +847,7 @@ export function Input({
   leading,
   trailing,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & FieldProps & { leading?: ReactNode; trailing?: ReactNode }) {
+}: InputHTMLAttributes<HTMLInputElement> & FieldProps & { leading?: ReactNode; trailing?: ReactNode; ref?: Ref<HTMLInputElement> }) {
   const auto = useId();
   const inputId = id || auto;
   return (
@@ -2781,7 +2782,14 @@ export function Ring({
   }, []);
   const strokeColor = (VIZ as Record<string, string>)[color] ?? color;
   return (
-    <div className={cx('relative inline-flex items-center justify-center', className)} style={{ width: size, height: size }} role={label ? 'img' : undefined} aria-label={label ? `${label}: ${Math.round(pct * 100)}%` : undefined}>
+    <div
+      className={cx('relative inline-flex items-center justify-center', className)}
+      style={{ width: size, height: size }}
+      role={label ? 'img' : undefined}
+      // No percentage when there is no target: "Calories 134 kcal: 0%" told
+      // screen-reader users they had eaten none of a goal that did not exist.
+      aria-label={label ? (max > 0 ? `${label}: ${Math.round(pct * 100)}%` : label) : undefined}
+    >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden="true">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
         <circle
