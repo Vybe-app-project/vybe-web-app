@@ -4,14 +4,40 @@ set -Eeuo pipefail
 # Runs on the OVH host. This script builds one exact source archive, publishes
 # it to an immutable directory, and atomically advances the `current` symlink.
 
+check_current_release() {
+  local expected="$1" current_path="$2" actual
+  if [[ "$expected" != "none" && ! "$expected" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "expected current release must be a commit SHA or none" >&2
+    return 1
+  fi
+  if [[ -L "$current_path" ]]; then
+    actual="$(basename "$(readlink "$current_path")")"
+  elif [[ -e "$current_path" ]]; then
+    echo "current release is not a symlink" >&2
+    return 1
+  else
+    actual="none"
+  fi
+  if [[ "$actual" != "$expected" ]]; then
+    echo "current release changed: expected $expected, found $actual; refusing to overwrite another deployment" >&2
+    return 1
+  fi
+}
+
+if [[ "${1:-}" == "--check-current" ]]; then
+  check_current_release "${2:?missing expected release}" "${3:?missing current symlink}"
+  exit
+fi
+
 if (( EUID != 0 )); then
   echo "deploy-web-remote.sh must run as root" >&2
   exit 1
 fi
 
-archive="${1:?usage: deploy-web-remote.sh ARCHIVE SHA256 COMMIT_SHA}"
+archive="${1:?usage: deploy-web-remote.sh ARCHIVE SHA256 COMMIT_SHA EXPECTED_CURRENT}"
 expected_checksum="${2:?missing archive SHA-256}"
 commit_sha="${3:?missing commit SHA}"
+expected_current="${4:?missing expected current release SHA or none}"
 release_root="${VYBE_WEB_RELEASE_ROOT:-/srv/vybe-consumer}"
 health_url="${VYBE_WEB_HEALTH_URL:-}"
 
@@ -40,6 +66,7 @@ flock -x 9
 
 release="$release_root/releases/$commit_sha"
 current="$release_root/current"
+check_current_release "$expected_current" "$current"
 
 if [[ -e "$release" ]]; then
   if [[ ! -f "$release/release.json" ]] \
