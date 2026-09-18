@@ -1,0 +1,30 @@
+name: Web CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Scan source before installing dependencies
+        run: node scripts/scan-injected-code.mjs
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Audit, test, type-check and verify the production build
+        run: npm run verify

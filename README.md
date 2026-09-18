@@ -13,10 +13,11 @@ embeds those values in the public JavaScript bundle.
 
 ## Local verification
 
-Use the locked Node version:
+Use Node 24.19.0 LTS from `.node-version` (npm 11.17.0):
 
 ```sh
-export PATH=/Users/Charlie/opt/node20/bin:$PATH
+export PATH="$HOME/.local/share/fnm/node-versions/v24.19.0/installation/bin:$PATH"
+node scripts/scan-injected-code.mjs
 npm ci
 npm run verify
 ```
@@ -31,7 +32,8 @@ stale snapshot before it can be released.
 
 ## OVH build
 
-The release container is pinned to Node 20.20.2. It builds a static artifact
+The release container is pinned by digest to Node 24.19.0 Alpine. It scans
+source before installing dependencies and builds a static artifact
 without requiring a GitHub Actions runner:
 
 ```sh
