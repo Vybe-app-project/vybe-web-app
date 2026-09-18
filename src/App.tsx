@@ -6,54 +6,51 @@ import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth } from './lib/auth';
-import { registerPreload } from './lib/navigation';
+import { lazyPage } from './lib/navigation';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
  * bundle would make first paint on mobile noticeably worse, which matters
  * because this same origin backs the iOS web views.
  *
- * Each loader is also registered by path so the shell can warm a chunk when
- * the user shows intent (pointer down / hover on a nav link) and the tab
- * roots while the browser is idle; otherwise the first tap into a section
- * shows nothing until the chunk arrives.
+ * Consumer pages go through lazyPage (lib/navigation.ts): each loader is
+ * registered by path so the shell can warm a chunk when the user shows
+ * intent (pointer down / hover on a nav link) and the tab roots while the
+ * browser is idle, and a warmed page renders without suspending, so the
+ * skeleton only ever shows for a chunk that is genuinely still downloading.
  */
-function page<T>(path: string | null, load: () => Promise<{ default: T }>) {
-  if (path) registerPreload(path, load);
-  return load;
-}
-const Feed = lazy(page('/', () => import('./pages/Feed')));
-const Discover = lazy(page('/discover', () => import('./pages/Discover')));
-const Search = lazy(page('/search', () => import('./pages/Search')));
-const PostDetail = lazy(page(null, () => import('./pages/PostDetail')));
-const Profile = lazy(page('/profile', () => import('./pages/Profile')));
-const UserProfile = lazy(page(null, () => import('./pages/UserProfile')));
-const Settings = lazy(page('/settings', () => import('./pages/Settings')));
-const Notifications = lazy(page('/notifications', () => import('./pages/Notifications')));
-const Messages = lazy(page('/messages', () => import('./pages/Messages')));
-const Friends = lazy(page('/friends', () => import('./pages/Friends')));
-const Stories = lazy(page('/stories', () => import('./pages/Stories')));
-const Gyms = lazy(page('/gyms', () => import('./pages/Gyms')));
-const GymCommunity = lazy(page('/communities', () => import('./pages/GymCommunity')));
-const Livestreams = lazy(page('/live', () => import('./pages/Livestreams')));
-const Support = lazy(page('/support', () => import('./pages/Support')));
-const OpenHandoff = lazy(page(null, () => import('./pages/OpenHandoff')));
-const NotFound = lazy(page(null, () => import('./pages/NotFound')));
+const Feed = lazyPage('/', () => import('./pages/Feed'));
+const Discover = lazyPage('/discover', () => import('./pages/Discover'));
+const Search = lazyPage('/search', () => import('./pages/Search'));
+const PostDetail = lazyPage(null, () => import('./pages/PostDetail'));
+const Profile = lazyPage('/profile', () => import('./pages/Profile'));
+const UserProfile = lazyPage(null, () => import('./pages/UserProfile'));
+const Settings = lazyPage('/settings', () => import('./pages/Settings'));
+const Notifications = lazyPage('/notifications', () => import('./pages/Notifications'));
+const Messages = lazyPage('/messages', () => import('./pages/Messages'));
+const Friends = lazyPage('/friends', () => import('./pages/Friends'));
+const Stories = lazyPage('/stories', () => import('./pages/Stories'));
+const Gyms = lazyPage('/gyms', () => import('./pages/Gyms'));
+const GymCommunity = lazyPage('/communities', () => import('./pages/GymCommunity'));
+const Livestreams = lazyPage('/live', () => import('./pages/Livestreams'));
+const Support = lazyPage('/support', () => import('./pages/Support'));
+const OpenHandoff = lazyPage(null, () => import('./pages/OpenHandoff'));
+const NotFound = lazyPage(null, () => import('./pages/NotFound'));
 
-const Workouts = lazy(page('/workouts', () => import('./pages/Workouts')));
-const WorkoutDetail = lazy(page(null, () => import('./pages/WorkoutDetail')));
-const WorkoutLogs = lazy(page('/workouts/logs', () => import('./pages/WorkoutLogs')));
-const Meals = lazy(page('/meals', () => import('./pages/Meals')));
-const MealDetail = lazy(page(null, () => import('./pages/MealDetail')));
-const SharedMeal = lazy(page(null, () => import('./pages/SharedMeal')));
-const MealTemplates = lazy(page('/meals/templates', () => import('./pages/MealTemplates')));
-const WeeklyPlans = lazy(page('/meals/plans', () => import('./pages/WeeklyPlans')));
-const Health = lazy(page('/health', () => import('./pages/Health')));
-const HealthGoals = lazy(page('/health/goals', () => import('./pages/HealthGoals')));
-const Water = lazy(page('/health/water', () => import('./pages/Water')));
-const ProgressPhotos = lazy(page('/health/photos', () => import('./pages/ProgressPhotos')));
-const Challenges = lazy(page('/challenges', () => import('./pages/Challenges')));
-const Achievements = lazy(page('/achievements', () => import('./pages/Achievements')));
+const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
+const WorkoutDetail = lazyPage(null, () => import('./pages/WorkoutDetail'));
+const WorkoutLogs = lazyPage('/workouts/logs', () => import('./pages/WorkoutLogs'));
+const Meals = lazyPage('/meals', () => import('./pages/Meals'));
+const MealDetail = lazyPage(null, () => import('./pages/MealDetail'));
+const SharedMeal = lazyPage(null, () => import('./pages/SharedMeal'));
+const MealTemplates = lazyPage('/meals/templates', () => import('./pages/MealTemplates'));
+const WeeklyPlans = lazyPage('/meals/plans', () => import('./pages/WeeklyPlans'));
+const Health = lazyPage('/health', () => import('./pages/Health'));
+const HealthGoals = lazyPage('/health/goals', () => import('./pages/HealthGoals'));
+const Water = lazyPage('/health/water', () => import('./pages/Water'));
+const ProgressPhotos = lazyPage('/health/photos', () => import('./pages/ProgressPhotos'));
+const Challenges = lazyPage('/challenges', () => import('./pages/Challenges'));
+const Achievements = lazyPage('/achievements', () => import('./pages/Achievements'));
 
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));

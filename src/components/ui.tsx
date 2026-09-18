@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import type {
+  AnchorHTMLAttributes,
   ButtonHTMLAttributes,
   CSSProperties,
   HTMLAttributes,
@@ -748,6 +749,8 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   /** Small count pill in the top-right corner. */
   badge?: number | string | null;
   to?: string;
+  /** Handlers for the link form (`to`), e.g. the shell's route-change intent props (preload + pending destination). */
+  linkProps?: Pick<AnchorHTMLAttributes<HTMLAnchorElement>, 'onPointerDown' | 'onMouseEnter' | 'onFocus' | 'onClick'>;
 };
 
 const ICON_BUTTON_VARIANT = {
@@ -764,6 +767,7 @@ export function IconButton({
   active = false,
   badge,
   to,
+  linkProps,
   className,
   children,
   type = 'button',
@@ -784,7 +788,7 @@ export function IconButton({
   );
   if (to) {
     return (
-      <Link to={to} viewTransition aria-label={label} title={label} className={cls}>
+      <Link to={to} viewTransition aria-label={label} title={label} className={cls} {...linkProps}>
         {inner}
       </Link>
     );

@@ -82,8 +82,11 @@ function onUnauthorized(kind: 'user' | 'admin') {
     tokenStore.clearAdmin();
     if (!location.pathname.startsWith('/admin/login')) location.href = '/admin/login';
   } else {
+    // Only a session that existed can have expired; a visitor whose request
+    // 401s on a public page just needs the sign-in form.
+    const hadSession = !!tokenStore.get();
     tokenStore.clear();
-    if (!location.pathname.startsWith('/login')) location.href = signInRedirect(location.pathname, location.search);
+    if (!location.pathname.startsWith('/login')) location.href = signInRedirect(location.pathname, location.search, hadSession ? 'expired' : null);
   }
 }
 

@@ -85,13 +85,6 @@ export type RouteMeta = {
   /** Feed-width content with the desktop right rail. */
   rail?: boolean;
   hideTabs?: boolean;
-  /**
-   * Routes rendered by the same page component share a chunk key so moving
-   * between them (a chat room, a stream) keeps the page mounted; every other
-   * route gets a fresh Suspense boundary so its skeleton shows while the
-   * chunk downloads instead of the previous page being held on screen.
-   */
-  chunk?: string;
 };
 
 /**
@@ -105,12 +98,12 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/search', title: 'Search', tab: 'home', nav: '/discover', hub: 'explore' },
   { pattern: '/stories', title: 'Stories', tab: 'home', nav: '/stories', hub: 'explore' },
   { pattern: '/live', title: 'Live', tab: 'home', nav: '/live', hub: 'explore' },
-  { pattern: '/live/:streamId', title: 'Live', tab: 'home', nav: '/live', parent: '/live', chunk: '/live' },
+  { pattern: '/live/:streamId', title: 'Live', tab: 'home', nav: '/live', parent: '/live' },
   { pattern: '/p/:postId', title: 'Post', tab: 'home', nav: '/', parent: '/', rail: true },
   { pattern: '/u/:id', title: 'Profile', tab: 'home', nav: '/', parent: '/' },
   { pattern: '/notifications', title: 'Notifications', tab: 'home', nav: '/notifications', hub: 'inbox' },
   { pattern: '/messages', title: 'Messages', tab: 'home', nav: '/messages', hub: 'inbox' },
-  { pattern: '/messages/:roomId', title: 'Messages', tab: 'home', nav: '/messages', parent: '/messages', hideTabs: true, chunk: '/messages' },
+  { pattern: '/messages/:roomId', title: 'Messages', tab: 'home', nav: '/messages', parent: '/messages', hideTabs: true },
   { pattern: '/profile', title: 'Profile', tab: 'you', nav: '/profile', root: true },
   { pattern: '/friends', title: 'Friends', tab: 'you', nav: '/friends', parent: '/profile' },
   { pattern: '/settings', title: 'Settings', tab: 'you', nav: '/settings', parent: '/profile' },
@@ -301,12 +294,15 @@ const willNavigateHere = (e: ReactMouseEvent) => e.button === 0 && !e.metaKey &&
 function useNavLinkProps(to: string) {
   const { pathname } = useLocation();
   const start = usePendingNavigation((s) => s.start);
-  const warm = () => preload(to);
+  const warm = () => {
+    void preload(to);
+  };
+  // pointerdown covers touch as well; a touchstart handler on top of it only
+  // doubled the calls for the taps that begin a scroll.
   return {
     onPointerDown: warm,
     onMouseEnter: warm,
     onFocus: warm,
-    onTouchStart: warm,
     onClick: (e: ReactMouseEvent) => {
       const path = pathOf(to);
       if (willNavigateHere(e) && path !== pathname) start(path);
@@ -316,19 +312,11 @@ function useNavLinkProps(to: string) {
 
 /**
  * Thin indeterminate bar under the top edge while a route's code downloads.
- * Appears after 150 ms so a cached chunk (the common case) never flashes it.
+ * Driven by the store's grace-timed flag, so a chunk that is in memory
+ * (lazyPage) or lands within NAV_GRACE_MS never flashes it.
  */
 function NavProgress() {
-  const pending = usePendingNavigation(selectNavigating);
-  const [show, setShow] = useState(false);
-  useEffect(() => {
-    if (!pending) {
-      setShow(false);
-      return;
-    }
-    const t = window.setTimeout(() => setShow(true), 150);
-    return () => window.clearTimeout(t);
-  }, [pending]);
+  const show = usePendingNavigation(selectNavigating);
   if (!show) return null;
   return (
     <div role="progressbar" aria-label="Loading page" aria-busy="true" className="pointer-events-none fixed inset-x-0 top-0 z-[60] h-0.5 overflow-hidden bg-brand-soft">
@@ -338,9 +326,10 @@ function NavProgress() {
 }
 
 /**
- * The page region's Suspense fallback. While it is mounted the route's chunk
- * is still downloading, so the progress bar stays up for the whole wait, not
- * just until the location commits.
+ * The page region's Suspense fallback. Navigations never reach it (the
+ * previous page is held, then swapped for the skeleton below); it mounts on a
+ * hard load whose chunk is still downloading and keeps the progress bar up
+ * for the whole wait.
  */
 function RouteFallback() {
   const setChunkLoading = usePendingNavigation((s) => s.setChunkLoading);
@@ -378,6 +367,7 @@ function OfflineBanner() {
 function SearchBox({ className }: { className?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const start = usePendingNavigation((s) => s.start);
   const [q, setQ] = useState('');
 
   useEffect(() => {
@@ -388,6 +378,7 @@ function SearchBox({ className }: { className?: string }) {
     e.preventDefault();
     const value = q.trim();
     if (!value) return;
+    if (location.pathname !== '/search') start('/search');
     navigate(`/search?q=${encodeURIComponent(value)}`, { viewTransition: true });
   };
 
@@ -589,11 +580,12 @@ function Sidebar({ meta, chats, notifications, liveEnabled }: { meta: RouteMeta;
 }
 
 function DesktopTopBar({ notifications }: { notifications: string | number | null }) {
+  const notificationsNav = useNavLinkProps('/notifications');
   return (
     <header className="vt-header sticky top-0 z-40 hidden h-14 items-center gap-4 border-b border-line bg-bg/85 px-6 backdrop-blur-xl lg:flex xl:px-8">
       <SearchBox className="w-full max-w-md" />
       <div className="ml-auto flex items-center gap-1">
-        <IconButton to="/notifications" label="Notifications" badge={notifications}>
+        <IconButton to="/notifications" label="Notifications" badge={notifications} linkProps={notificationsNav}>
           <Bell size={22} />
         </IconButton>
         <AccountMenu />
@@ -621,6 +613,11 @@ function MobileTopBar({
   const { logout } = useAuth();
   const isHome = meta.pattern === '/';
   const showBack = typeof back === 'string' || back === true || (back === undefined && !meta.root && !meta.hub && !isHome);
+  // The Home top bar's icons are primary entry points too: same preload-on-intent
+  // and pending-destination feedback as the tabs.
+  const searchNav = useNavLinkProps('/search');
+  const messagesNav = useNavLinkProps('/messages');
+  const notificationsNav = useNavLinkProps('/notifications');
 
   const goBack = () => {
     if (typeof back === 'string') return navigate(back, { viewTransition: true });
@@ -666,13 +663,13 @@ function MobileTopBar({
           {actions}
           {isHome ? (
             <>
-              <IconButton to="/search" label="Search">
+              <IconButton to="/search" label="Search" linkProps={searchNav}>
                 <Compass size={22} />
               </IconButton>
-              <IconButton to="/messages" label="Messages" badge={chats}>
+              <IconButton to="/messages" label="Messages" badge={chats} linkProps={messagesNav}>
                 <Inbox size={22} />
               </IconButton>
-              <IconButton to="/notifications" label="Notifications" badge={notifications}>
+              <IconButton to="/notifications" label="Notifications" badge={notifications} linkProps={notificationsNav}>
                 <Bell size={22} />
               </IconButton>
             </>
@@ -928,6 +925,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
   // Route-change feedback: the destination a nav control was activated for,
   // until the location catches up (see lib/navigation.ts).
   const pendingPath = usePendingNavigation((s) => s.pendingPath);
+  const slow = usePendingNavigation((s) => s.slow);
   const finish = usePendingNavigation((s) => s.finish);
   useEffect(() => {
     finish();
@@ -938,7 +936,19 @@ export default function Layout({ children }: { children?: ReactNode }) {
     const t = window.setTimeout(finish, 10_000);
     return () => window.clearTimeout(t);
   }, [pendingPath, finish]);
-  const navMeta = useMemo(() => (pendingPath && pendingPath !== pathname ? routeMeta(pendingPath) : meta), [pendingPath, pathname, meta]);
+  const pending = pendingPath !== null && pendingPath !== pathname;
+  const navMeta = useMemo(() => (pending && pendingPath ? routeMeta(pendingPath) : meta), [pending, pendingPath, meta]);
+  // The router commits a location change inside startTransition, so while the
+  // destination's code downloads React holds the previous page. The tapped tab
+  // lights up at once (navMeta), and a chunk already in memory renders straight
+  // through (lazyPage). Only past the grace period do the destination's chrome
+  // and a skeleton replace the held page: a Suspense fallback is never
+  // committed for a navigation, because React would then hold it for its
+  // 300 ms throttle and every quick chunk would flash a skeleton.
+  const waiting = pending && slow;
+  const shellMeta = waiting ? navMeta : meta;
+  const shellChrome = waiting ? null : chrome;
+  const shellPath = waiting && pendingPath ? pendingPath : pathname;
 
   useEffect(() => preloadWhenIdle(TAB_ROOT_PATHS), []);
 
@@ -952,14 +962,14 @@ export default function Layout({ children }: { children?: ReactNode }) {
   const homeTotal = (unreadChats.data ?? 0) + (unreadNotifs.data?.count ?? 0);
   const homeBadge = badgeText(homeTotal, unreadNotifs.data?.more);
 
-  const title = chrome?.title || meta.title;
+  const title = shellChrome?.title || shellMeta.title;
   useEffect(() => {
-    document.title = pathname === '/' ? 'Vybe' : `${title} · Vybe`;
-  }, [title, pathname]);
+    document.title = shellPath === '/' ? 'Vybe' : `${title} · Vybe`;
+  }, [title, shellPath]);
 
-  const hub = meta.hub && !meta.hideTabs && !chrome?.hideSectionTabs ? meta.hub : null;
-  const rail: ReactNode = chrome && 'rail' in chrome && chrome.rail !== undefined ? chrome.rail : meta.rail ? <DefaultRail /> : null;
-  const feedWidth = !!rail && !chrome?.wide;
+  const hub = shellMeta.hub && !shellMeta.hideTabs && !shellChrome?.hideSectionTabs ? shellMeta.hub : null;
+  const rail: ReactNode = shellChrome && 'rail' in shellChrome && shellChrome.rail !== undefined ? shellChrome.rail : shellMeta.rail ? <DefaultRail /> : null;
+  const feedWidth = !!rail && !shellChrome?.wide;
 
   return (
     <div className="min-h-dvh bg-bg text-text-1 lg:flex">
@@ -968,21 +978,21 @@ export default function Layout({ children }: { children?: ReactNode }) {
       <Sidebar meta={navMeta} chats={chats} notifications={notifications} liveEnabled={liveEnabled} />
 
       <div className="min-w-0 flex-1 overflow-x-clip">
-        {!chrome?.hideTopBar ? (
+        {!shellChrome?.hideTopBar ? (
           <>
-            <MobileTopBar meta={meta} title={title} back={chrome?.back} actions={chrome?.actions} chats={chats} notifications={notifications} />
+            <MobileTopBar meta={shellMeta} title={title} back={shellChrome?.back} actions={shellChrome?.actions} chats={chats} notifications={notifications} />
             <DesktopTopBar notifications={notifications} />
           </>
         ) : null}
         <OfflineBanner />
-        {hub ? <SectionTabs hub={hub} pathname={pathname} chats={chats} notifications={notifications} liveEnabled={liveEnabled} /> : null}
+        {hub ? <SectionTabs hub={hub} pathname={shellPath} chats={chats} notifications={notifications} liveEnabled={liveEnabled} /> : null}
 
         {/* Feed-width pages centre a 600 px column from tablets up (a 720 px
             4:5 photo was 900 px tall); the rail joins at lg. */}
         <div className={cx('mx-auto flex w-full gap-8 px-4 md:px-6 lg:px-8', feedWidth ? 'max-w-[62rem] justify-center' : 'max-w-[1200px]')}>
-          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none lg:pt-6', chrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'md:max-w-feed')}>
-            <Suspense key={meta.chunk ?? meta.pattern} fallback={<RouteFallback />}>
-              {children ?? <Outlet />}
+          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none lg:pt-6', shellChrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'md:max-w-feed')}>
+            <Suspense fallback={<RouteFallback />}>
+              {waiting ? <PageSkeleton /> : (children ?? <Outlet />)}
             </Suspense>
           </main>
           {rail ? (
@@ -993,7 +1003,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
         </div>
       </div>
 
-      {!chrome?.hideBottomNav ? <BottomNav meta={navMeta} homeBadge={homeBadge} /> : null}
+      {!shellChrome?.hideBottomNav ? <BottomNav meta={navMeta} homeBadge={homeBadge} /> : null}
       <LogSheet />
     </div>
   );

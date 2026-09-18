@@ -1138,7 +1138,7 @@ function ChallengeCard({
 
       <div className="min-w-0 space-y-1">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="line-clamp-2 text-md font-semibold text-text-1">{challenge.title}</h3>
+          <h2 className="line-clamp-2 text-md font-semibold text-text-1">{challenge.title}</h2>
           {challenge.ownership === 'system' ? <Badge tone="info">Official</Badge> : null}
         </div>
         <p className="line-clamp-2 text-xs leading-5 text-text-2">{challenge.description}</p>

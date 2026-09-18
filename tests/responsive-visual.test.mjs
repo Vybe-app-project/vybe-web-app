@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { register } from 'node:module';
 import path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 register('./ts-loader.mjs', import.meta.url);
@@ -79,38 +79,149 @@ test('navigation store records the tapped destination and preloads run once per 
   assert.equal(nav.pathOf('/health/water?log=1#a'), '/health/water');
   assert.equal(nav.pathOf(''), '/');
 
-  const store = nav.usePendingNavigation;
-  store.getState().start('/meals');
-  assert.equal(store.getState().pendingPath, '/meals');
-  assert.equal(nav.selectNavigating(store.getState()), true);
-  store.getState().finish();
-  assert.equal(store.getState().pendingPath, null);
-  assert.equal(nav.selectNavigating(store.getState()), false);
-  store.getState().setChunkLoading(true);
-  assert.equal(nav.selectNavigating(store.getState()), true, 'a downloading chunk keeps the bar up after the location commits');
-  store.getState().setChunkLoading(false);
+  // The pending store: the destination is recorded at once (tab highlight), but the
+  // skeleton/progress feedback only after the grace period, so a chunk that lands
+  // quickly (service worker, HTTP cache) never flashes anything.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const store = nav.usePendingNavigation;
+    store.getState().start('/meals');
+    assert.equal(store.getState().pendingPath, '/meals');
+    assert.equal(store.getState().slow, false);
+    assert.equal(nav.selectNavigating(store.getState()), false, 'no bar inside the grace period');
+    mock.timers.tick(nav.NAV_GRACE_MS - 1);
+    assert.equal(store.getState().slow, false);
+    mock.timers.tick(1);
+    assert.equal(store.getState().slow, true, 'past the grace period the shell shows the skeleton and bar');
+    assert.equal(nav.selectNavigating(store.getState()), true);
+    store.getState().finish();
+    assert.equal(store.getState().pendingPath, null);
+    assert.equal(store.getState().slow, false);
+    assert.equal(nav.selectNavigating(store.getState()), false);
+
+    // A navigation that commits inside the grace period cancels the timer: no late flash.
+    store.getState().start('/gyms');
+    store.getState().finish();
+    mock.timers.tick(nav.NAV_GRACE_MS * 2);
+    assert.equal(store.getState().slow, false, 'a finished navigation must not turn slow afterwards');
+
+    // Re-targeting restarts the grace period for the new destination.
+    store.getState().start('/workouts');
+    mock.timers.tick(nav.NAV_GRACE_MS - 10);
+    store.getState().start('/profile');
+    mock.timers.tick(20);
+    assert.equal(store.getState().slow, false, 'the grace period belongs to the latest destination');
+    mock.timers.tick(nav.NAV_GRACE_MS);
+    assert.equal(store.getState().slow, true);
+    store.getState().finish();
+
+    store.getState().setChunkLoading(true);
+    assert.equal(nav.selectNavigating(store.getState()), true, 'a hard load still downloading its chunk keeps the bar up');
+    store.getState().setChunkLoading(false);
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(nav.NAV_GRACE_MS, 150);
 });
 
 test('the shell shows progress and a keyed skeleton while a route chunk downloads, and warms chunks on intent', () => {
-  // Every routed page that a nav control can reach registers a preload, and every registered path is routed.
-  const registered = [...app.matchAll(/page\('([^']+)', \(\) => import\('\.\/pages\/(\w+)'\)\)/g)].map((m) => m[1]);
+  // Every consumer page is a lazyPage (the registry owns the chunk, so a warmed page never suspends);
+  // every routed page a nav control can reach registers a preload, and every registered path is routed.
+  assert.doesNotMatch(app, /lazy\(page\(/, 'React.lazy over a separately warmed import() suspends on its first render; use lazyPage');
+  const pages = [...app.matchAll(/^const (\w+) = (lazyPage|lazy)\((?:(null|'[^']*'), )?\(\) => import\('\.\/pages\/(\w+)'\)\);$/gm)];
+  const consumer = pages.filter((m) => !/^(Login|Register|ForgotPassword|ResetPassword)$/.test(m[1]) && !m[4].startsWith('admin/'));
+  assert.ok(consumer.length >= 30, `expected every consumer page to be code-split, found ${consumer.length}`);
+  for (const m of consumer) assert.equal(m[2], 'lazyPage', `${m[1]} must go through lazyPage so a warmed chunk renders without a skeleton`);
+  const registered = consumer.filter((m) => m[3] && m[3] !== 'null').map((m) => m[3].slice(1, -1));
   assert.ok(registered.length >= 20, `expected the nav destinations to register preloads, found ${registered.length}`);
   const routed = new Set(['/', ...[...app.matchAll(/<Route path="([^"*:]+)"/g)].map((m) => (m[1].startsWith('/') ? m[1] : `/${m[1]}`))]);
   for (const p of registered) assert.ok(routed.has(p), `${p} registers a preload but is not routed`);
   for (const p of ['/', '/meals', '/gyms', '/workouts', '/profile']) assert.ok(registered.includes(p), `tab root ${p} must preload`);
 
-  assert.match(layout, /<Suspense key=\{meta\.chunk \?\? meta\.pattern\} fallback=\{<RouteFallback \/>\}>/, 'the page region needs its own, per-route Suspense boundary');
-  assert.match(layout, /function RouteFallback\(\)[\s\S]*?setChunkLoading\(true\);[\s\S]*?return <PageSkeleton \/>;/, 'the skeleton keeps the progress bar up for the whole download');
-  assert.match(layout, /usePendingNavigation\(selectNavigating\)/);
-  assert.match(layout, /chunk: '\/messages'/, 'chat rooms share one chunk so switching rooms keeps Messages mounted');
+  // The page region keeps ONE stable Suspense boundary: a boundary keyed per route commits its fallback the
+  // moment the location changes and React then holds that fallback for its 300 ms throttle, so every first
+  // visit flashed a skeleton even with the chunk in memory. Instead the held page is swapped for the skeleton
+  // (and the shell for the destination's chrome) only once the grace period has passed.
+  assert.doesNotMatch(layout, /<Suspense key=/, 'no per-route Suspense key: it makes a grace period impossible');
+  assert.match(layout, /<Suspense fallback=\{<RouteFallback \/>\}>\s+\{waiting \? <PageSkeleton \/> : \(children \?\? <Outlet \/>\)\}\s+<\/Suspense>/);
+  assert.match(layout, /const pending = pendingPath !== null && pendingPath !== pathname;/);
+  assert.match(layout, /const waiting = pending && slow;\s+const shellMeta = waiting \? navMeta : meta;\s+const shellChrome = waiting \? null : chrome;\s+const shellPath = waiting && pendingPath \? pendingPath : pathname;/);
+  assert.match(layout, /<MobileTopBar meta=\{shellMeta\} title=\{title\} back=\{shellChrome\?\.back\} actions=\{shellChrome\?\.actions\}/, 'the top bar follows the destination once its skeleton shows');
+  assert.match(layout, /<SectionTabs hub=\{hub\} pathname=\{shellPath\}/);
+  assert.match(layout, /function RouteFallback\(\)[\s\S]*?setChunkLoading\(true\);[\s\S]*?return <PageSkeleton \/>;/, 'a hard load keeps the progress bar up for the whole download');
+  assert.match(layout, /const show = usePendingNavigation\(selectNavigating\);/, 'the bar is driven by the store grace flag, not a second timer');
   assert.match(layout, /function NavProgress\(\)/);
   assert.match(layout, /role="progressbar" aria-label="Loading page"/);
-  assert.match(layout, /const navMeta = useMemo\(\(\) => \(pendingPath && pendingPath !== pathname \? routeMeta\(pendingPath\) : meta\)/, 'the tapped tab lights up before the location commits');
+  assert.match(layout, /const navMeta = useMemo\(\(\) => \(pending && pendingPath \? routeMeta\(pendingPath\) : meta\)/, 'the tapped tab lights up before the location commits');
   assert.match(layout, /<Sidebar meta=\{navMeta\}/);
   assert.match(layout, /<BottomNav meta=\{navMeta\}/);
-  assert.match(layout, /onPointerDown: warm,\s+onMouseEnter: warm,\s+onFocus: warm,\s+onTouchStart: warm/);
+  assert.match(layout, /onPointerDown: warm,\s+onMouseEnter: warm,\s+onFocus: warm,\s+onClick/);
+  // The Home top bar's icons and the search form are entry points too, so they carry the same intent props.
+  assert.match(ui, /<Link to=\{to\} viewTransition aria-label=\{label\} title=\{label\} className=\{cls\} \{\.\.\.linkProps\}>/, 'IconButton links accept the intent handlers');
+  for (const [to, name] of [['/search', 'searchNav'], ['/messages', 'messagesNav'], ['/notifications', 'notificationsNav']]) {
+    assert.match(layout, new RegExp(`const ${name} = useNavLinkProps\\('${to}'\\);`), `${to} top-bar icon records intent`);
+    assert.match(layout, new RegExp(`<IconButton to="${to}" label="[^"]+"[^>]*linkProps=\\{${name}\\}>`));
+  }
+  assert.match(layout, /if \(location\.pathname !== '\/search'\) start\('\/search'\);\s+navigate\(`\/search\?q=/, 'submitting the search box records its destination');
+  assert.doesNotMatch(layout, /onTouchStart: warm/, 'pointerdown already fires for touch; a touchstart handler doubled the preloads on scroll-start taps');
   assert.match(layout, /useEffect\(\(\) => preloadWhenIdle\(TAB_ROOT_PATHS\), \[\]\)/);
   assert.match(css, /@keyframes nav-progress/);
+});
+
+test('a page whose chunk is already in memory renders without suspending; only a chunk still downloading shows the skeleton', async () => {
+  // renderToString marks a boundary that suspended with <!--$!--> (and emits the fallback) and one that
+  // rendered straight through with <!--$-->, so it can tell a warm first render from a cold one without a DOM.
+  const { createElement, lazy, Suspense } = await import('react');
+  const { renderToString } = await import('react-dom/server');
+  const nav = await import('../src/lib/navigation.ts');
+  nav.resetPreloads();
+  const Meals = () => createElement('h1', null, 'Meals');
+  const render = (Component) => renderToString(createElement(Suspense, { fallback: createElement('p', null, 'SKELETON') }, createElement(Component)));
+
+  // Cold, then in flight: the first render while the chunk downloads suspends, and reuses the preload's download.
+  let release;
+  let calls = 0;
+  const load = () => {
+    calls += 1;
+    return new Promise((resolve) => {
+      release = () => resolve({ default: Meals });
+    });
+  };
+  const MealsPage = nav.lazyPage('/meals', load);
+  const warming = nav.preload('/meals?log=1');
+  assert.equal(calls, 1);
+  assert.match(render(MealsPage), /<!--\$!-->[\s\S]*SKELETON/, 'a chunk still downloading shows the boundary fallback');
+  assert.equal(calls, 1, 'the page reuses the preload download instead of starting a second one');
+  release();
+  await warming;
+  const warm = render(MealsPage);
+  assert.match(warm, /<!--\$--><h1>Meals<\/h1>/, 'once the chunk has landed the page renders straight through');
+  assert.doesNotMatch(warm, /SKELETON|\$!/);
+  assert.equal(calls, 1);
+
+  // Warm on the very first render (the idle/hover preload case): no suspension, no fallback.
+  const Gyms = () => createElement('h1', null, 'Gyms');
+  const GymsPage = nav.lazyPage('/gyms', () => Promise.resolve({ default: Gyms }));
+  await nav.preload('/gyms');
+  assert.match(render(GymsPage), /^<!--\$--><h1>Gyms<\/h1><!--\/\$-->$/, 'a preloaded page must not suspend on its first render');
+
+  // Control: React.lazy over an already-resolved import() still suspends on its first render.
+  // That is the regression lazyPage exists to prevent (a ~300 ms skeleton flash on every warm first visit).
+  const Control = lazy(() => Promise.resolve({ default: Gyms }));
+  assert.match(render(Control), /<!--\$!-->[\s\S]*SKELETON/);
+
+  // A failed download is retried on the next intent rather than pinned as warmed.
+  let attempts = 0;
+  const FlakyPage = nav.lazyPage('/friends', () => {
+    attempts += 1;
+    return attempts === 1 ? Promise.reject(new Error('offline')) : Promise.resolve({ default: Gyms });
+  });
+  await nav.preload('/friends');
+  assert.equal(nav.isPreloaded('/friends'), false, 'a failed preload is forgotten');
+  await nav.preload('/friends');
+  assert.equal(attempts, 2);
+  assert.match(render(FlakyPage), /<!--\$--><h1>Gyms<\/h1>/);
+  nav.resetPreloads();
 });
 
 /* ------------------------------------------------------------ desktop sidebar */
@@ -273,7 +384,8 @@ test('the stories tray shows one tile for the viewer, with the "+" as its own co
 test('a revoked session lands on sign-in with a reason and a way back', async () => {
   const api = read('src/lib/api.ts');
   assert.match(api, /import \{ signInRedirect \} from '\.\/sessionRedirect';/);
-  assert.match(api, /location\.href = signInRedirect\(location\.pathname, location\.search\)/);
+  assert.match(api, /const hadSession = !!tokenStore\.get\(\);\s+tokenStore\.clear\(\);/, 'remember whether there was a session before clearing it');
+  assert.match(api, /location\.href = signInRedirect\(location\.pathname, location\.search, hadSession \? 'expired' : null\)/);
   const login = read('src/pages/Login.tsx');
   assert.match(login, /params\.get\('reason'\) === 'expired'/);
   assert.match(login, /<Callout tone="info" title="You were signed out"/);
@@ -282,6 +394,8 @@ test('a revoked session lands on sign-in with a reason and a way back', async ()
   assert.equal(signInRedirect('/', ''), '/login?reason=expired');
   assert.equal(signInRedirect('/meals', '?log=1'), '/login?reason=expired&next=%2Fmeals%3Flog%3D1');
   assert.equal(signInRedirect('/login', ''), '/login?reason=expired', 'never loops sign-in back to itself');
+  assert.equal(signInRedirect('/support', '', null), '/login?next=%2Fsupport', 'a visitor with no session is not told they were signed out');
+  assert.equal(signInRedirect('/', '', null), '/login');
 });
 
 /* ------------------------------------------------------------ routing */
@@ -331,6 +445,10 @@ test('touch targets reach 44 px: chips, 40 px icon buttons, theme segments, smal
 
 test('phone Home has a level-one heading; empty states and card headers default to h2; section tabs are a landmark', () => {
   assert.match(layout, /<h1 className="sr-only">Home<\/h1>/);
+  // /challenges: the card titles sit directly under the page h1, so they are h2 (axe heading-order).
+  const challenges = read('src/pages/Challenges.tsx');
+  assert.match(challenges, /<h2 className="line-clamp-2 text-md font-semibold text-text-1">\{challenge\.title\}<\/h2>/);
+  assert.doesNotMatch(challenges, /<h3[\s>]/, 'no h3 on /challenges without an h2 above it');
   assert.match(ui, /export function EmptyState\(\{[\s\S]*?level = 2,/);
   assert.match(ui, /export function CardHeader\(\{[\s\S]*?level = 2,/);
   assert.match(layout, /<nav aria-label="Sections" className="sticky/);
