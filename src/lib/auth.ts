@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { AxiosError } from 'axios';
 import { api, tokenStore, adminApi, revokeSession } from './api';
 import { disposeSocket } from './socket';
 
@@ -14,13 +15,21 @@ export type User = {
   avatar?: string;
   coverPicture?: string;
   bio?: string;
+  /** Auth policy only (email or provider identity proven); never a badge. */
   isVerified?: boolean;
+  /** Staff-granted public "Verified" check. */
+  isIdentityVerified?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
   isPremium?: boolean;
   followersCount?: number;
   followingCount?: number;
   [k: string]: any;
+};
+
+export type LoginOptions = {
+  /** false = a one-day, tab-scoped session for a shared computer. Default true. */
+  remember?: boolean;
 };
 
 type AuthState = {
@@ -31,7 +40,7 @@ type AuthState = {
   bootstrap: () => Promise<void>;
   bootstrapAdmin: () => Promise<void>;
   setUser: (u: User | null) => void;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, options?: LoginOptions) => Promise<void>;
   adminLogin: (email: string, password: string) => Promise<void>;
   logout: () => void;
   adminLogout: () => void;
@@ -50,8 +59,14 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const { data } = await api.get('/users/me');
       set({ user: data.user || data, loading: false });
-    } catch {
-      tokenStore.clear();
+    } catch (e) {
+      // Only an answer from the API can end the session. A 401 has already
+      // been handled by the interceptor (token cleared, hand-off to /login
+      // with the path preserved); a 403 means unverified or suspended. A
+      // network failure keeps the token so a reload with connectivity back
+      // signs the person straight in instead of logging them out.
+      const status = (e as AxiosError)?.response?.status;
+      if (status === 401 || status === 403) tokenStore.clear();
       set({ user: null, loading: false });
     }
   },
@@ -69,9 +84,11 @@ export const useAuth = create<AuthState>((set) => ({
 
   setUser: (u) => set({ user: u }),
 
-  login: async (email, password) => {
-    const { data } = await api.post('/auth/login', { email, password });
-    tokenStore.set(data.token);
+  login: async (email, password, { remember = true }: LoginOptions = {}) => {
+    // remember:false asks the API for a one-day token and keeps it in
+    // sessionStorage, so closing the tab on a shared computer ends the session.
+    const { data } = await api.post('/auth/login', { email, password, remember });
+    tokenStore.set(data.token, remember ? 'local' : 'session');
     set({ user: data.user, loading: false });
   },
 

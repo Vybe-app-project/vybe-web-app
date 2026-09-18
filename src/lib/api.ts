@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios';
+import { sessionExpiredLoginUrl } from './authRedirect';
 
 export const API_BASE =
   (import.meta.env.VITE_API_BASE as string | undefined) || '/api';
@@ -9,21 +10,45 @@ const TOKEN_KEY = 'vybe.token';
 const ADMIN_TOKEN_KEY = 'vybe.adminToken';
 
 // Consumer sessions live in localStorage so the installed PWA survives a
-// relaunch. Admin sessions live in sessionStorage: they end with the tab,
-// which is the right lifetime for a moderation console that shares its origin
-// with the consumer app and is used from shared machines. The previous
-// console kept the admin token in localStorage; any such token is dropped
-// rather than migrated so it cannot outlive this change.
+// relaunch -- unless the person unticks "Keep me signed in", in which case
+// the token goes to sessionStorage and ends with the tab (a shared or public
+// computer should not carry a 30-day session). Admin sessions always live in
+// sessionStorage: they end with the tab, which is the right lifetime for a
+// moderation console that shares its origin with the consumer app and is
+// used from shared machines. The previous console kept the admin token in
+// localStorage; any such token is dropped rather than migrated so it cannot
+// outlive this change.
 try {
   localStorage.removeItem(ADMIN_TOKEN_KEY);
 } catch {
   // Storage can be unavailable (privacy mode); nothing to clean up then.
 }
 
+export type SessionPersistence = 'local' | 'session';
+
+const readStorage = (storage: Storage, key: string): string | null => {
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
 export const tokenStore = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
+  get: () => readStorage(localStorage, TOKEN_KEY) ?? readStorage(sessionStorage, TOKEN_KEY),
+  /** Exactly one store holds the token, so switching persistence cannot leave a copy behind. */
+  set: (t: string, persistence: SessionPersistence = 'local') => {
+    const [target, other] = persistence === 'session' ? [sessionStorage, localStorage] : [localStorage, sessionStorage];
+    target.setItem(TOKEN_KEY, t);
+    other.removeItem(TOKEN_KEY);
+  },
+  clear: () => {
+    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+  },
+  /** Which store currently holds the session, for anything that re-issues it. */
+  persistence: (): SessionPersistence | null =>
+    readStorage(localStorage, TOKEN_KEY) ? 'local' : readStorage(sessionStorage, TOKEN_KEY) ? 'session' : null,
   getAdmin: () => sessionStorage.getItem(ADMIN_TOKEN_KEY),
   setAdmin: (t: string) => sessionStorage.setItem(ADMIN_TOKEN_KEY, t),
   clearAdmin: () => sessionStorage.removeItem(ADMIN_TOKEN_KEY),
@@ -71,14 +96,25 @@ adminApi.interceptors.request.use((config) => {
   return config;
 });
 
-/** Session-version invalidation: the API revokes tokens on password change. */
+const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'];
+
+/**
+ * Session-version invalidation: the API revokes tokens on password change,
+ * sign-out on another device, or the 30-day expiry. This runs outside React
+ * and the token is already gone, so it is a hard navigation; the path the
+ * person was on travels in `?next=` and `?expired=1` tells the sign-in page
+ * to say why they are there (it used to bounce to a bare /login and drop the
+ * RequireAuth `from` state on the floor).
+ */
 function onUnauthorized(kind: 'user' | 'admin') {
   if (kind === 'admin') {
     tokenStore.clearAdmin();
     if (!location.pathname.startsWith('/admin/login')) location.href = '/admin/login';
   } else {
     tokenStore.clear();
-    if (!location.pathname.startsWith('/login')) location.href = '/login';
+    if (!AUTH_PATHS.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))) {
+      location.href = sessionExpiredLoginUrl(location.pathname, location.search);
+    }
   }
 }
 

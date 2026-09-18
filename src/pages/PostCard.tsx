@@ -530,7 +530,7 @@ export default function PostCard({
     <>
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="truncate text-md font-semibold text-text-1">{name}</span>
-        {author?.isVerified ? <BadgeCheck size={18} className="shrink-0 text-brand" aria-label="Verified" role="img" /> : null}
+        {author?.isIdentityVerified ? <BadgeCheck size={18} className="shrink-0 text-brand" aria-label="Verified" role="img" /> : null}
         {author?.isCoach || author?.isTrainer ? (
           <Badge tone="brand" size="sm">
             Coach

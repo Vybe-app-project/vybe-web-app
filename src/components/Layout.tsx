@@ -383,6 +383,9 @@ function LogSheet() {
   );
 }
 
+/** What "Log out" does: every device, not just this one. */
+const LOGOUT_SCOPE = 'Signs you out on every device';
+
 function AccountMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
   const { user, logout } = useAuth();
   const items: MenuItem[] = [
@@ -390,7 +393,10 @@ function AccountMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
     { label: 'Settings', icon: <Settings size={18} />, to: '/settings' },
     { label: 'Appearance', description: 'System, light or dark', icon: <Palette size={18} />, to: '/settings#appearance' },
     { label: 'Support', icon: <LifeBuoy size={18} />, to: '/support' },
-    { label: 'Log out', icon: <LogOut size={18} />, onSelect: logout, danger: true, divider: true },
+    // Sign-out revokes every session (the API bumps tokenVersion), so a phone
+    // signed in to the same account goes too. Say so where the choice is made;
+    // Settings > Password already explains the same behaviour.
+    { label: 'Log out', description: LOGOUT_SCOPE, icon: <LogOut size={18} />, onSelect: logout, danger: true, divider: true },
   ];
   return (
     <Menu
@@ -531,7 +537,7 @@ function MobileTopBar({
     { label: 'Progress photos', icon: <Camera size={18} />, to: '/health/photos' },
     { label: 'Settings', icon: <Settings size={18} />, to: '/settings', divider: true },
     { label: 'Support', icon: <LifeBuoy size={18} />, to: '/support' },
-    { label: 'Log out', icon: <LogOut size={18} />, onSelect: logout, danger: true, divider: true },
+    { label: 'Log out', description: LOGOUT_SCOPE, icon: <LogOut size={18} />, onSelect: logout, danger: true, divider: true },
   ];
 
   return (

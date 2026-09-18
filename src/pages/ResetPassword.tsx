@@ -1,39 +1,61 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api, errMsg } from '../lib/api';
+import { api } from '../lib/api';
 import { passwordRules, isPasswordValid } from '../lib/hooks';
+import { classifyResetFailure, isResetToken, readResetToken, resetFailureMessage } from '../lib/passwordReset';
 import { Button, Callout, EmptyState } from './ui';
 import { ArrowLeft, Lock } from './icons';
-import { AuthShell, PasswordField } from './Login';
+import { AuthShell, PasswordField, focusField } from './Login';
 import { PasswordRules } from './Register';
 
 export default function ResetPassword() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const token = (params.get('token') || '').trim();
+  const token = readResetToken(params);
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the API refuses the token: reused, or older than 15 minutes.
+  const [linkDead, setLinkDead] = useState(false);
 
   const rules = passwordRules(password);
-  const tokenLooksValid = /^[a-fA-F0-9]{64}$/.test(token);
+  const tokenLooksValid = isResetToken(token);
   const mismatch = confirm.length > 0 && confirm !== password;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!isPasswordValid(password)) return setError('Your password does not meet all requirements yet.');
-    if (password !== confirm) return setError('Passwords do not match.');
+    if (!isPasswordValid(password)) {
+      setError('Your password does not meet all requirements yet.');
+      focusField('rp-password');
+      return;
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match.');
+      focusField('rp-confirm');
+      return;
+    }
 
     setBusy(true);
     try {
-      await api.post('/auth/reset-password', { token, password });
-      navigate('/login?reset=1', { replace: true });
+      const { data } = await api.post('/auth/reset-password', { token, password });
+      // The API names the account so sign-in only needs the new password.
+      navigate('/login?reset=1', { replace: true, state: { email: typeof data?.email === 'string' ? data.email : undefined } });
     } catch (e2) {
-      setError(errMsg(e2, 'This reset link is invalid or has expired.'));
+      const failure = classifyResetFailure(e2, {
+        online: navigator.onLine,
+        fallback: 'This reset link is invalid or has expired.',
+      });
+      // A dead link is not a form error: swap to the recovery state with a
+      // way forward instead of leaving the form up under a raw API message.
+      if (failure.kind === 'invalid-token') {
+        setLinkDead(true);
+        return;
+      }
+      setError(resetFailureMessage(failure));
     } finally {
       setBusy(false);
     }
@@ -49,10 +71,11 @@ export default function ResetPassword() {
     </Link>
   );
 
-  if (!tokenLooksValid) {
+  if (!tokenLooksValid || linkDead) {
     return (
       <AuthShell
         title="This link is not valid"
+        documentTitle="Reset your password"
         headline="Let’s try that again."
         tagline="Reset links are single-use and expire quickly, which is how it should be."
         footer={backLink}
@@ -60,8 +83,12 @@ export default function ResetPassword() {
         <EmptyState
           variant="error"
           icon={<Lock size={26} />}
-          title="Reset link is missing or malformed"
-          message="Request a new link and open it from the same device within a few minutes."
+          title={linkDead ? 'This reset link has expired or was already used' : 'Reset link is missing or malformed'}
+          message={
+            linkDead
+              ? 'Links work once and for 15 minutes. Request a new one and open it from the same device.'
+              : 'Request a new link and open it from the same device within a few minutes.'
+          }
           action={{ label: 'Request a new link', to: '/forgot-password' }}
           size="sm"
           className="rounded-lg bg-surface-2"
@@ -73,6 +100,7 @@ export default function ResetPassword() {
   return (
     <AuthShell
       title="Choose a new password"
+      documentTitle="Reset your password"
       subtitle="Every other device will be signed out and will need the new password."
       headline="Let’s try that again."
       tagline="Reset links are single-use and expire quickly, which is how it should be."

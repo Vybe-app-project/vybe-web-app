@@ -35,7 +35,8 @@ type CommentAuthor = {
   username?: string;
   fullName?: string;
   avatar?: string;
-  isVerified?: boolean;
+  /** Staff-granted public check; email verification (`isVerified`) is not a badge. */
+  isIdentityVerified?: boolean;
 };
 
 type MealComment = {
@@ -316,7 +317,7 @@ export default function MealDetail() {
               <span className="min-w-0">
                 <span className="flex items-center gap-1 text-sm font-semibold text-text-1">
                   <span className="truncate">{author.fullName || author.username || 'Vybe member'}</span>
-                  {(author as CommentAuthor).isVerified ? <BadgeCheck size={16} className="shrink-0 text-brand" /> : null}
+                  {(author as CommentAuthor).isIdentityVerified ? <BadgeCheck size={16} className="shrink-0 text-brand" aria-label="Verified" role="img" /> : null}
                 </span>
                 {author.username ? <span className="block truncate text-xs text-text-2">@{author.username}</span> : null}
               </span>
