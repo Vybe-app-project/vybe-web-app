@@ -174,6 +174,21 @@ test('4xx responses are not retried and the ring omits a percentage without a go
   assert.match(detail, /status === 404 \|\| status === 400/);
 });
 
+test('the log sheet offers a photo route that is honest about what it does', () => {
+  const scan = read('src/lib/mealScan.ts');
+  assert.match(scan, /purpose: 'meal-scan'/, 'photos go through the presign route with the meal-scan purpose');
+  assert.match(scan, /api\.post<MealScanAnalysis>\('\/meals\/scan\/analyze', input\)/);
+  assert.match(scan, /api\.post\('\/meals\/scan\/log', input\)/);
+  assert.match(scan, /api\.post\('\/meals\/scan\/discard', input\)/);
+  assert.match(meals, /confirmed: true,/);
+  assert.match(meals, /Add a photo/);
+  assert.match(meals, /aria-label="Photo matches"/);
+  assert.match(meals, /Photos are not identified automatically\./);
+  // Cancelling after an upload discards the orphaned photo; a logged one is kept.
+  assert.match(meals, /if \(!log\.isPending\) removePhoto\(true\);/);
+  assert.match(meals, /removePhoto\(false\);/);
+});
+
 test('the log sheet keeps the labels the live suites use', () => {
   for (const label of ['label="Meal name"', "label = 'Search foods'", 'Log meal', 'aria-label="Foods in this meal"', 'id={formId}', "const formId = 'log-meal-form'"]) {
     assert.ok(meals.includes(label), `Meals.tsx must keep ${label}`);

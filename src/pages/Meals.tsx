@@ -5,6 +5,17 @@ import { format, isToday, isValid, isYesterday, parseISO } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { localDayParams, timeOfDay } from '../lib/timezone';
+import { MAX_UPLOAD_BYTES } from '../lib/hooks';
+import {
+  analyzeMealScan,
+  discardMealScan,
+  logReviewedMealScan,
+  mealPhotoContentType,
+  nutritionFromCandidate,
+  uploadMealScanImage,
+  type MealScanAnalysis,
+  type MealScanCandidate,
+} from '../lib/mealScan';
 import {
   Avatar,
   Badge,
@@ -37,7 +48,7 @@ import {
   useToast,
 } from './ui';
 import type { MenuItem } from './ui';
-import { Utensils, Plus, Trash, Heart, Clock, BookOpen, Flame, Target, ChevronRight, Search, Globe, Users } from './icons';
+import { Utensils, Plus, Trash, Heart, Clock, BookOpen, Flame, Target, ChevronRight, Search, Globe, Users, Camera } from './icons';
 
 /* ------------------------------------------------------------------ types */
 
@@ -636,6 +647,22 @@ const MANUAL_FIELDS = [
   { key: 'fat', label: 'Fat', unit: 'g' },
 ] as const;
 
+/**
+ * A photo attached to the meal being logged. The API keeps the image with the
+ * meal and matches the typed label against the catalog; it does not identify
+ * food from pixels, and the copy says so.
+ */
+type PhotoState = {
+  previewUrl: string;
+  key?: string;
+  analysis?: MealScanAnalysis;
+  selectedCandidateId?: string | null;
+  status: 'uploading' | 'analyzing' | 'ready' | 'failed';
+  error?: string;
+};
+
+const PHOTO_COPY = 'Photo + label: the picture is saved with the meal and the name you type is matched against the food catalog and your history. Photos are not identified automatically.';
+
 export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -645,8 +672,59 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
   const [foods, setFoods] = useState<SelectedFood[]>([]);
   const [manual, setManual] = useState<Nutrition>(EMPTY_MANUAL);
   const [nameError, setNameError] = useState<string | undefined>();
+  const [photo, setPhoto] = useState<PhotoState | null>(null);
   const nameTouched = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const nameId = 'log-meal-name';
+
+  const attachPhoto = async (file: File) => {
+    const contentType = mealPhotoContentType(file);
+    if (!contentType) {
+      toast.error('Choose a JPEG, PNG, WebP or HEIC photo.');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(`That photo is over ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB. Pick a smaller one.`);
+      return;
+    }
+    const previewUrl = URL.createObjectURL(file);
+    setPhoto({ previewUrl, status: 'uploading' });
+    try {
+      const { key } = await uploadMealScanImage(file, contentType);
+      setPhoto((p) => (p ? { ...p, key, status: 'analyzing' } : p));
+      const analysis = await analyzeMealScan({ imageKey: key, hint: name.trim() });
+      setPhoto((p) => (p ? { ...p, analysis, status: 'ready' } : p));
+    } catch (e) {
+      setPhoto((p) => (p ? { ...p, status: 'failed', error: errMsg(e, 'Could not upload the photo') } : p));
+    }
+  };
+
+  const findMatches = async () => {
+    if (!photo?.key) return;
+    setPhoto((p) => (p ? { ...p, status: 'analyzing', selectedCandidateId: null } : p));
+    try {
+      const analysis = await analyzeMealScan({ imageKey: photo.key, hint: name.trim() });
+      setPhoto((p) => (p ? { ...p, analysis, status: 'ready' } : p));
+    } catch (e) {
+      setPhoto((p) => (p ? { ...p, status: 'failed', error: errMsg(e, 'Could not look up matches') } : p));
+    }
+  };
+
+  const removePhoto = (discard = true) => {
+    const current = photo;
+    setPhoto(null);
+    if (!current) return;
+    URL.revokeObjectURL(current.previewUrl);
+    if (discard && current.key) void discardMealScan({ analysisToken: current.analysis?.analysisToken, imageKey: current.key });
+  };
+
+  const pickCandidate = (candidate: MealScanCandidate) => {
+    setFoods([]);
+    setManual(nutritionFromCandidate(candidate));
+    if (!nameTouched.current) setName(candidate.name);
+    if (!servingSize.trim()) setServingSize(candidate.servingSize);
+    setPhoto((p) => (p ? { ...p, selectedCandidateId: candidate.id } : p));
+  };
 
   const totals = useMemo<Nutrition>(() => {
     if (foods.length === 0) return manual;
@@ -675,6 +753,13 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
     setManual(EMPTY_MANUAL);
     setNameError(undefined);
     nameTouched.current = false;
+    // The photo was logged with the meal, so keep it on the server.
+    removePhoto(false);
+  };
+
+  const cancel = () => {
+    if (!log.isPending) removePhoto(true);
+    onClose();
   };
 
   const log = useMutation({
@@ -688,6 +773,24 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
       // A serving line the person typed wins; otherwise describe the picked
       // foods ("Egg, whole, raw, fresh 2 × 1 large (50 g)") so the log keeps it.
       const autoServing = foods.map((f) => `${f.name} ${servingLineFor(f)}`).join(', ');
+      if (photo?.analysis?.analysisToken && photo.status === 'ready') {
+        // Logged through the reviewed-scan route so the photo stays with the meal.
+        return logReviewedMealScan({
+          analysisToken: photo.analysis.analysisToken,
+          confirmed: true,
+          foodName,
+          servingSize: servingSize.trim() || autoServing.slice(0, 200) || '1 serving',
+          mealType,
+          nutrition: {
+            ...totals,
+            calories: totals.calories ?? 0,
+            protein: totals.protein ?? 0,
+            carbs: totals.carbs ?? 0,
+            fat: totals.fat ?? 0,
+          },
+          selectedCandidateId: photo.selectedCandidateId ?? undefined,
+        });
+      }
       const { data } = await api.post('/meals/log', {
         food_name: foodName,
         meal_type: mealType,
@@ -720,13 +823,13 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={cancel}
       title="Log a meal"
-      description="Search the food database or enter the macros yourself."
+      description="Search the food database, add a photo, or enter the macros yourself."
       size="md"
       footer={
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={cancel}>
             Cancel
           </Button>
           <Button type="submit" form={formId} variant="primary" loading={log.isPending}>
@@ -765,6 +868,93 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
             value={servingSize}
             onChange={(e) => setServingSize(e.target.value)}
           />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="type-label text-text-2">Photo</p>
+            {photo ? (
+              <Button type="button" size="sm" variant="ghost" onClick={() => removePhoto(true)} disabled={photo.status === 'uploading'}>
+                Remove photo
+              </Button>
+            ) : null}
+          </div>
+          {!photo ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={fileInputRef}
+                id="log-meal-photo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic"
+                capture="environment"
+                className="sr-only"
+                aria-label="Meal photo"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void attachPhoto(file);
+                  e.target.value = '';
+                }}
+              />
+              <Button type="button" variant="secondary" icon={<Camera size={18} />} onClick={() => fileInputRef.current?.click()}>
+                Add a photo
+              </Button>
+              <p className="min-w-0 flex-1 basis-56 text-xs text-text-3">{PHOTO_COPY}</p>
+            </div>
+          ) : (
+            <div className="flex gap-3 rounded-md border border-line bg-surface-1 p-3">
+              <img src={photo.previewUrl} alt="" className="h-20 w-20 shrink-0 rounded-md bg-surface-2 object-cover" />
+              <div className="min-w-0 flex-1 space-y-2">
+                {photo.status === 'uploading' || photo.status === 'analyzing' ? (
+                  <p className="inline-flex items-center gap-2 text-sm text-text-2" aria-live="polite">
+                    <Spinner size={16} /> {photo.status === 'uploading' ? 'Uploading photo…' : 'Looking for matches…'}
+                  </p>
+                ) : photo.status === 'failed' ? (
+                  <Callout tone="danger" title="Photo not attached" action={<Button size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>Try again</Button>}>
+                    {photo.error}
+                  </Callout>
+                ) : (
+                  <>
+                    <p className="text-xs text-text-2">
+                      {photo.analysis?.status === 'needs_label'
+                        ? 'Photo saved. Name the meal above, then find catalog matches for it.'
+                        : photo.analysis?.status === 'no_catalog_match'
+                          ? `No catalog match for “${photo.analysis.query}”. Search foods below or enter the macros yourself; the photo stays with the meal.`
+                          : `Matches for “${photo.analysis?.query}” from the catalog and your history. Pick one to fill in the nutrition.`}
+                    </p>
+                    {photo.analysis && photo.analysis.candidates.length > 0 ? (
+                      <ul className="max-h-48 divide-y divide-line overflow-y-auto rounded-md border border-line" aria-label="Photo matches">
+                        {photo.analysis.candidates.map((c) => {
+                          const selected = photo.selectedCandidateId === c.id;
+                          return (
+                            <li key={c.id}>
+                              <button
+                                type="button"
+                                aria-pressed={selected}
+                                className={cx('flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left transition-colors dur-1 hover:bg-surface-2', selected && 'bg-brand-soft')}
+                                onClick={() => pickCandidate(c)}
+                              >
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-medium text-text-1">{c.name}</span>
+                                  <span className="block truncate text-xs text-text-2">
+                                    {[c.brandName, c.servingSize, c.sourceLabel].filter(Boolean).join(' · ')}
+                                  </span>
+                                  <MacroLine nutrition={nutritionFromCandidate(c)} emphasis="sm" className="mt-0.5" />
+                                </span>
+                                {selected ? <Badge tone="brand">Selected</Badge> : <Plus size={18} className="shrink-0 text-brand" />}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
+                    <Button type="button" size="sm" variant="secondary" icon={<Search size={16} />} disabled={!name.trim()} onClick={() => void findMatches()}>
+                      {name.trim() ? `Find matches for “${name.trim().slice(0, 40)}”` : 'Name the meal to find matches'}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-3">
