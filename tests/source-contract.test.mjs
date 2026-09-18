@@ -85,6 +85,11 @@ test('OVH release scripts require clean immutable commit artifacts', () => {
   assert.match(local, /git status --porcelain/);
   assert.match(local, /git archive/);
   assert.match(local, /shasum -a 256/);
+  // Remote steps need root and the SSH user is unprivileged: every remote
+  // privileged command must go through sudo -n so it fails fast, not hangs.
+  assert.match(local, /sudo -n install -d/);
+  assert.match(local, /sudo -n env VYBE_WEB_RELEASE_ROOT/);
+  assert.match(read('scripts/rollback-ovh.sh'), /sudo -n env VYBE_WEB_RELEASE_ROOT/);
   assert.match(remote, /sha256sum/);
   assert.match(remote, /flock -x/);
   assert.match(remote, /releases\/\$commit_sha/);

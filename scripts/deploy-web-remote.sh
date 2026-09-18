@@ -106,4 +106,7 @@ if [[ -n "$health_url" ]] && ! curl --fail --silent --show-error \
   exit 1
 fi
 
+# The archive has done its job; the immutable release directory is the record.
+rm -f -- "$archive"
+
 echo "published Vybe web commit $commit_sha"

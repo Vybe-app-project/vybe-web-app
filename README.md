@@ -51,17 +51,29 @@ For the complete direct-to-OVH transaction, start from a clean committed tree:
 
 ```sh
 export VYBE_OVH_HOST=your-ssh-config-alias
-export VYBE_WEB_HEALTH_URL=https://your-web-origin.example/health
+export VYBE_WEB_HEALTH_URL=https://your-web-origin.example/healthz.json
 ./scripts/release-ovh.sh
 ```
 
+The health URL must be a static file served by the web release (`healthz.json`
+ships in `public/`), not the API's `/health`, which the web origin does not
+proxy.
+
 The local script creates a deterministic `git archive`, records its SHA-256,
-and uploads it over SSH. OVH rebuilds the archive with the pinned container,
+and uploads it over SSH. The SSH user is an ordinary account; the remote steps
+run through `sudo -n` because the incoming directory lives under `/opt` and the
+release root under `/srv`. OVH rebuilds the archive with the pinned container,
 publishes it under `/srv/vybe-consumer/releases/<commit>`, and atomically
 updates `/srv/vybe-consumer/current`. A failed public health check restores the
 previous symlink. The script refuses dirty trees and refuses to replace an
 existing release with different source bytes.
 
-To roll back, copy `scripts/rollback-web-remote.sh` to the host or stream it over
-SSH and pass the full 40-character commit SHA. It only changes the `current`
-symlink; release files remain read-only and production data is untouched.
+To roll back:
+
+```sh
+ssh "$VYBE_OVH_HOST" ls /srv/vybe-consumer/releases   # candidates
+./scripts/rollback-ovh.sh <full 40-character commit sha>
+```
+
+It only changes the `current` symlink; release files remain read-only and
+production data is untouched.

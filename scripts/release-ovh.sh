@@ -52,14 +52,22 @@ printf -v quoted_commit '%q' "$commit_sha"
 printf -v quoted_release_root '%q' "$release_root"
 printf -v quoted_health_url '%q' "$health_url"
 
-# Every interpolated remote value is printf-%q escaped above.
-# shellcheck disable=SC2029
-ssh "$VYBE_OVH_HOST" "install -d -m 0700 $quoted_incoming"
-scp "$archive" "$VYBE_OVH_HOST:$remote_archive"
+# The remote steps need root: the incoming directory lives under /opt and the
+# release root under /srv, and deploy-web-remote.sh refuses to run otherwise.
+# The SSH user is an ordinary account with passwordless sudo, so every remote
+# privileged step goes through `sudo -n` and fails fast if a password would be
+# required. The incoming directory is handed to the SSH user so scp can write
+# the archive without root.
+#
 # Every interpolated remote value is printf-%q escaped above.
 # shellcheck disable=SC2029
 ssh "$VYBE_OVH_HOST" \
-  "VYBE_WEB_RELEASE_ROOT=$quoted_release_root VYBE_WEB_HEALTH_URL=$quoted_health_url bash -s -- $quoted_archive $quoted_checksum $quoted_commit" \
+  "sudo -n install -d -m 0755 \"\$(dirname $quoted_incoming)\" && sudo -n install -d -m 0700 -o \"\$(id -un)\" -g \"\$(id -gn)\" $quoted_incoming"
+scp -q "$archive" "$VYBE_OVH_HOST:$remote_archive"
+# Every interpolated remote value is printf-%q escaped above.
+# shellcheck disable=SC2029
+ssh "$VYBE_OVH_HOST" \
+  "sudo -n env VYBE_WEB_RELEASE_ROOT=$quoted_release_root VYBE_WEB_HEALTH_URL=$quoted_health_url bash -s -- $quoted_archive $quoted_checksum $quoted_commit" \
   <"$repo_root/scripts/deploy-web-remote.sh"
 
 echo "release=$commit_sha sha256=$checksum"
