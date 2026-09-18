@@ -6,19 +6,26 @@ set -Eeuo pipefail
 
 check_current_release() {
   local expected="$1" current_path="$2" actual
-  if [[ "$expected" != "none" && ! "$expected" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "expected current release must be a commit SHA or none" >&2
-    return 1
+  if [ "$expected" != "none" ]; then
+    case "$expected" in
+      *[!0-9a-f]*|'')
+        echo "expected current release must be a commit SHA or none" >&2
+        return 1 ;;
+    esac
+    if [ "${#expected}" -ne 40 ]; then
+      echo "expected current release must be a commit SHA or none" >&2
+      return 1
+    fi
   fi
-  if [[ -L "$current_path" ]]; then
+  if [ -L "$current_path" ]; then
     actual="$(basename "$(readlink "$current_path")")"
-  elif [[ -e "$current_path" ]]; then
+  elif [ -e "$current_path" ]; then
     echo "current release is not a symlink" >&2
     return 1
   else
     actual="none"
   fi
-  if [[ "$actual" != "$expected" ]]; then
+  if [ "$actual" != "$expected" ]; then
     echo "current release changed: expected $expected, found $actual; refusing to overwrite another deployment" >&2
     return 1
   fi

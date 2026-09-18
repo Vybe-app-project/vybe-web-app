@@ -7,13 +7,21 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const remoteScript = fileURLToPath(new URL('../scripts/deploy-web-remote.sh', import.meta.url));
+// Exercise the production function with sh: the Alpine build image has no
+// Bash, and the rest of the publisher is deliberately privileged host code.
+const guard = readFileSync(remoteScript, 'utf8').match(/check_current_release\(\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(guard, 'the production release guard must exist');
 const first = 'a'.repeat(40);
 const second = 'b'.repeat(40);
 
 test('release compare-and-swap accepts only the observed current artifact', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'vybe-release-guard-'));
   const current = path.join(dir, 'current');
-  const check = (expected) => spawnSync('bash', [remoteScript, '--check-current', expected, current], { encoding: 'utf8' });
+  const check = (expected) => {
+    const result = spawnSync('sh', ['-c', `${guard}\ncheck_current_release "$1" "$2"`, 'release-guard', expected, current], { encoding: 'utf8' });
+    assert.ifError(result.error);
+    return result;
+  };
   try {
     assert.equal(check('none').status, 0);
     assert.notEqual(check(first).status, 0);
