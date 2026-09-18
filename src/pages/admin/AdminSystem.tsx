@@ -43,14 +43,15 @@ const POLL_MS = 10_000;
 /** Rows shown before "Show all"; the table is sorted by volume so this is the top 25. */
 const TOP_ROUTES = 25;
 
-/**
- * The probes are read under the API prefix (/api/system/health, /api/system/
- * ready). The root /health and /ready are NOT proxied on the product origin:
- * Caddy serves the SPA there, so the console received index.html, failed to
- * find `status`, and reported a healthy API as "Unreachable / Not ready /
- * Database disconnected" every ten seconds.
+/*
+ * The probes are read under the API prefix (/api/system/health and
+ * /api/system/ready, literal below so scripts/audit-api-contracts.cjs can
+ * resolve them against the backend route inventory). The root /health and
+ * /ready are NOT proxied on the product origin: Caddy serves the SPA there,
+ * so the console received index.html, failed to find `status`, and reported a
+ * healthy API as "Unreachable / Not ready / Database disconnected" every ten
+ * seconds.
  */
-const PROBES = { health: '/system/health', ready: '/system/ready' } as const;
 
 /** A probe answer is an object with a status; HTML (or anything else) means the path is not the API. */
 function asProbe<T extends object>(data: unknown): T | null {
@@ -151,7 +152,7 @@ export default function AdminSystem() {
 
   const health = useQuery<Health | null>({
     queryKey: ['system', 'health'],
-    queryFn: async () => asProbe<Health>((await adminApi.get(PROBES.health)).data),
+    queryFn: async () => asProbe<Health>((await adminApi.get('/system/health')).data),
     refetchInterval: POLL_MS,
     refetchIntervalInBackground: false,
     retry: false,
@@ -163,7 +164,7 @@ export default function AdminSystem() {
     // The readiness probe answers 503 when the DB is down; that body is still meaningful.
     queryFn: async () => {
       try {
-        return asProbe<Ready>((await adminApi.get(PROBES.ready)).data);
+        return asProbe<Ready>((await adminApi.get('/system/ready')).data);
       } catch (e: any) {
         const body = asProbe<Ready>(e?.response?.data);
         if (body) return body;

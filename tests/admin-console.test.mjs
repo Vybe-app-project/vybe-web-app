@@ -142,9 +142,9 @@ test('Dashboard cannot overflow a phone and names authors', () => {
 
 test('System probes the API under /api and treats a non-JSON answer as "not exposed"', () => {
   const source = read('src/pages/admin/AdminSystem.tsx');
-  assert.match(source, /health: '\/system\/health', ready: '\/system\/ready'/);
-  assert.match(source, /adminApi\.get\(PROBES\.health\)/);
-  assert.match(source, /adminApi\.get\(PROBES\.ready\)/);
+  // Literal paths: scripts/audit-api-contracts.cjs must resolve them statically.
+  assert.match(source, /adminApi\.get\('\/system\/health'\)/);
+  assert.match(source, /adminApi\.get\('\/system\/ready'\)/);
   assert.doesNotMatch(source, /originApi/);
   assert.doesNotMatch(source, /axios\.create/);
   assert.match(source, /Probe not exposed on this origin/);
