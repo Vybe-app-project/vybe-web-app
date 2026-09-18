@@ -1,11 +1,13 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { lazy, Suspense, useEffect } from 'react';
-import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth } from './lib/auth';
+import { postLoginTarget } from './lib/authRedirect';
+import WelcomeSheet from './pages/WelcomeSheet';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
@@ -83,15 +85,20 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** Signed-in users skip auth pages; honour the `from` location RequireAuth stored. */
+/**
+ * Signed-in users skip auth pages. The redirect target is computed by the
+ * same rule Login uses (router `from` state, then `?next=`, then Home): this
+ * guard renders the moment the store has a user, so if it disagreed with the
+ * page -- as it did when it ignored `?next=` -- its redirect always won.
+ */
 function GuestOnly({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
+  const [params] = useSearchParams();
   if (loading) return <FullPageSpinner />;
   if (user) {
     const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
-    const target = from?.pathname && from.pathname !== '/login' ? `${from.pathname}${from.search ?? ''}` : '/';
-    return <Navigate to={target} replace />;
+    return <Navigate to={postLoginTarget({ from, next: params.get('next') })} replace />;
   }
   return <>{children}</>;
 }
@@ -209,8 +216,8 @@ export default function App() {
             <Route path="system" element={<AdminSystem />} />
           </Route>
 
-          {/* Authenticated app */}
-          <Route element={<RequireAuth><Layout /></RequireAuth>}>
+          {/* Authenticated app. The first-run sheet answers /?welcome=1 on any route. */}
+          <Route element={<RequireAuth><Layout /><WelcomeSheet /></RequireAuth>}>
             <Route index element={<Feed />} />
             <Route path="discover" element={<Discover />} />
             <Route path="search" element={<Search />} />

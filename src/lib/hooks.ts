@@ -11,7 +11,10 @@ export type PublicUser = {
   fullName?: string;
   avatar?: string;
   bio?: string;
+  /** Auth policy only (email or provider identity proven); never a badge. */
   isVerified?: boolean;
+  /** Staff-granted public "Verified" check; the only flag the badge keys on. */
+  isIdentityVerified?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
   isPremium?: boolean;

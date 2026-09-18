@@ -102,12 +102,16 @@ export function FollowButton({
  * Role badges shared by rows and profile headers. `compact` (list rows) keeps
  * the name on one line: verified becomes the check glyph and only Coach stays
  * as a small badge.
+ *
+ * "Verified" keys on `isIdentityVerified`, the staff-granted flag -- never on
+ * `isVerified`, which only records that the email was confirmed and is true
+ * for every account (it put a Verified chip on every brand-new profile).
  */
 export function UserBadges({ user, compact = false }: { user: PublicUser; compact?: boolean }) {
   if (compact) {
     return (
       <>
-        {user.isVerified ? (
+        {user.isIdentityVerified ? (
           <span role="img" aria-label="Verified" title="Verified" className="inline-flex shrink-0 text-brand">
             <BadgeCheck size={16} />
           </span>
@@ -122,7 +126,7 @@ export function UserBadges({ user, compact = false }: { user: PublicUser; compac
   }
   return (
     <>
-      {user.isVerified ? (
+      {user.isIdentityVerified ? (
         <Badge tone="brand">
           <BadgeCheck size={12} />
           Verified

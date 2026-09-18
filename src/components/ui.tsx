@@ -24,6 +24,7 @@ import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { create } from 'zustand';
 import { errMsg, mediaUrl } from '../lib/api';
+import { describedByIds } from '../lib/a11y';
 import { Brand, BrandMark, PairFigure } from './Brand';
 import {
   Alert as AlertIcon,
@@ -845,6 +846,7 @@ export function Input({
   id,
   leading,
   trailing,
+  'aria-describedby': describedBy,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & FieldProps & { leading?: ReactNode; trailing?: ReactNode }) {
   const auto = useId();
@@ -858,7 +860,7 @@ export function Input({
         <input
           id={inputId}
           aria-invalid={error ? true : undefined}
-          aria-describedby={error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined}
+          aria-describedby={describedByIds(inputId, error, hint, describedBy)}
           className={cx('input-base', !!leading && 'pl-10', !!trailing && 'pr-10', className)}
           {...rest}
         />
