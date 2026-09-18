@@ -51,6 +51,7 @@ import {
   Palette,
   Radio,
   Scale,
+  Search as SearchIcon,
   Settings,
   Sparkles,
   Target,
@@ -99,10 +100,12 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/live/:streamId', title: 'Live', tab: 'home', nav: '/live', parent: '/live' },
   { pattern: '/p/:postId', title: 'Post', tab: 'home', nav: '/', parent: '/', rail: true },
   { pattern: '/u/:id', title: 'Profile', tab: 'home', nav: '/', parent: '/' },
+  { pattern: '/u/:id/:kind', title: 'Connections', tab: 'home', nav: '/', parent: '/' },
   { pattern: '/notifications', title: 'Notifications', tab: 'home', nav: '/notifications', hub: 'inbox' },
   { pattern: '/messages', title: 'Messages', tab: 'home', nav: '/messages', hub: 'inbox' },
   { pattern: '/messages/:roomId', title: 'Messages', tab: 'home', nav: '/messages', parent: '/messages', hideTabs: true },
   { pattern: '/profile', title: 'Profile', tab: 'you', nav: '/profile', root: true },
+  { pattern: '/profile/:kind', title: 'Connections', tab: 'you', nav: '/profile', parent: '/profile' },
   { pattern: '/friends', title: 'Friends', tab: 'you', nav: '/friends', parent: '/profile' },
   { pattern: '/settings', title: 'Settings', tab: 'you', nav: '/settings', parent: '/profile' },
   { pattern: '/support', title: 'Support', tab: 'you', nav: '/support', parent: '/settings' },
@@ -648,7 +651,7 @@ function MobileTopBar({
           {isHome ? (
             <>
               <IconButton to="/search" label="Search">
-                <Compass size={22} />
+                <SearchIcon size={22} />
               </IconButton>
               <IconButton to="/messages" label="Messages" badge={chats}>
                 <Inbox size={22} />

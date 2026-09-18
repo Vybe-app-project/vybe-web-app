@@ -9,8 +9,11 @@ const qc = new QueryClient({
   defaultOptions: {
     queries: {
       retry: (count, err: any) => {
+        // A 4xx is the API's final answer (bad input, no access, not found):
+        // repeating it only stretches the skeleton for three seconds before
+        // the same message. Retry when the server did not answer or 5xx'd.
         const s = err?.response?.status;
-        if (s === 401 || s === 403 || s === 404) return false;
+        if (typeof s === 'number' && s < 500) return false;
         return count < 2;
       },
       staleTime: 30_000,

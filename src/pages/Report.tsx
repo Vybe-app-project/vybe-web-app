@@ -84,6 +84,9 @@ export function ReportModal({
     },
   });
 
+  // A supplied label is a name ("QA8 Stranger") and keeps its case; only
+  // the generic type word is lowercased ("Report post").
+  const what = targetLabel || humanize(targetType).toLowerCase();
   const needsDetail = reason === 'other';
 
   function send() {

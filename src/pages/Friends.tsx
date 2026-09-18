@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg } from '../lib/api';
-import { displayName, type PublicUser } from '../lib/hooks';
+import { displayName, type PublicUser, useIsCompact } from '../lib/hooks';
 import {
   Avatar,
   Badge,
@@ -23,7 +23,7 @@ import {
   useToast,
 } from './ui';
 import { Check, Compass, MessageCircle, User, UserPlus, Users, X } from './icons';
-import { ROW_LINK, UserBadges } from './UserRow';
+import { PrivateMark, ROW_LINK, UserBadges } from './UserRow';
 import PeopleSearch, { type Person } from './PeopleSearch';
 
 type FriendRequest = {
@@ -255,9 +255,11 @@ export default function Friends() {
     return map;
   }, [friends.data, sent.data, pending.data]);
 
+  const compact = useIsCompact();
+
   const tabs = [
-    { key: 'friends', label: 'Friends', count: friends.data?.length, icon: <Users size={16} /> },
-    { key: 'pending', label: 'Requests', count: pending.data?.length || undefined, icon: <UserPlus size={16} /> },
+    { key: 'friends', label: 'Friends', count: friends.data?.length, icon: compact ? undefined : <Users size={16} /> },
+    { key: 'pending', label: 'Requests', count: pending.data?.length || undefined, icon: compact ? undefined : <UserPlus size={16} /> },
     { key: 'sent', label: 'Sent', count: sent.data?.length || undefined },
     { key: 'follows', label: 'Follow requests', count: followRequests.data?.length || undefined },
   ];
@@ -344,7 +346,7 @@ export default function Friends() {
       </Card>
 
       <section className="space-y-4" aria-label="Friends and requests">
-        <Tabs aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} />
+        <Tabs aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} size={compact ? 'sm' : 'md'} />
 
         <Card padded={false} className={cx('overflow-hidden', 'anim-fade-in')} key={tab}>
           {tab === 'friends' && (

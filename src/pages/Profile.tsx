@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg, mediaUrl } from '../lib/api';
+import { api, errMsg, fieldErrorsOf, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   ACCEPTED_IMAGE_TYPES,
@@ -264,7 +264,24 @@ export default function Profile() {
       setEditing(false);
       toast.success('Profile saved');
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save your profile.')),
+    onError: (e) => {
+      const message = errMsg(e, 'Could not save your profile.');
+      const field = fieldErrorsOf(e);
+      // A taken or malformed handle belongs under the field, where the
+      // person is looking, with focus moved there; the toast alone left the
+      // input looking valid.
+      if (field.username || /username/i.test(message)) {
+        setErrors((er) => ({ ...er, username: field.username || message }));
+        document.getElementById('pf-username')?.focus();
+        return;
+      }
+      if (field.fullName) {
+        setErrors((er) => ({ ...er, fullName: field.fullName }));
+        document.getElementById('pf-name')?.focus();
+        return;
+      }
+      toast.error(message);
+    },
   });
 
   const saveAvatar = useMutation({
@@ -454,8 +471,8 @@ export default function Profile() {
 
       <StatGrid>
         <StatTile label="Posts" value={formatStat(postCount(me))} onClick={() => setTab('posts')} />
-        <StatTile label="Followers" value={formatStat(followerCount(me))} to="/friends" />
-        <StatTile label="Following" value={formatStat(followingCount(me))} to="/friends" />
+        <StatTile label="Followers" value={formatStat(followerCount(me))} to="/profile/followers" />
+        <StatTile label="Following" value={formatStat(followingCount(me))} to="/profile/following" />
         <StatTile label="Workouts" value={formatStat(me.stats?.workouts || 0)} onClick={() => setTab('workouts')} tone="brand" />
       </StatGrid>
 

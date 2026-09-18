@@ -26,6 +26,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { create } from 'zustand';
 import { errMsg, mediaUrl } from '../lib/api';
 import { describedByIds } from '../lib/a11y';
+import { useAuth } from '../lib/auth';
 import { Brand, BrandMark, PairFigure } from './Brand';
 import {
   Alert as AlertIcon,
@@ -541,7 +542,13 @@ export function Avatar({
         alt={alt || name || 'avatar'}
         loading="lazy"
         style={style}
-        onError={() => setBroken(true)}
+        onError={() => {
+          setBroken(true);
+          // Signed media URLs expire; when one does, re-read the session so
+          // the store (and every avatar bound to it) gets a fresh URL. The
+          // effect above clears `broken` once `src` changes.
+          if (url.includes('/api/media/content/')) void useAuth.getState().refreshUser();
+        }}
         className={cx(base, 'bg-surface-3 object-cover')}
       />
     );

@@ -223,3 +223,167 @@ test('OVH release scripts require clean immutable commit artifacts', () => {
   assert.match(rollback, /releases\/\$commit_sha/);
   assert.doesNotMatch(`${local}\n${remote}\n${rollback}`, /149\.56\.18\.195/);
 });
+
+test('search, profiles and friends: the fix8 regressions stay fixed', () => {
+  const friends = read('src/pages/Friends.tsx');
+  // Declining an incoming request is the receiver's route; the sender-only
+  // cancel route answered 404 and the request stayed in Requests forever.
+  assert.match(friends, /const declineFriend = useMutation\(\{[\s\S]*?api\.delete\(`\/friends\/incoming\/\$\{requestId\}`\)/);
+  assert.match(friends, /const withdrawRequest = useMutation\(\{[\s\S]*?api\.delete\(`\/friends\/requests\/\$\{requestId\}`\)/);
+  // The pending tab's X uses the decline mutation, the Sent tab's Withdraw uses the other one.
+  assert.match(friends, /label=\{`Decline \$\{displayName\(r\.sender\)\}`\}[\s\S]*?onClick=\{\(\) => declineFriend\.mutate\(r\._id\)\}/);
+  assert.match(friends, /onClick=\{\(\) => withdrawRequest\.mutate\(r\._id\)\}[\s\S]*?Withdraw/);
+  // Messaging opens the draft route with the person attached, never the bare inbox.
+  assert.match(friends, /navigate\(`\/messages\/new\?to=\$\{encodeURIComponent\(u\._id\)\}`, \{\s*state: \{ peer:/);
+  assert.doesNotMatch(friends, /\/messages\?to=/);
+  // The privacy CTA lands on the privacy card, and the copy no longer promises private-post access.
+  assert.match(friends, /to: '\/settings#privacy'/);
+  assert.doesNotMatch(friends, /Friends see each other’s private posts/);
+  // Phone tab strip: no icons and the small size so "Follow requests" is not clipped at 390 px.
+  assert.match(friends, /size=\{compact \? 'sm' : 'md'\}/);
+  assert.match(friends, /icon: compact \? undefined : <Users size=\{16\} \/>/);
+  // People search is no longer silently capped at eight rows.
+  assert.match(friends, /Show all \{peopleTotal\} results/);
+  assert.match(friends, /to=\{`\/search\?q=\$\{encodeURIComponent\(debouncedPeople\)\}&type=users`\}/);
+
+  const profile = read('src/pages/UserProfile.tsx');
+  assert.match(profile, /api\.delete\(`\/friends\/incoming\/\$\{requestId\}`\)/);
+  assert.match(profile, /label=\{`Decline \$\{name\}’s friend request`\}/);
+  assert.match(profile, /navigate\(`\/messages\/new\?to=\$\{encodeURIComponent\(user\._id\)\}`/);
+  assert.doesNotMatch(profile, /\/messages\?to=/);
+  // Followers / Following tiles open the lists (only when the content is visible).
+  assert.match(profile, /to=\{canViewContent \? `\/u\/\$\{user\._id\}\/followers` : undefined\}/);
+  assert.match(profile, /to=\{canViewContent \? `\/u\/\$\{user\._id\}\/following` : undefined\}/);
+  assert.match(profile, /Settings › Blocked accounts/);
+
+  const own = read('src/pages/Profile.tsx');
+  assert.match(own, /to="\/profile\/followers"/);
+  assert.match(own, /to="\/profile\/following"/);
+  assert.doesNotMatch(own, /label="Followers"[^\n]*to="\/friends"/);
+  // Username-taken is an inline field error with focus, not only a toast.
+  assert.match(own, /setErrors\(\(er\) => \(\{ \.\.\.er, username: field\.username \|\| message \}\)\);\s*document\.getElementById\('pf-username'\)\?\.focus\(\)/);
+
+  const app = read('src/App.tsx');
+  assert.match(app, /path="profile\/:kind" element=\{<Connections \/>\}/);
+  assert.match(app, /path="u\/:id\/:kind" element=\{<Connections \/>\}/);
+  const connections = read('src/pages/Connections.tsx');
+  assert.match(connections, /\/users\/statistics\/conn\/all\/social\/populate\/\$\{id\}\/connections/);
+  assert.match(connections, /params: \{ type: kind, page: pageParam, limit: PAGE_SIZE/);
+  assert.match(connections, /title="This list is private"/);
+
+  // Messages: a bare /messages?to=<id> is the draft route.
+  const messages = read('src/pages/Messages.tsx');
+  assert.match(messages, /const bareRecipient = !roomId \? params\.get\('to'\) \|\| '' : '';/);
+  assert.match(messages, /navigate\(`\/messages\/\$\{DRAFT_ROOM_ID\}\?to=\$\{encodeURIComponent\(bareRecipient\)\}`, \{\s*replace: true/);
+});
+
+test('settings: privacy switch, blocked accounts and inline username errors', () => {
+  const settings = read('src/pages/Settings.tsx');
+  assert.match(settings, /id="privacy"/);
+  assert.match(settings, /title="Private account"/);
+  assert.match(settings, /api\.put\('\/users\/settings', \{ privacy: nextPrivate \? 'private' : 'public' \}\)/);
+  assert.match(settings, /Only approved followers see your posts, workouts and meals\./);
+  assert.match(settings, /id="blocked"/);
+  assert.match(settings, /api\.get\('\/users\/blocked'\)/);
+  assert.match(settings, /api\.post\('\/users\/unblock', \{ userId: user\._id \}\)/);
+  assert.match(settings, /aria-label=\{`Unblock \$\{displayName\(u\)\}`\}/);
+  // Deep links (#privacy from the Friends page) scroll to and focus the card.
+  assert.match(settings, /const \{ hash \} = useLocation\(\);/);
+  assert.match(settings, /card\.scrollIntoView\(/);
+  assert.match(settings, /document\.getElementById\('set-username'\)\?\.focus\(\)/);
+  // Section order: privacy sits right after the account card.
+  assert.match(settings, /<AccountSection \/>\s*<PrivacySection \/>/);
+  assert.match(settings, /<EmailPreferencesSection \/>\s*<BlockedAccountsSection \/>/);
+  // Deletion stays deliberate (kept from the earlier contract).
+  assert.match(settings, /Permanently delete my account/);
+});
+
+test('search: every API bucket renders, the typeahead is keyboard-navigable and opens profiles', () => {
+  const search = read('src/pages/Search.tsx');
+  for (const key of ['users', 'posts', 'hashtags', 'workouts', 'meals', 'challenges']) {
+    assert.match(search, new RegExp(`\\{ key: '${key}', label: '`), `result tab for ${key}`);
+  }
+  assert.match(search, /const nothingFound =\s*results\.isSuccess && !users\.length && !posts\.length && !hashtags\.length && !workouts\.length && !meals\.length && !challenges\.length;/);
+  assert.match(search, /<WorkoutTile key=\{w\._id\} workout=\{w\} \/>/);
+  assert.match(search, /<MealTile key=\{m\._id\} meal=\{m\} \/>/);
+  assert.match(search, /<ChallengeTile key=\{c\._id\} challenge=\{c\} \/>/);
+  assert.match(search, /to=\{`\/challenges\?open=\$\{challenge\._id\}`\}/);
+  // The All tab previews people/hashtags with See all; posts stay complete.
+  assert.match(search, /users: 3,\s*hashtags: 6,/);
+  assert.match(search, /<SeeAll label="See all people" onClick=\{\(\) => switchType\('users'\)\} \/>/);
+  // Typeahead: roving active option with ARIA wiring; a person navigates to the profile.
+  assert.match(search, /role="combobox"\s+aria-autocomplete="list"/);
+  assert.match(search, /aria-activedescendant=\{showSuggestions && activeIndex >= 0 \? optionId\(activeIndex\) : undefined\}/);
+  assert.match(search, /if \(e\.key === 'ArrowDown'\)/);
+  assert.match(search, /if \(e\.key === 'ArrowUp'\)/);
+  assert.match(search, /else if \(e\.key === 'Escape'\)/);
+  assert.match(search, /role="option" aria-selected=\{active\}/);
+  assert.match(search, /navigate\(`\/u\/\$\{s\.id\}`, \{ viewTransition: true \}\)/);
+  // Private accounts carry a lock in suggestions; the field caps at the API limit; recents are deduped.
+  assert.match(search, /s\.isPrivate \? \(\s*<span role="img" aria-label="Private account"/);
+  assert.match(search, /maxLength=\{SEARCH_QUERY_MAX\}/);
+  assert.match(search, /export const SEARCH_QUERY_MAX = 100;/);
+  assert.match(search, /return dedupeRecent\(\(data\.recentSearches \|\| \[\]\) as RecentSearch\[\]\);/);
+  // "Popular" only when every listed account has followers.
+  assert.match(search, /'Popular athletes' : 'People to follow'/);
+  // Subtitle and shell placeholder agree about what search covers.
+  assert.match(search, /subtitle="People, posts, hashtags, workouts, meals and challenges across Vybe\."/);
+  assert.match(read('src/components/Layout.tsx'), /placeholder="Search people, workouts, meals…"/);
+  // Challenges honours the deep link the search results use.
+  assert.match(read('src/pages/Challenges.tsx'), /useState<string \| null>\(\(\) => searchParams\.get\('open'\)\)/);
+
+  // Two clear affordances became one: the native WebKit cancel button is hidden.
+  const css = read('src/styles.css');
+  assert.match(css, /input\[type='search'\]::-webkit-search-cancel-button,\s*input\[type='search'\]::-webkit-search-decoration \{[^}]*display: none;/);
+
+  // 4xx answers are final: no retry (the skeleton no longer lingers 3 s on a 400).
+  const main = read('src/main.tsx');
+  assert.match(main, /if \(typeof s === 'number' && s < 500\) return false;/);
+  assert.doesNotMatch(main, /s === 401 \|\| s === 403 \|\| s === 404/);
+});
+
+test('badges, report labels, handoff and session-freshness contracts', () => {
+  const row = read('src/pages/UserRow.tsx');
+  // The check is the operator-set badge; isVerified (e-mail confirmed) never renders one.
+  assert.match(row, /const verified = user\.isIdentityVerified === true;/);
+  assert.doesNotMatch(row, /user\.isVerified \?/);
+  assert.match(row, /export function PrivateMark/);
+  assert.match(read('src/pages/PostCard.tsx'), /author\?\.isIdentityVerified \? <BadgeCheck/);
+  assert.doesNotMatch(read('src/pages/PostCard.tsx'), /author\?\.isVerified \? <BadgeCheck/);
+  assert.match(read('src/pages/MealDetail.tsx'), /\.isIdentityVerified \? <BadgeCheck/);
+  assert.match(read('src/lib/hooks.ts'), /isIdentityVerified\?: boolean;/);
+
+  // "Report QA8 Stranger", not "Report qa8 stranger": only the generic type word is lowercased.
+  assert.match(read('src/pages/Report.tsx'), /const what = targetLabel \|\| humanize\(targetType\)\.toLowerCase\(\);/);
+
+  // The phone Home header's Search shortcut is the magnifier, not the Explore compass.
+  const layout = read('src/components/Layout.tsx');
+  assert.match(layout, /<IconButton to="\/search" label="Search">\s*<SearchIcon size=\{22\} \/>/);
+  assert.match(layout, /pattern: '\/u\/:id\/:kind'/);
+  assert.match(layout, /pattern: '\/profile\/:kind'/);
+
+  // The share handoff shell does not offer Log in / Join to a signed-in person.
+  const shell = read('src/components/PublicShell.tsx');
+  assert.match(shell, /const user = useAuth\(\(s\) => s\.user\);/);
+  assert.match(shell, /\{loading \? null : user \? \(\s*<ButtonLink to="\/" variant="secondary" size="sm">\s*Open Vybe/);
+
+  // Signed avatar URLs expire: the session refreshes on foreground/interval and on a broken avatar.
+  const auth = read('src/lib/auth.ts');
+  assert.match(auth, /refreshUser: async \(\{ force = false \} = \{\}\) =>/);
+  assert.match(auth, /export function useSessionRefresh/);
+  assert.match(auth, /document\.addEventListener\('visibilitychange', onVisibility\)/);
+  assert.match(read('src/App.tsx'), /useSessionRefresh\(onStale\)/);
+  assert.match(read('src/components/ui.tsx'), /if \(url\.includes\('\/api\/media\/content\/'\)\) void useAuth\.getState\(\)\.refreshUser\(\);/);
+
+  // The route snapshot pins the API routes the new surfaces call.
+  const snapshot = JSON.parse(read('contracts/backend-routes.json'));
+  const pinned = new Set(snapshot.routes.map((route) => `${route.method} ${route.path}`));
+  for (const route of [
+    'GET /api/users/blocked', 'POST /api/users/unblock', 'PUT /api/users/settings',
+    'DELETE /api/friends/incoming/:requestId', 'DELETE /api/friends/requests/:requestId',
+    'GET /api/users/statistics/conn/all/social/populate/:profileUserId/connections',
+    'GET /api/share/preview/u/:id', 'GET /api/share/preview/p/:id',
+  ]) {
+    assert.ok(pinned.has(route), `contracts/backend-routes.json must pin ${route}`);
+  }
+});

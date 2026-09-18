@@ -1,14 +1,15 @@
 /// <reference types="vite-plugin-pwa/react" />
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
+import { useQueryClient } from '@tanstack/react-query';
 import { RouteErrorBoundary } from './components/ErrorBoundary';
 import { postLoginTarget } from './lib/authRedirect';
 import WelcomeSheet from './pages/WelcomeSheet';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
-import { useAuth } from './lib/auth';
+import { useAuth, useSessionRefresh } from './lib/auth';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
@@ -22,6 +23,7 @@ const PostDetail = lazy(() => import('./pages/PostDetail'));
 const PublicPost = lazy(() => import('./pages/PublicPost'));
 const Profile = lazy(() => import('./pages/Profile'));
 const UserProfile = lazy(() => import('./pages/UserProfile'));
+const Connections = lazy(() => import('./pages/Connections'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const Messages = lazy(() => import('./pages/Messages'));
@@ -69,6 +71,14 @@ const AdminSystem = lazy(() => import('./pages/admin/AdminSystem'));
 const AdminCatalog = lazy(() => import('./pages/admin/AdminCatalog'));
 const AdminCatalogWorkout = lazy(() => import('./pages/admin/AdminCatalogWorkout'));
 const AdminCatalogPlan = lazy(() => import('./pages/admin/AdminCatalogPlan'));
+
+/** Refresh the session user on foreground/interval; after a long absence, everything on screen refetches too. */
+function SessionRefresh() {
+  const qc = useQueryClient();
+  const onStale = useCallback(() => { void qc.invalidateQueries(); }, [qc]);
+  useSessionRefresh(onStale);
+  return null;
+}
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -198,6 +208,7 @@ export default function App() {
     <ToastProvider>
       <ScrollToTop />
       <PwaUpdates />
+      <SessionRefresh />
       <Suspense fallback={<FullPageSpinner />}>
         <RouteErrorBoundary>
           <Routes>
@@ -249,6 +260,9 @@ export default function App() {
               <Route path="stories" element={<Stories />} />
               <Route path="profile" element={<Profile />} />
               <Route path="u/:id" element={<UserProfile />} />
+              {/* Followers / Following lists: your own under /profile, anyone else's under their profile. */}
+              <Route path="profile/:kind" element={<Connections />} />
+              <Route path="u/:id/:kind" element={<Connections />} />
               <Route path="settings" element={<Settings />} />
               <Route path="notifications" element={<Notifications />} />
               <Route path="messages" element={<Messages />} />
