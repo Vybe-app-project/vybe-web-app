@@ -763,7 +763,7 @@ export function DefaultRail() {
 
 /* ================================================================== shell */
 
-export default function Layout() {
+export default function Layout({ children }: { children?: ReactNode }) {
   const { pathname } = useLocation();
   const meta = useMemo(() => routeMeta(pathname), [pathname]);
   const storedChrome = usePageChromeStore((s) => s.chrome);
@@ -803,7 +803,7 @@ export default function Layout() {
 
         <div className={cx('mx-auto flex w-full gap-8 px-4 md:px-6 lg:px-8', feedWidth ? 'max-w-[62rem] justify-center' : 'max-w-[1200px]')}>
           <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none lg:pt-6', chrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'lg:max-w-feed')}>
-            <Outlet />
+            {children ?? <Outlet />}
           </main>
           {rail ? (
             <aside aria-label="Highlights" className="hidden w-72 shrink-0 pt-6 lg:block xl:w-80">

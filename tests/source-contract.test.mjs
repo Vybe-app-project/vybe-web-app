@@ -30,7 +30,7 @@ test('the consumer and administration route families are present', () => {
   const required = [
     '/login', '/register', '/admin', '/admin/login', 'discover', 'messages',
     'gyms', 'communities', 'live', 'workouts', 'meals', 'health', 'challenges',
-    'achievements', 'settings', 'support',
+    'achievements', 'settings', '/support',
   ];
   for (const route of required) {
     assert.match(app, new RegExp(`path=["']${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`));
@@ -65,23 +65,17 @@ test('account deletion remains a deliberate authenticated operation', () => {
   assert.match(settings, /Permanently delete my account/);
 });
 
-test('public legal, deletion, and support pages ship without placeholder configuration', () => {
+test('public legal and deletion pages ship without placeholder configuration', () => {
   const required = [
     'privacy-policy.html',
     'terms-and-conditions.html',
     'account-deletion.html',
-    'support.html',
-    'support/index.html',
-    'support-client.js',
-    'support-bootstrap.js',
   ];
   for (const relative of required) {
     const source = read(path.join('public', relative));
     assert.ok(source.length > 50, `public/${relative} is unexpectedly empty`);
     assert.doesNotMatch(source, /__VYBE_[A-Z0-9_]+__/);
   }
-  assert.match(read('public/support.html'), /connect-src 'self'/);
-  assert.match(read('public/support.html'), /content="\/api"/);
 });
 
 test('OVH release scripts require clean immutable commit artifacts', () => {

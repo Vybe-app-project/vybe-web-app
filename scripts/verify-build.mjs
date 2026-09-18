@@ -23,10 +23,6 @@ for (const relative of [
   'privacy-policy.html',
   'terms-and-conditions.html',
   'account-deletion.html',
-  'support.html',
-  'support/index.html',
-  'support-client.js',
-  'support-bootstrap.js',
 ]) {
   const target = path.join(dist, relative);
   assert.ok(fs.statSync(target).size > 0, `missing or empty build asset: ${relative}`);

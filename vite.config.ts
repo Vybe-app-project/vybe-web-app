@@ -31,7 +31,7 @@ export default defineConfig({
       ],
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2,webmanifest}'],
-        globIgnores: ['support/**', 'support*.js', 'privacy-policy.html', 'terms-and-conditions.html', 'account-deletion.html'],
+        globIgnores: ['privacy-policy.html', 'terms-and-conditions.html', 'account-deletion.html'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//, /\.[a-z0-9]+$/i],
         cleanupOutdatedCaches: true,

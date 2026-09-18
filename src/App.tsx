@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
+import { PublicShell } from './components/PublicShell';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth } from './lib/auth';
 
@@ -88,6 +89,31 @@ function GuestOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Support must work without an account: the iOS app and the store listings
+ * link straight to /support, and App Review loads the support URL signed out.
+ * Signed-in users get the same form inside the app shell.
+ */
+function SupportGate() {
+  const { user, loading } = useAuth();
+  if (loading) return <FullPageSpinner />;
+  if (user) {
+    return (
+      <Layout>
+        <Support />
+      </Layout>
+    );
+  }
+  return (
+    <PublicShell
+      title="Support"
+      subtitle="Report a problem, ask a question or share feedback. We usually reply within two business days."
+    >
+      <Support standalone />
+    </PublicShell>
+  );
+}
+
 /** Route changes should start at the top rather than inherit scroll. */
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -140,6 +166,9 @@ export default function App() {
           <Route path="/forgot-password" element={<GuestOnly><ForgotPassword /></GuestOnly>} />
           <Route path="/reset-password" element={<ResetPassword />} />
 
+          {/* Public help: works signed out, wears the app shell when signed in */}
+          <Route path="/support" element={<SupportGate />} />
+
           {/* Admin */}
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
@@ -172,7 +201,6 @@ export default function App() {
             <Route path="communities" element={<GymCommunity />} />
             <Route path="live" element={<Livestreams />} />
             <Route path="live/:streamId" element={<Livestreams />} />
-            <Route path="support" element={<Support />} />
 
             <Route path="workouts" element={<Workouts />} />
             <Route path="workouts/logs" element={<WorkoutLogs />} />

@@ -777,8 +777,8 @@ export default function Meals() {
         });
         return data.data;
       } catch (e: unknown) {
-        // 404 simply means the user has not set health goals yet — that is a
-        // first-run state, not an error.
+        // Current servers answer "no goals yet" with 200 and data: null; a 404
+        // from an older server means the same first-run state, not an error.
         const status = (e as { response?: { status?: number } })?.response?.status;
         if (status === 404) return null;
         throw e;

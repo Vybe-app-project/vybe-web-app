@@ -3,17 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <script>
-      // Apply the stored theme before first paint so there is no flash.
-      // Mirrors the store in src/components/ui.tsx (key `vybe.theme`).
-      (function () {
-        try {
-          var pref = localStorage.getItem('vybe.theme');
-          var dark = pref === 'dark' || (pref !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-          document.documentElement.classList.toggle('dark', dark);
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme.js"></script>
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F9F8" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#04101B" />

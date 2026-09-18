@@ -26,7 +26,7 @@ const validate = (v: { fullName: string; email: string; message: string }): Fiel
   return errors;
 };
 
-export default function Support() {
+export default function Support({ standalone = false }: { standalone?: boolean }) {
   const toast = useToast();
   const user = useAuth((s) => s.user);
   const [fullName, setFullName] = useState(user?.fullName || user?.username || '');
@@ -68,14 +68,18 @@ export default function Support() {
 
   return (
     <>
-      <PageHeader
-        title="Support"
-        subtitle="Report a problem, ask a question or share feedback. We usually reply within two business days."
-      />
+      {standalone ? null : (
+        <PageHeader
+          title="Support"
+          subtitle="Report a problem, ask a question or share feedback. We usually reply within two business days."
+        />
+      )}
       <div className="w-full max-w-form space-y-4">
-        <p className="text-sm text-text-2 lg:hidden">
-          Report a problem, ask a question or share feedback. We usually reply within two business days.
-        </p>
+        {standalone ? null : (
+          <p className="text-sm text-text-2 lg:hidden">
+            Report a problem, ask a question or share feedback. We usually reply within two business days.
+          </p>
+        )}
 
         {sent ? (
           <Card className="text-center">
@@ -92,7 +96,7 @@ export default function Support() {
                 Send another message
               </Button>
               <ButtonLink to="/" variant="ghost">
-                Back to home
+                Back to Vybe
               </ButtonLink>
             </div>
           </Card>
