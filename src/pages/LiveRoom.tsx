@@ -1244,6 +1244,12 @@ function HostRoom({ stream, capabilities }: { stream: Stream; capabilities: Live
                     </li>
                   ))}
                 </ul>
+              ) : host.viewerCount > 0 ? (
+                // Presence counts room membership; chips only appear once a
+                // viewer's peer exists, so this gap is "in the room, no video yet".
+                <p className="text-sm text-text-3">
+                  {host.viewerCount === 1 ? 'One viewer is in the room but not receiving video yet.' : `${host.viewerCount} viewers are in the room but not receiving video yet.`}
+                </p>
               ) : (
                 <p className="text-sm text-text-3">Nobody has joined yet. Share the stream from the Live tab.</p>
               )}
