@@ -183,7 +183,7 @@ export default function Search() {
   const [activeIndex, setActiveIndex] = useState(-1);
   const blurTimer = useRef<number | null>(null);
 
-  useEffect(() => setTerm(urlQuery), [urlQuery]);
+  useEffect(() => setTerm(urlQuery.slice(0, SEARCH_QUERY_MAX)), [urlQuery]);
   useEffect(() => setType(urlType), [urlType]);
 
   const debounced = useDebounced(term.trim(), 300);
