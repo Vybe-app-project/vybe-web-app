@@ -26,6 +26,8 @@ export type User = {
 
 type AuthState = {
   user: User | null;
+  /** In-memory credential that actually verified `user`; never persisted in drafts. */
+  verifiedToken: string | null;
   loading: boolean;
   bootstrapError: string | null;
   admin: any | null;
@@ -54,6 +56,7 @@ const isUser = (value: unknown): value is User =>
 
 export const useAuth = create<AuthState>((set) => ({
   user: null,
+  verifiedToken: null,
   loading: true,
   bootstrapError: null,
   admin: null,
@@ -64,7 +67,7 @@ export const useAuth = create<AuthState>((set) => ({
     if (userBootstrap) return userBootstrap;
     const token = tokenStore.get();
     if (!token) {
-      set({ user: null, loading: false, bootstrapError: null });
+      set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
       return Promise.resolve();
     }
     set({ loading: true, bootstrapError: null });
@@ -72,21 +75,21 @@ export const useAuth = create<AuthState>((set) => ({
       try {
         const { data } = await api.get('/users/me', { sessionVerification: true });
         if (tokenStore.get() !== token) {
-          if (!tokenStore.get()) set({ user: null, loading: false, bootstrapError: null });
+          if (!tokenStore.get()) set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
           return;
         }
         const user: unknown = data?.user ?? data;
         if (!isUser(user)) throw new Error('Session response has no user identity.');
-        set({ user, loading: false, bootstrapError: null });
+        set({ user, verifiedToken: token, loading: false, bootstrapError: null });
       } catch (error) {
         const current = tokenStore.get();
         if (current && current !== token) return;
         const status = axios.isAxiosError(error) ? error.response?.status : undefined;
         if (status === 401) {
           tokenStore.clear();
-          set({ user: null, loading: false, bootstrapError: null });
+          set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
         } else if (!current) {
-          set({ user: null, loading: false, bootstrapError: null });
+          set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
         } else if (current === token) {
           console.warn('User session verification is unavailable.', { status });
           set({ loading: false, bootstrapError: 'Your saved sign-in is still on this device. Check your connection and try again.' });
@@ -132,12 +135,12 @@ export const useAuth = create<AuthState>((set) => ({
     return adminBootstrap;
   },
 
-  setUser: (u) => set({ user: u, loading: false, bootstrapError: null }),
+  setUser: (u) => set({ user: u, ...(!u ? { verifiedToken: null } : {}), loading: false, bootstrapError: null }),
 
   login: async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
     tokenStore.set(data.token);
-    set({ user: data.user, loading: false, bootstrapError: null });
+    set({ user: data.user, verifiedToken: data.token, loading: false, bootstrapError: null });
   },
 
   adminLogin: async (email, password) => {
@@ -173,7 +176,7 @@ export const useAuth = create<AuthState>((set) => ({
     // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
     tokenStore.clear();
-    set({ user: null, loading: false, bootstrapError: null });
+    set({ user: null, verifiedToken: null, loading: false, bootstrapError: null });
     location.href = '/login';
   },
 

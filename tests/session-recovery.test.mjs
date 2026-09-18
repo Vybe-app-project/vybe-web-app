@@ -35,11 +35,23 @@ beforeEach(() => {
   location.pathname = '/';
   location.href = '/';
   useAuth.setState({
-    user: null, loading: true, bootstrapError: null,
+    user: null, verifiedToken: null, loading: true, bootstrapError: null,
     admin: null, adminLoading: true, adminBootstrapError: null,
   });
+
   api.defaults.adapter = async (config) => result({ user }, config);
   adminApi.defaults.adapter = async (config) => result({ success: true, data: { admin } }, config);
+});
+
+test('workout save cannot swap a verified credential for a different account token', async () => {
+  tokenStore.set('verified-owner-session');
+  await useAuth.getState().bootstrap();
+  assert.equal(useAuth.getState().verifiedToken, 'verified-owner-session');
+  let sent = false;
+  api.defaults.adapter = async config => { sent = true; return result({}, config); };
+  tokenStore.set('different-owner-session');
+  await assert.rejects(api.post('/workouts/logs', {}, { workoutSessionToken: useAuth.getState().verifiedToken }), /account changed/);
+  assert.equal(sent, false);
 });
 
 for (const status of [undefined, 408, 429, 500, 503]) {
