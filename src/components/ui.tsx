@@ -1706,10 +1706,15 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Swipe-to-dismiss on the sheet handle / header.
+  // Swipe-to-dismiss on the sheet handle / header. Only a finger starts a
+  // drag: capturing a mouse/pen pointer here stole the click from the Close
+  // button (the X did nothing on a narrow desktop window or an iPad with a
+  // trackpad), and a press that begins on a control is that control's.
   const drag = useRef<{ startY: number; startT: number; dy: number } | null>(null);
   const onDragStart = (e: ReactPointerEvent) => {
     if (!asSheet) return;
+    if (e.pointerType !== 'touch') return;
+    if ((e.target as HTMLElement | null)?.closest?.('button, a, input, textarea, select, [role="button"]')) return;
     drag.current = { startY: e.clientY, startT: performance.now(), dy: 0 };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     if (panelRef.current) panelRef.current.style.transition = 'none';
