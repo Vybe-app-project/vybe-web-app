@@ -49,11 +49,17 @@ export function sortMessagesAscending<T extends ChatMessageLike>(messages: reado
 }
 
 /**
- * One timeline from every source the thread has: earlier pages loaded on
- * scroll-up, the newest page, and realtime deliveries for this room. Later
- * copies of the same id win (they carry fresher `readers`), deleted ids are
- * dropped, and the result is sorted so day dividers and grouping stay right
- * no matter which source a message arrived from.
+ * One timeline from every source the thread has: the history held so far
+ * (older pages plus every newest page seen), the current newest page, and
+ * realtime deliveries for this room. Later copies of the same id win (they
+ * carry fresher `readers`), deleted ids are dropped, and the result is sorted
+ * so day dividers and grouping stay right no matter which source a message
+ * arrived from.
+ *
+ * Without a `roomId` (a draft thread that has no room yet) realtime
+ * deliveries are ignored entirely: the page-level buffer holds every socket
+ * message since the Messages page mounted, and none of them can belong to a
+ * conversation that does not exist.
  */
 export function mergeThread<T extends ChatMessageLike>({
   earlier = [],
@@ -71,15 +77,92 @@ export function mergeThread<T extends ChatMessageLike>({
   const byId = new Map<string, T>();
   for (const m of earlier) byId.set(m._id, m);
   for (const m of latest) byId.set(m._id, m);
-  for (const m of incoming) {
-    if (roomId && roomIdOfMessage(m) !== roomId) continue;
-    // A realtime copy never replaces a fetched one: the fetched copy is
-    // populated (sender, sharedPost) and carries read state.
-    if (!byId.has(m._id)) byId.set(m._id, m);
+  if (roomId) {
+    for (const m of incoming) {
+      if (roomIdOfMessage(m) !== roomId) continue;
+      // A realtime copy never replaces a fetched one: the fetched copy is
+      // populated (sender, sharedPost) and carries read state.
+      if (!byId.has(m._id)) byId.set(m._id, m);
+    }
   }
   const out: T[] = [];
   for (const m of byId.values()) if (!deletedIds?.has(m._id)) out.push(m);
   return sortMessagesAscending(out);
+}
+
+/* ------------------------------------------------------------------ pages */
+
+/** One page of GET /messages/conversation?limit= as the thread holds it: oldest first. */
+export type ThreadPage<T extends ChatMessageLike = ChatMessageLike> = {
+  messages: T[];
+  hasMore: boolean;
+  /** Cursor for the page before this one: the oldest message's createdAt and id. */
+  nextBefore: string | null;
+  nextBeforeId: string | null;
+};
+
+/**
+ * Everything fetched for one thread so far: the older pages loaded on
+ * scroll-up plus every newest page seen. `hasMore` and the cursor describe
+ * what lies beyond the oldest message held.
+ */
+export type ThreadHistory<T extends ChatMessageLike = ChatMessageLike> = ThreadPage<T>;
+
+export const EMPTY_HISTORY: ThreadHistory<never> = Object.freeze({ messages: [], hasMore: false, nextBefore: null, nextBeforeId: null });
+
+/** Shape one API response (newest-first, `pagination` only when a limit was sent). */
+export function toThreadPage<T extends ChatMessageLike>(data: {
+  messages?: T[];
+  pagination?: { hasMore?: boolean; nextBefore?: string | null; nextBeforeId?: string | null };
+}): ThreadPage<T> {
+  return {
+    // The API is newest-first (the mobile list is inverted); the page reads top to bottom.
+    messages: sortMessagesAscending(data.messages || []),
+    hasMore: Boolean(data.pagination?.hasMore),
+    nextBefore: data.pagination?.nextBefore ?? null,
+    nextBeforeId: data.pagination?.nextBeforeId ?? null,
+  };
+}
+
+/** Union by id, `fresh` copies replacing `held` ones, oldest first. */
+function foldMessages<T extends ChatMessageLike>(held: readonly T[], fresh: readonly T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const m of held) byId.set(m._id, m);
+  for (const m of fresh) byId.set(m._id, m);
+  return sortMessagesAscending([...byId.values()]);
+}
+
+/**
+ * Fold a (re)fetched newest page into the history. After a send the newest
+ * page slides forward by one message, so the one that fell off its start
+ * must survive here or it vanishes from the middle of the thread once older
+ * pages are on screen. When the page no longer touches what is held (more
+ * than a page of messages arrived while the socket was down) the older
+ * history is dropped rather than shown with a silent hole in it: scrolling
+ * up loads it again from the page's own cursor.
+ */
+export function absorbNewestPage<T extends ChatMessageLike>(history: ThreadHistory<T>, page: ThreadPage<T>): ThreadHistory<T> {
+  if (!history.messages.length) return page;
+  const held = new Map(history.messages.map((m) => [m._id, m] as const));
+  if (page.messages.every((m) => held.get(m._id) === m)) return history;
+  const overlaps = page.messages.some((m) => held.has(m._id));
+  if (!overlaps && page.hasMore) return page;
+  const messages = foldMessages(history.messages, page.messages);
+  // A page with no older sibling is the whole thread; otherwise the history's
+  // (older) cursor still marks where the next scroll-up continues.
+  return page.hasMore
+    ? { messages, hasMore: history.hasMore, nextBefore: history.nextBefore, nextBeforeId: history.nextBeforeId }
+    : { messages, hasMore: false, nextBefore: null, nextBeforeId: null };
+}
+
+/** Prepend a page fetched with the history's cursor; the cursor moves to the page's. */
+export function absorbEarlierPage<T extends ChatMessageLike>(history: ThreadHistory<T>, page: ThreadPage<T>): ThreadHistory<T> {
+  return {
+    messages: foldMessages(history.messages, page.messages),
+    hasMore: page.hasMore,
+    nextBefore: page.nextBefore,
+    nextBeforeId: page.nextBeforeId,
+  };
 }
 
 /** The `messageRead` socket payload (utils/socketServer + messageController). */

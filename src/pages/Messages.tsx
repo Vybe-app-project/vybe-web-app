@@ -6,11 +6,14 @@ import { differenceInCalendarDays, differenceInMinutes, format, isSameDay, isThi
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../lib/auth';
-import { uploadImage, useDebounced, type UploadedMedia } from '../lib/hooks';
+import { uploadImage, type UploadedMedia } from '../lib/hooks';
 import {
   ACCEPTED_TYPES,
   ACCEPTED_TYPES_LABEL,
+  EMPTY_HISTORY,
   TYPING_TTL_MS,
+  absorbEarlierPage,
+  absorbNewestPage,
   applyReadReceipts,
   consentCopy,
   consentErrorUser,
@@ -18,16 +21,18 @@ import {
   isConsentError,
   mergeThread,
   roomIdOfMessage,
-  sortMessagesAscending,
+  toThreadPage,
   typingExpired,
   typingLabel,
   typingStarted,
   typingStopped,
   type ReadReceiptPayload,
+  type ThreadHistory,
+  type ThreadPage as ThreadPageOf,
   type TypingState,
 } from '../lib/chat';
 import { linkifySegments } from '../lib/linkify';
-import PeopleSearch, { PersonRow, personName as nameOf, rememberPerson, type Person } from './PeopleSearch';
+import PeopleSearch, { PersonRow, personName as nameOf, rememberPerson, usePeopleSearch, type Person } from './PeopleSearch';
 import {
   Avatar,
   AvatarStack,
@@ -134,7 +139,7 @@ type ChatMessage = {
 };
 
 /** The newest page of a thread, oldest → newest, plus the cursor for older history. */
-type ThreadPage = { messages: ChatMessage[]; hasMore: boolean; nextBefore: string | null };
+type ThreadPage = ThreadPageOf<ChatMessage>;
 
 /** A message that has left the composer but not yet been confirmed by the API. */
 type OutboxItem = {
@@ -499,17 +504,8 @@ function RoomList({
 }) {
   const [search, setSearch] = useState('');
   const q = search.trim().toLowerCase();
-  const debounced = useDebounced(search.trim(), 200);
-
-  const people = useQuery({
-    queryKey: ['people-search', debounced, 20],
-    enabled: debounced.length >= 1,
-    staleTime: 60_000,
-    queryFn: async ({ signal }) => {
-      const { data } = await api.get('/users/all/search', { params: { q: debounced, limit: 20 }, signal });
-      return (data.users || []) as ChatUser[];
-    },
-  });
+  // The same typeahead query as every other people surface (debounced, aborted, cached).
+  const people = usePeopleSearch(search);
 
   const list = useMemo(() => {
     const all = rooms.data || [];
@@ -689,11 +685,9 @@ function NewMessageModal({
     }
   }, [open]);
 
+  // Enabled only while open with staleTime 0: TanStack fetches once each time
+  // the picker opens, so a friend accepted a moment ago is already listed.
   const friends = useFriendsList(open);
-  useEffect(() => {
-    if (open) void friends.refetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
 
   const pickedIds = useMemo(() => new Set(picked.map((p) => p._id)), [picked]);
   const excludeIds = useMemo(() => new Set(meId ? [meId] : []), [meId]);
@@ -1668,15 +1662,6 @@ function Composer({
 
 /* ================================================================== thread */
 
-type EarlierState = { messages: ChatMessage[]; hasMore: boolean | null; nextBefore: string | null; loading: boolean; error: string | null };
-
-const toPage = (data: { messages?: ChatMessage[]; pagination?: { hasMore?: boolean; nextBefore?: string | null } }): ThreadPage => ({
-  // The API is newest-first (the mobile list is inverted); the page reads top to bottom.
-  messages: sortMessagesAscending(data.messages || []),
-  hasMore: Boolean(data.pagination?.hasMore),
-  nextBefore: data.pagination?.nextBefore ?? null,
-});
-
 function Thread({
   target,
   meId,
@@ -1724,52 +1709,84 @@ function Thread({
   const [leaving, setLeaving] = useState(false);
   const [lightbox, setLightbox] = useState<{ items: MessageMedia[]; index: number } | null>(null);
   const [unseen, setUnseen] = useState(0);
-  const [earlier, setEarlier] = useState<EarlierState>({ messages: [], hasMore: null, nextBefore: null, loading: false, error: null });
+  // Every message fetched for this thread so far (older pages plus each
+  // newest page as it arrives) and the cursor to what lies before it.
+  const [history, setHistory] = useState<ThreadHistory<ChatMessage>>(EMPTY_HISTORY);
+  const [older, setOlder] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [consent, setConsent] = useState<{ blocked: boolean; friendStatus?: string }>(() => ({ blocked: peer?.canMessage === false, friendStatus: peer?.friendStatus }));
+
+  // The draft header can mount from router state before GET /users/:id has
+  // answered; the composer follows the consent flags once they arrive.
+  useEffect(() => {
+    if (peer?.canMessage === undefined && peer?.friendStatus === undefined) return;
+    setConsent((c) => {
+      const blocked = peer?.canMessage === undefined ? c.blocked : peer.canMessage === false;
+      const friendStatus = peer?.friendStatus ?? c.friendStatus;
+      return blocked === c.blocked && friendStatus === c.friendStatus ? c : { blocked, friendStatus };
+    });
+  }, [peer?.canMessage, peer?.friendStatus]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
   const atBottomRef = useRef(true);
   const firstPaintRef = useRef(true);
   const seenIdsRef = useRef<Set<string> | null>(null);
-  const restoreRef = useRef<{ height: number; top: number } | null>(null);
+  const restoreRef = useRef<{ height: number; top: number; firstId: string } | null>(null);
 
   const thread = useQuery({
     queryKey: room ? ['thread', room._id] : ['thread', 'peer', peer?._id],
     queryFn: async () => {
       const { data } = await api.get(conversationPath, { params: { ...conversationParams, limit: PAGE_SIZE } });
-      return toPage(data);
+      return toThreadPage<ChatMessage>(data);
     },
   });
 
-  // Older history, loaded on scroll-up. Kept separate from the newest page so
-  // refetching after a send never re-downloads the whole conversation.
-  const cursor = earlier.messages.length ? earlier.nextBefore : thread.data?.nextBefore ?? null;
-  const hasMore = earlier.messages.length ? earlier.hasMore === true : thread.data?.hasMore === true;
+  // The newest page is refetched after a send and on reconnect, and each time
+  // its window slides forward. Folding every page into `history` means a
+  // message that slid out of the window is still on screen (see absorbNewestPage).
+  useEffect(() => {
+    const page = thread.data;
+    if (!page) return;
+    setHistory((h) => absorbNewestPage(h, page));
+  }, [thread.data]);
+
+  // Older history, loaded on scroll-up with the compound (createdAt, id) cursor.
+  const cursor = history.nextBefore;
+  const cursorId = history.nextBeforeId;
+  const hasMore = history.hasMore;
   const loadEarlier = useCallback(async () => {
-    if (!cursor || earlier.loading) return;
+    if (!cursor || older.loading) return;
     const el = scrollRef.current;
-    restoreRef.current = el ? { height: el.scrollHeight, top: el.scrollTop } : null;
-    setEarlier((s) => ({ ...s, loading: true, error: null }));
+    const firstId = listRef.current?.querySelector<HTMLElement>('[data-message-id]')?.dataset.messageId || '';
+    restoreRef.current = el ? { height: el.scrollHeight, top: el.scrollTop, firstId } : null;
+    setOlder({ loading: true, error: null });
     try {
-      const { data } = await api.get(conversationPath, { params: { ...conversationParams, limit: PAGE_SIZE, before: cursor } });
-      const page = toPage(data);
-      setEarlier((s) => ({ messages: [...page.messages, ...s.messages], hasMore: page.hasMore, nextBefore: page.nextBefore, loading: false, error: null }));
+      const { data } = await api.get(conversationPath, {
+        params: { ...conversationParams, limit: PAGE_SIZE, before: cursor, ...(cursorId ? { beforeId: cursorId } : {}) },
+      });
+      const page = toThreadPage<ChatMessage>(data);
+      if (!page.messages.length) restoreRef.current = null;
+      setHistory((h) => absorbEarlierPage(h, page));
+      setOlder({ loading: false, error: null });
     } catch (e) {
       restoreRef.current = null;
-      setEarlier((s) => ({ ...s, loading: false, error: errMsg(e, 'Could not load earlier messages') }));
+      setOlder({ loading: false, error: errMsg(e, 'Could not load earlier messages') });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, earlier.loading, conversationPath]);
+  }, [cursor, cursorId, older.loading, conversationPath]);
 
-  // Keep the reader's place when older messages are prepended above.
+  // Keep the reader's place when older messages are prepended above. A newest
+  // page folding in meanwhile (someone wrote) changes the height too, so only
+  // act once the first message on screen is a different one.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const saved = restoreRef.current;
     if (!el || !saved) return;
+    const firstNow = listRef.current?.querySelector<HTMLElement>('[data-message-id]')?.dataset.messageId || '';
+    if (firstNow === saved.firstId) return;
     restoreRef.current = null;
     el.scrollTop = saved.top + (el.scrollHeight - saved.height);
-  }, [earlier.messages.length]);
+  });
 
   useEffect(() => {
     const sentinel = topRef.current;
@@ -1785,19 +1802,19 @@ function Thread({
     return () => io.disconnect();
   }, [hasMore, thread.isSuccess, loadEarlier]);
 
-  // Live receipts for the pages held in component state (the newest page is patched in the query cache).
+  // Live receipts for the history held in component state (the newest page is patched in the query cache).
   useEffect(() => {
     if (!receipt) return;
-    setEarlier((s) => {
-      const next = applyReadReceipts(s.messages, receipt.payload);
-      return next === s.messages ? s : { ...s, messages: next };
+    setHistory((h) => {
+      const next = applyReadReceipts(h.messages, receipt.payload);
+      return next === h.messages ? h : { ...h, messages: next };
     });
   }, [receipt]);
 
   // Fetched history + realtime deliveries for this room, minus anything deleted, oldest first.
   const merged = useMemo(
-    () => mergeThread({ earlier: earlier.messages, latest: thread.data?.messages, incoming, deletedIds, roomId: room?._id ?? null }),
-    [earlier.messages, thread.data?.messages, incoming, deletedIds, room?._id],
+    () => mergeThread({ earlier: history.messages, latest: thread.data?.messages, incoming, deletedIds, roomId: room?._id ?? null }),
+    [history.messages, thread.data?.messages, incoming, deletedIds, room?._id],
   );
 
   const timeline = useMemo(() => buildTimeline(merged, outbox, meId), [merged, outbox, meId]);
@@ -2057,15 +2074,15 @@ function Thread({
           ) : (
             <>
               <div ref={topRef} aria-hidden="true" className="h-px" />
-              {hasMore || earlier.loading || earlier.error ? (
+              {hasMore || older.loading || older.error ? (
                 <div className="flex justify-center pb-3">
-                  {earlier.loading ? (
+                  {older.loading ? (
                     <span className="inline-flex items-center gap-2 text-xs text-text-3" aria-live="polite">
                       <Spinner size={14} /> Loading earlier messages…
                     </span>
-                  ) : earlier.error ? (
+                  ) : older.error ? (
                     <Button size="sm" variant="secondary" onClick={() => void loadEarlier()}>
-                      {earlier.error} · Try again
+                      {older.error} · Try again
                     </Button>
                   ) : (
                     <Button size="sm" variant="ghost" onClick={() => void loadEarlier()}>
@@ -2094,7 +2111,7 @@ function Thread({
                   }
                   const senderName = nameOf(item.sender, 'Member');
                   return (
-                    <li key={item.key} className={cx('flex gap-2', item.mine ? 'justify-end' : 'items-end justify-start')}>
+                    <li key={item.key} data-message-id={item.messages[0]?._id} className={cx('flex gap-2', item.mine ? 'justify-end' : 'items-end justify-start')}>
                       {!item.mine ? (
                         <Link to={item.senderId ? `/u/${item.senderId}` : '/friends'} viewTransition aria-label={senderName} className="relative mb-5 shrink-0 rounded-full before:absolute before:-inset-2 before:content-['']">
                           <Avatar src={item.sender?.avatar} name={senderName} size={28} />

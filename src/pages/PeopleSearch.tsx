@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { useDebounced } from '../lib/hooks';
 import { Avatar, Badge, EmptyState, ErrorState, Input, SkeletonRow, cx } from './ui';
 import { BadgeCheck, Check, Clock, Search as SearchIcon, X } from './icons';
@@ -56,12 +57,24 @@ export function usePeopleSearch(query: string, { enabled = true, limit = PEOPLE_
 
 /* ------------------------------------------------------------------ recent */
 
-const RECENT_KEY = 'vybe.recentPeople';
+// Recents are per account: on a shared browser the next person to sign in
+// must not see who the previous one messaged. The key carries the signed-in
+// user's id; with nobody signed in nothing is stored or read.
+const RECENT_KEY_PREFIX = 'vybe.recentPeople';
 const RECENT_MAX = 8;
 
+const recentKey = (): string | null => {
+  const id = useAuth.getState().user?._id;
+  return id ? `${RECENT_KEY_PREFIX}.${id}` : null;
+};
+
 const readRecent = (): Person[] => {
+  const key = recentKey();
+  if (!key) return [];
   try {
-    const raw = localStorage.getItem(RECENT_KEY);
+    // An older build kept one shared list under the bare prefix; drop it.
+    localStorage.removeItem(RECENT_KEY_PREFIX);
+    const raw = localStorage.getItem(key);
     const list = raw ? (JSON.parse(raw) as Person[]) : [];
     return Array.isArray(list) ? list.filter((u) => u && typeof u._id === 'string') : [];
   } catch {
@@ -70,8 +83,10 @@ const readRecent = (): Person[] => {
 };
 
 const writeRecent = (list: Person[]) => {
+  const key = recentKey();
+  if (!key) return;
   try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
+    localStorage.setItem(key, JSON.stringify(list.slice(0, RECENT_MAX)));
   } catch {
     // Storage may be unavailable (private mode); recents are a convenience.
   }
@@ -93,16 +108,18 @@ export function clearRecentPeople() {
 }
 
 export function useRecentPeople(): Person[] {
+  const userId = useAuth((s) => s.user?._id);
   const [list, setList] = useState<Person[]>(() => (typeof window === 'undefined' ? [] : readRecent()));
   useEffect(() => {
     const sync = () => setList(readRecent());
+    sync();
     window.addEventListener('vybe:recent-people', sync);
     window.addEventListener('storage', sync);
     return () => {
       window.removeEventListener('vybe:recent-people', sync);
       window.removeEventListener('storage', sync);
     };
-  }, []);
+  }, [userId]);
   return list;
 }
 
@@ -134,6 +151,7 @@ export function PersonRow({
   selected,
   meta,
   disabled,
+  locked = false,
   className,
   buttonRef,
   onKeyDown,
@@ -152,6 +170,8 @@ export function PersonRow({
   selected?: boolean;
   meta?: ReactNode;
   disabled?: boolean;
+  /** Not pickable but still focusable, so screen readers reach the reason (e.g. "Friends only"). */
+  locked?: boolean;
   className?: string;
   buttonRef?: (el: HTMLButtonElement | null) => void;
   onKeyDown?: (e: ReactKeyboardEvent<HTMLButtonElement>) => void;
@@ -168,12 +188,14 @@ export function PersonRow({
         onClick={onClick}
         onKeyDown={onKeyDown}
         disabled={disabled}
+        aria-disabled={locked || undefined}
         role={selected === undefined ? undefined : 'checkbox'}
         aria-checked={selected === undefined ? undefined : selected}
         className={cx(
           'flex min-h-14 w-full min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand',
-          !aside && (selected ? 'bg-brand-soft' : 'hover:bg-surface-2 active:bg-surface-2 focus-visible:bg-surface-2'),
-          disabled && 'opacity-60',
+          !aside && !locked && (selected ? 'bg-brand-soft' : 'hover:bg-surface-2 active:bg-surface-2 focus-visible:bg-surface-2'),
+          (disabled || locked) && 'opacity-60',
+          locked && 'cursor-not-allowed',
           !aside && className,
         )}
       >
@@ -286,7 +308,7 @@ export default function PeopleSearch({
   const recentPeople = useRecentPeople();
   const inputRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const listId = useMemo(() => `people-${Math.random().toString(36).slice(2, 8)}`, []);
+  const listId = useId();
 
   const visible = useMemo(() => {
     const seen = new Set<string>(excludeIds ? [...excludeIds] : []);
@@ -359,7 +381,9 @@ export default function PeopleSearch({
     }
   };
 
+  const lockedInMulti = (u: Person) => mode === 'multi' && u.canMessage === false;
   const pick = (u: Person) => {
+    if (lockedInMulti(u)) return;
     if (mode === 'single') rememberPerson(u);
     onPick(u);
   };
@@ -451,6 +475,7 @@ export default function PeopleSearch({
             <ul className="space-y-0.5" aria-label={searching ? `People matching ${trimmed}` : emptyList ? emptyHeading : 'Recent people'}>
               {visible.map((u, i) => {
                 const on = selectedIds?.has(u._id) ?? false;
+                const locked = lockedInMulti(u);
                 return (
                   <PersonRow
                     key={u._id}
@@ -461,16 +486,17 @@ export default function PeopleSearch({
                     }}
                     onKeyDown={onRowKeyDown(i)}
                     onClick={() => pick(u)}
+                    locked={locked}
                     trailingInteractive={trailingInteractive && !!trailing}
                     selected={mode === 'multi' ? on : undefined}
                     meta={meta ? meta(u) : !searching && !emptyList ? <Clock size={12} className="shrink-0 text-text-3" aria-label="Recent" /> : undefined}
                     trailing={
                       trailing ? (
                         trailing(u)
-                      ) : mode === 'multi' ? (
-                        <SelectionCheck on={on} />
                       ) : u.canMessage === false ? (
                         <span className="shrink-0 text-xs font-medium text-text-3">Friends only</span>
+                      ) : mode === 'multi' ? (
+                        <SelectionCheck on={on} />
                       ) : (
                         <span className="shrink-0 text-xs font-semibold text-brand-text">Message</span>
                       )
