@@ -1,0 +1,246 @@
+# Durable workout draft and rest timer (bounded W3/W5)
+
+Current branch `aaa-a656-fleet-workout-recovery-web` combines reconciled web
+`7e5b308b755d4d794f1069b8b0003875a95ec972` with the preserved draft/timer
+`b8b5e3af0b9bf2bb84ac87a9e1928bc07aa2e96f`. Main's place pictures, meal-token
+handoff and full-template updates, plus the earlier reliability/per-set fixes,
+remain intact. Built-in IndexedDB/Web Crypto only; no new dependencies.
+
+The paired backend's create-only `clientRequestId` deduplication and full
+backend qualification remain **independent release prerequisites**. This
+frontend package does not change the REST contract or qualify server storage.
+
+## Local authoring and explicit recovery
+
+- One local workout draft per verified account/browser origin, in IndexedDB
+  `vybe-workout-drafts` database version 2 (`drafts` keyed by owner ID; `meta`
+  contains account scope and per-owner revision stamps). Draft payloads retain
+  their version-1 format.
+- Save form strings, stable exercise/set IDs, original edit/seed context,
+  request ID, rest timer and any pending immutable request. No raw credential
+  is stored in IndexedDB. The existing authentication token store is unchanged.
+- “Local only · unsynced” distinguishes local commits from server saves.
+  “Saved on this device” appears only after the IndexedDB transaction completes.
+  Input entered while a storage operation is pending is not yet durable.
+- Navigating away/reloading never publishes. Returning offers **Resume workout
+  draft / Discard local draft**. Save for later explicitly closes the editor
+  after local persistence. Discard is confirmed and removes only local state,
+  never a possibly saved server workout.
+- Drafts older than seven days show a review warning. Unknown/invalid draft
+  formats are not silently migrated into fabricated sets; explicit discard is
+  available. Legacy aggregate rows remain aggregate rows.
+- An existing draft takes priority over opening another new/edit/template
+  session. Resume/discard first, then open the desired authoring workflow.
+- Storage unavailable/quota/transaction failures are visible, retain in-memory
+  input and block network publication until the request can be stored safely.
+  There is no silent localStorage or volatile-only “success” fallback.
+
+## Save/retry protocol
+
+Generate one client request ID when a new draft starts. Before any network
+save, commit the exact payload and target ID to IndexedDB. While a request is
+unresolved, authoring is locked and **Retry save** reuses the immutable payload.
+The timer can still operate independently; its state is not workout metrics.
+
+- Create: send `clientRequestId`; 201/200 with a valid owner-scoped workout
+  acknowledgement is a verified save. A lost response/reload reuses the same
+  key/body and cannot create a second log.
+- Definite 400 validation rejection permits correction. A 409 conflict keeps
+  the draft and refreshes history; it never overwrites the server or silently
+  changes the key. A 410 deleted-request response also requires deliberate
+  local discard, not resurrection.
+- Edit: keep `setRecordsVersion`/`expectedRevision` semantics. A lost edit
+  acknowledgement may subsequently return 409; inspect refreshed history and
+  discard/reopen deliberately. No automatic merge of concurrent edits.
+- After acknowledgement, delete the local draft. If local cleanup fails,
+  **Retry local cleanup** removes it without another POST in that editor.
+  After a process crash, replaying the persisted create is still idempotent.
+
+There is no automatic queue flush on reconnect, startup or a timer event.
+An operator must choose Resume and Save/Retry.
+
+## Account isolation and purging
+
+Draft storage is bound to verified owner ID, a one-way session fingerprint and
+a local revocation generation. Logout/credential replacement synchronously
+revokes the generation before asynchronous IndexedDB purge, so navigation
+interrupting that purge cannot make the old draft eligible again.
+
+The small `api.ts`/`auth.ts`/`App.tsx` hooks are necessary for lifecycle safety,
+including outside the logger:
+
+- `verifiedToken` pairs the in-memory user with the credential that actually
+  verified it. A token changed in another tab cannot be paired with a stale
+  owner object to send the old draft as the new user.
+- Workout requests pin that verified session through the Axios interceptor.
+  A mismatch fails before dispatch; ordinary requests keep their existing
+  behavior.
+- Logout/account deletion and cross-tab token/generation changes revoke
+  draft access and purge storage. On startup/account switch, mismatched
+  owner/session/generation data is cleared before any recovery read/write.
+- IDs, content and request metadata stay local/private. No secrets appear in
+  status messages. Browser storage is not application-level encrypted; device/
+  browser profile access remains a privacy consideration.
+
+## Concurrent tabs and stale editors
+
+Multiple tabs may read/resume the same draft. They do **not** silently merge
+or overwrite one another: the first committed change wins, and every stale
+writer or discard fails with an actionable conflict.
+
+- A recovery read atomically captures the account scope, occupied slot/draft
+  identity and its revision in an editor-specific in-memory handle.
+- Each write/delete checks that handle against IndexedDB in the **same
+  readwrite transaction** as the mutation. A fresh opaque revision is stored
+  atomically with the change. No localStorage lock, timestamp ordering, lease
+  timeout or cross-tab message delivery is required.
+- Deletion keeps a revision tombstone and permanently closes that editor's
+  handle. Stale writes cannot resurrect saved/discarded state, even after a
+  same-ID delete/recreate cycle or an empty → occupied → empty cycle (ABA).
+  Failed stale discards cannot remove the new state.
+- A single editor's queued autosaves advance only their own cursor, **after
+  transaction completion**, before the next queued operation. Other editors'
+  handles never advance automatically. An aborted request/transaction leaves
+  the cursor unchanged and never displays a storage success.
+- Merely resuming a stored draft does not rewrite it. A conflict retains this
+  tab's unsaved in-memory input and stops its persistence/publication. Copy
+  any wanted values, choose **Reload latest draft**, confirm, and deliberately
+  resume the latest local recovery state. There is no auto-merge or auto-send.
+- Pending request identity/payload remains immutable while timer-only updates
+  can commit through the same handle. A newer tab's write also prevents stale
+  server-acknowledgement cleanup from deleting its state. Reconcile explicitly;
+  this is separate from backend `expectedRevision`/idempotency handling.
+
+Database version 2 upgrades existing stores without fabricating or deleting a
+matching account's version-1 draft. Older builds request database version 1,
+so they fail closed after the upgrade rather than bypassing revision checks.
+Close/reload an old tab if it blocks the upgrade. All participating clients
+must use the guarded implementation; browser storage editing outside the app
+is not a supported concurrency mechanism.
+
+## Rest timer
+
+Optional, user-chosen duration (1–86,400 seconds), scoped to the session or an
+exercise. Start/resume records an absolute deadline. Remaining time is derived
+from the current timestamp, not decremented ticks, so navigation, process
+restart and background throttling do not extend the timer. Pause stores the
+remaining seconds; reset/stop are explicit.
+
+Only start/pause/reset/stop/configuration changes write timer state. There are
+no per-second IndexedDB writes, animations, sound, vibration or automatic
+workout changes. Remaining time has `role="timer"` and `aria-live="off"`;
+the separate status announces transitions, not every tick. Existing reduced-
+motion UI primitives remain in use. No rest duration is a medical/training
+recommendation.
+
+**No background/native notification support is claimed.** With the page
+suspended/closed, expiry is shown when the UI runs again. System-clock changes
+affect an absolute wall-clock deadline.
+
+## Validation commands
+
+Run from this worktree on Node 24.19.0:
+
+```sh
+export PATH="$HOME/.local/share/fnm/node-versions/v24.19.0/installation/bin:$PATH"
+mkdir -p node_modules/.cache/runtime node_modules/.cache/npm
+export TMPDIR="$PWD/node_modules/.cache/runtime"
+export npm_config_cache="$PWD/node_modules/.cache/npm"
+export VYBE_PLAYWRIGHT="$HOME/.agents/skills/playwright-skill/node_modules/playwright/index.mjs"
+unset VYBE_TEST_BACKEND
+npm run scan
+npm run build
+npm run verify
+node --test --test-concurrency=1 $(find tests -maxdepth 1 -name '*.test.mjs' \
+  ! -name 'workout-drafts.local-e2e.test.mjs' | sort)
+npm run verify:build
+node scripts/audit-api-contracts.cjs ../int-vybe-backend
+git diff --check
+```
+
+The `npm run verify` invocation explicitly gates/skips the one real-backend
+E2E with `VYBE_TEST_BACKEND` unset. The following full non-Mongo run excludes
+**only** that file; every pure/mock-API browser test must pass with zero skips.
+Do not supply the backend variable while another QA lane owns the shared DB.
+
+Chromium exercises actual IndexedDB: save/recover/clear, stale/unknown drafts,
+quota/unavailable storage, failed cleanup, rest deadline/pause/reset/stop,
+logout, deletion and cross-tab account switching. Added same-context two-page
+tests cover stale writes/discards of the same draft, simultaneous contenders,
+pending request/timer preservation, saved/discarded-state resurrection, ABA,
+rapid queued inputs, transaction rollback, old-database upgrade, in-flight save
+cleanup, and logout while another editor remains open. The ABA fixture imports
+the actual storage module into Chromium; it uses real IndexedDB transactions,
+not text matching or a mocked database. Existing set editor tests
+retain light/dark, aggregate, template, repeat and revision conflict coverage.
+
+The opt-in local end-to-end test uses the exact isolated backend and hard-pins
+`mongodb://127.0.0.1:27018/vybe_aaa_a656_drafts_browser?replicaSet=rs0`.
+It seeds a local-only account, commits a real POST, drops its acknowledgement,
+closes Chromium, restarts it with the same worktree-local profile, explicitly
+resumes/retries and verifies one database log plus cleared IndexedDB. That
+test database and profile are removed afterward. It never inherits a
+production connection string or uses production credentials.
+
+**That real-backend E2E was not run for the concurrency package.** Its browser
+inspection was updated to database version 2, but Mongo/API/process-restart
+qualification remains separately gated with the backend QA owner. Existing
+mocked-API lost-ack recovery is not a substitute for that proof.
+
+Without the browser/backend environment variables, optional suites explicitly
+skip; those skips are not proof. The live smoke script is **not run** here.
+Native/device, actual production, notifications and full W3/W5 completion
+remain parent-owned/out of scope.
+
+## Current concurrency-package verification — 2026-09-18
+
+Node 24.19.0 / npm 11.17.0; existing manifest-matched dependency links only,
+with worktree-local writable caches:
+
+- Draft/IndexedDB/timer Chromium suite: **22 passed, zero failures/skips**.
+- `npm run verify`: **165 passed, zero failures, one explicitly gated
+  real-backend E2E skip**. Supply-chain scan, production audit (**zero
+  findings**), API contracts, typecheck, build and artifact verification passed
+  (107 files / five entry assets).
+- Separately, all **19 non-Mongo test files** against the newly rebuilt app:
+  **165 passed, zero failures/skips/cancellations**, including five actual
+  Chromium suites. The only excluded file is the separately gated
+  `workout-drafts.local-e2e.test.mjs`; no browser suite is silently skipped.
+- Read-only route audit against backend
+  `7368dbd0c972b2baf1b512a245c2ea1aca3d585f`: 284 resolved Axios calls against
+  369 routes, zero dynamic/unmatched/shadowed/unresolved-base cases. This is
+  source inspection, not API or Mongo execution.
+- Merge/conflict/diff checks pass. Main's Gyms/share/template files, previous
+  runtime/release/cache/set helpers, and the optional timer implementation
+  remain byte-identical to their input commits.
+
+Raw gate output is retained in ignored `logs/fleet-draft-tab-safety/`.
+Temporary dependency links/caches are removed before handoff; no shared
+dependency directory was installed over. No production account, push,
+deployment, backend edit, Mongo use, native change or global release completion
+is claimed. Backend/full E2E qualification, deployment coordination and native/
+device/server constraints remain independent prerequisites.
+
+## Historical preserved-draft verification (before this reconciliation)
+
+Node 24.19.0, final serialized full run:
+
+- **145 tests passed, 0 failed, 0 skipped**, including four browser suites.
+- New IndexedDB/timer browser coverage: 11 tests; existing per-set browser
+  coverage: 6 tests; real backend + Chromium process restart: 1 test.
+- Focused session/clock regressions: 20 passed.
+- `npm run build` (includes TypeScript): passed.
+- Build verification: 107 files, 5 entry assets.
+- Route audit against the isolated backend: 284 resolved calls; 0 unmatched,
+  shadowed or unresolved routes/bases.
+- Supply-chain scan and `git diff --check`: passed.
+
+No product dependencies were installed or changed; matching installed tools
+were linked into this worktree during validation. The link and test artifacts
+are removed before handing off the commit.
+
+Owned feature files are `src/lib/workoutDrafts.ts`,
+`src/lib/WorkoutDraftLifecycle.tsx`, `src/pages/WorkoutRestTimer.tsx` and
+`src/pages/WorkoutLogs.tsx`. The minimal lifecycle integration touches
+`src/lib/api.ts`, `src/lib/auth.ts` and `src/App.tsx`; no login UI, themes,
+navigation definitions, runtime/deploy settings or messages were changed.
