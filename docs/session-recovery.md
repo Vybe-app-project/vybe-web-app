@@ -14,6 +14,11 @@ Concurrent startup checks share an in-flight request. Retrying clears the prior
 error and checks the server again. Support remains publicly reachable, and the
 person can explicitly sign out instead of retrying.
 
+Startup verification lets route guards handle an expired credential, so an
+expired consumer session cannot eject someone from public support or the
+separately authenticated admin console. Other protected requests retain the
+normal session-expired navigation behavior.
+
 Consumer credentials retain their existing local-storage lifetime. Administrator
 credentials remain tab-scoped in session storage. This change does not introduce
 offline authentication, session extension, or a new session-revocation policy.

@@ -45,9 +45,12 @@ type AuthState = {
 let userBootstrap: Promise<void> | null = null;
 let adminBootstrap: Promise<void> | null = null;
 
-const hasIdentity = (value: unknown): value is User =>
+const hasIdentity = (value: unknown): value is { _id: string } =>
   typeof value === 'object' && value !== null && '_id' in value
   && typeof value._id === 'string' && value._id.length > 0;
+
+const isUser = (value: unknown): value is User =>
+  hasIdentity(value) && 'username' in value && typeof value.username === 'string';
 
 export const useAuth = create<AuthState>((set) => ({
   user: null,
@@ -67,13 +70,13 @@ export const useAuth = create<AuthState>((set) => ({
     set({ loading: true, bootstrapError: null });
     userBootstrap = (async () => {
       try {
-        const { data } = await api.get('/users/me');
+        const { data } = await api.get('/users/me', { sessionVerification: true });
         if (tokenStore.get() !== token) {
           if (!tokenStore.get()) set({ user: null, loading: false, bootstrapError: null });
           return;
         }
         const user: unknown = data?.user ?? data;
-        if (!hasIdentity(user)) throw new Error('Session response has no user identity.');
+        if (!isUser(user)) throw new Error('Session response has no user identity.');
         set({ user, loading: false, bootstrapError: null });
       } catch (error) {
         const current = tokenStore.get();
@@ -103,7 +106,7 @@ export const useAuth = create<AuthState>((set) => ({
     set({ adminLoading: true, adminBootstrapError: null });
     adminBootstrap = (async () => {
       try {
-        const { data } = await adminApi.get('/admins/me');
+        const { data } = await adminApi.get('/admins/me', { sessionVerification: true });
         if (tokenStore.getAdmin() !== token) {
           if (!tokenStore.getAdmin()) set({ admin: null, adminLoading: false, adminBootstrapError: null });
           return;

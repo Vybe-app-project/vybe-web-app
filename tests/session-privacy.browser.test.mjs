@@ -103,18 +103,38 @@ if (!playwrightPath) {
       }
     });
 
-    test('the public support form remains reachable during a saved-session outage', async () => {
+    for (const status of [401, 503]) {
+    test(`public support remains reachable when session verification returns ${status}`, async () => {
       const context = await browser.newContext({ serviceWorkers: 'block' });
       try {
         const page = await context.newPage();
         await page.addInitScript(() => localStorage.setItem('vybe.token', 'fixture-session'));
         await page.route('**/api/users/me', (route) => route.fulfill({
-          status: 503, contentType: 'application/json', body: '{}',
+          status, contentType: 'application/json', body: '{}',
         }));
         await page.goto(`${base}/support`);
         await page.getByRole('heading', { name: 'Support', exact: true }).waitFor();
-        assert.equal(await page.evaluate(() => localStorage.getItem('vybe.token')), 'fixture-session');
+        assert.equal(await page.evaluate(() => localStorage.getItem('vybe.token')), status === 401 ? null : 'fixture-session');
+        assert.equal(new URL(page.url()).pathname, '/support');
         assert.equal(await page.getByRole('heading', { name: 'Unable to verify your sign-in', exact: true }).count(), 0);
+      } finally {
+        await context.close();
+      }
+    });
+    }
+
+    test('an expired session on a protected route goes to sign-in through the route guard', async () => {
+      const context = await browser.newContext({ serviceWorkers: 'block' });
+      try {
+        const page = await context.newPage();
+        await page.addInitScript(() => localStorage.setItem('vybe.token', 'fixture-session'));
+        await page.route('**/api/users/me', (route) => route.fulfill({
+          status: 401, contentType: 'application/json', body: '{}',
+        }));
+        await page.goto(`${base}/settings`);
+        await page.waitForURL('**/login');
+        await page.getByRole('heading', { name: 'Welcome back', exact: true }).waitFor();
+        assert.equal(await page.evaluate(() => localStorage.getItem('vybe.token')), null);
       } finally {
         await context.close();
       }

@@ -66,7 +66,7 @@ test('an authoritative 401 removes the consumer session', async () => {
   assert.equal(tokenStore.get(), null);
   assert.equal(useAuth.getState().loading, false);
   assert.equal(useAuth.getState().bootstrapError, null);
-  assert.equal(location.href, '/login');
+  assert.equal(location.href, '/', 'route guards, not the bootstrap interceptor, own navigation');
 });
 
 test('a forbidden request does not masquerade as an expired session', async () => {
@@ -164,5 +164,24 @@ test('an invalid admin session is removed, leaving consumer sign-in untouched', 
   assert.equal(tokenStore.getAdmin(), null);
   assert.equal(tokenStore.get(), 'consumer-session');
   assert.equal(useAuth.getState().adminLoading, false);
-  assert.equal(location.href, '/admin/login');
+  assert.equal(location.href, '/', 'admin bootstrap must not redirect public recovery/support pages');
+});
+
+test('an ordinary protected request still redirects when its current credential is rejected', async () => {
+  tokenStore.set('consumer-session');
+  api.defaults.adapter = async (config) => { throw failure(config, 401); };
+  await assert.rejects(api.get('/posts/feed'));
+  assert.equal(tokenStore.get(), null);
+  assert.equal(location.href, '/login');
+});
+
+test('an expired consumer credential does not interrupt a valid administrator bootstrap', async () => {
+  tokenStore.set('expired-consumer-session');
+  tokenStore.setAdmin('valid-admin-session');
+  api.defaults.adapter = async (config) => { throw failure(config, 401); };
+  await Promise.all([useAuth.getState().bootstrap(), useAuth.getState().bootstrapAdmin()]);
+  assert.equal(tokenStore.get(), null);
+  assert.equal(tokenStore.getAdmin(), 'valid-admin-session');
+  assert.deepEqual(useAuth.getState().admin, admin);
+  assert.equal(location.href, '/');
 });
