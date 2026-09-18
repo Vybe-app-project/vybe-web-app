@@ -2463,6 +2463,14 @@ export default function Messages() {
   const toParam = params.get('to') || '';
   const isDraft = roomId === DRAFT_ROOM_ID || (!roomId && toParam.length > 0);
   const draftPeerId = isDraft ? toParam : '';
+  // /messages/new with nobody picked yet used to render a dead "conversation
+  // isn't available" thread; it now opens the people picker over the inbox.
+  useEffect(() => {
+    if (roomId === DRAFT_ROOM_ID && !toParam) {
+      setPickerOpen(true);
+      navigate('/messages', { replace: true, state: location.state });
+    }
+  }, [roomId, toParam, navigate, location.state]);
   const statePeer = (location.state as { peer?: ChatUser } | null)?.peer;
 
   const activeRoom = useMemo(() => (roomId && !isDraft ? (rooms.data || []).find((r) => r._id === roomId) || null : null), [rooms.data, roomId, isDraft]);
