@@ -1,7 +1,14 @@
 import axios, { AxiosError } from 'axios';
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** The auth store handles the result and lets route guards navigate. */
+    sessionVerification?: boolean;
+  }
+}
+
 export const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) || '/api';
+  (import.meta.env?.VITE_API_BASE as string | undefined) || '/api';
 
 export const ORIGIN_BASE = API_BASE.replace(/\/api\/?$/, '');
 
@@ -72,27 +79,31 @@ adminApi.interceptors.request.use((config) => {
 });
 
 /** Session-version invalidation: the API revokes tokens on password change. */
-function onUnauthorized(kind: 'user' | 'admin') {
+function onUnauthorized(kind: 'user' | 'admin', authorization: unknown, redirect: boolean) {
+  const current = kind === 'admin' ? tokenStore.getAdmin() : tokenStore.get();
+  // An old request must not invalidate a newer sign-in, or treat a failed
+  // public login attempt as an expired authenticated session.
+  if (!current || authorization !== `Bearer ${current}`) return;
   if (kind === 'admin') {
     tokenStore.clearAdmin();
-    if (!location.pathname.startsWith('/admin/login')) location.href = '/admin/login';
+    if (redirect && !location.pathname.startsWith('/admin/login')) location.href = '/admin/login';
   } else {
     tokenStore.clear();
-    if (!location.pathname.startsWith('/login')) location.href = '/login';
+    if (redirect && !location.pathname.startsWith('/login')) location.href = '/login';
   }
 }
 
 api.interceptors.response.use(
   (r) => r,
   (err: AxiosError) => {
-    if (err.response?.status === 401) onUnauthorized('user');
+    if (err.response?.status === 401) onUnauthorized('user', err.config?.headers.get('Authorization'), !err.config?.sessionVerification);
     return Promise.reject(err);
   },
 );
 adminApi.interceptors.response.use(
   (r) => r,
   (err: AxiosError) => {
-    if (err.response?.status === 401) onUnauthorized('admin');
+    if (err.response?.status === 401) onUnauthorized('admin', err.config?.headers.get('Authorization'), !err.config?.sessionVerification);
     return Promise.reject(err);
   },
 );
