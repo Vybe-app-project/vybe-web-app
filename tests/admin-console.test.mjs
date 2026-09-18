@@ -112,6 +112,18 @@ test('Users shows suspension state and offers suspend/restore without a report',
   assert.match(source, /admin-table--actions/);
 });
 
+test('every admin data table with row actions pins its Actions column for phones', () => {
+  for (const file of [
+    'src/pages/admin/AdminUsers.tsx',
+    'src/pages/admin/AdminPosts.tsx',
+    'src/pages/admin/AdminAudit.tsx',
+    'src/pages/admin/AdminCatalog.tsx',
+  ]) {
+    assert.match(read(file), /admin-table admin-table--actions/, `${file} must pin its actions column`);
+  }
+  assert.match(read('src/styles.admin.css'), /\.admin-table--actions td:last-child \{\s*position: sticky;\s*right: 0;/);
+});
+
 test('Posts pages server-side and names authors from real fields', () => {
   const source = read('src/pages/admin/AdminPosts.tsx');
   assert.match(source, /queryKey: \['admin', 'posts', page, pageSize, search, status\]/);
