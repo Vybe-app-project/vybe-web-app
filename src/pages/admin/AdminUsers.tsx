@@ -96,9 +96,9 @@ function StatusBadges({ user: u }: { user: AdminUser }) {
   const reason = u.moderationSuspension?.reason?.trim();
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {u.isVerified ? (
+      {u.isIdentityVerified ? (
         <Badge tone="success"><Check size={12} /> Verified</Badge>
-      ) : (
+      ) : u.isVerified ? null : (
         <Badge tone="neutral">Unverified</Badge>
       )}
       {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
