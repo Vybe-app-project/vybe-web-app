@@ -165,6 +165,14 @@ test('Trainers requires a reject reason up front and drops decision buttons once
   assert.match(source, /Decision recorded/);
 });
 
+test('the admin identity is unwrapped from the /admins/me envelope, so roles survive a reload', () => {
+  const auth = read('src/lib/auth.ts');
+  assert.match(auth, /data\?\.data\?\.admin \?\? data\?\.admin \?\? data/);
+  assert.doesNotMatch(auth, /admin: data\.admin \|\| data/);
+  const admins = read('src/pages/admin/AdminAdmins.tsx');
+  assert.match(admins, /useCurrentAdmin\(\)/, 'the Administrators page reads the role from the API, not only the sign-in payload');
+});
+
 test('Admins collapses row actions into an overflow menu on phones', () => {
   const source = read('src/pages/admin/AdminAdmins.tsx');
   assert.match(source, /useIsCompact\(\)/);

@@ -23,7 +23,7 @@ import {
   useToast,
 } from '../../components/ui';
 import { Shield, Plus, Trash, Edit, Lock, Users, Eye } from '../../components/icons';
-import { AdminPageHeader } from './AdminLayout';
+import { AdminPageHeader, useCurrentAdmin } from './AdminLayout';
 
 type Admin = {
   _id: string;
@@ -93,7 +93,10 @@ export default function AdminAdmins() {
     },
   });
 
-  const me = currentAdmin as Admin | null;
+  // The role comes from GET /admins/me (unwrapped by useCurrentAdmin), with
+  // the sign-in payload as the fallback while that request is in flight.
+  const identity = useCurrentAdmin();
+  const me = ((identity.data && identity.data._id ? identity.data : null) ?? currentAdmin) as Admin | null;
   const isSuperAdmin = me?.role === 'SUPER_ADMIN';
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'admins'] });
