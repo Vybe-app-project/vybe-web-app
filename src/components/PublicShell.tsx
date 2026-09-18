@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../lib/auth';
 import { Brand, ButtonLink, cx } from './ui';
 
 /**
@@ -19,6 +20,10 @@ export function PublicShell({
   children: ReactNode;
   className?: string;
 }) {
+  // The share handoff (/open.html) renders this shell for signed-in people
+  // too; offering them "Log in / Join Vybe" read as if the session was gone.
+  const user = useAuth((s) => s.user);
+  const loading = useAuth((s) => s.loading);
   return (
     <div className="min-h-dvh bg-bg text-text-1">
       <header className="safe-top border-b border-line bg-surface-1">
@@ -27,12 +32,20 @@ export function PublicShell({
             <Brand size="md" />
           </Link>
           <nav aria-label="Account" className="flex items-center gap-2">
-            <ButtonLink to="/login" variant="ghost" size="sm">
-              Log in
-            </ButtonLink>
-            <ButtonLink to="/register" variant="primary" size="sm">
-              Join Vybe
-            </ButtonLink>
+            {loading ? null : user ? (
+              <ButtonLink to="/" variant="secondary" size="sm">
+                Open Vybe
+              </ButtonLink>
+            ) : (
+              <>
+                <ButtonLink to="/login" variant="ghost" size="sm">
+                  Log in
+                </ButtonLink>
+                <ButtonLink to="/register" variant="primary" size="sm">
+                  Join Vybe
+                </ButtonLink>
+              </>
+            )}
           </nav>
         </div>
       </header>
