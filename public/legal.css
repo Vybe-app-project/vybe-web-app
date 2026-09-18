@@ -13,6 +13,13 @@
  * carries over. The prefers-color-scheme rule is scoped to `.no-js`, which
  * /legal.js removes when scripts run: without it an app user who chose
  * "light" on a dark OS would get a dark policy page.
+ *
+ * Shell geometry: the top bar is sticky, so `scroll-padding-top` on <html>
+ * must equal what stays on screen or a skip link / anchor scrolls its target
+ * under the bar. On phones the bar parks its 48px brand row above the
+ * viewport (negative sticky top) and legal.js hides the parked row, leaving
+ * only the page tabs over a long document. The numbers live together in the
+ * `html {}` metrics block below.
  * ------------------------------------------------------------------ */
 
 /* Latin subset of the app typeface, copied byte-for-byte from
@@ -119,6 +126,21 @@
   :root { --duration-1: 1ms; --duration-2: 1ms; --duration-3: 1ms; --duration-4: 1ms; }
 }
 
+/* Metrics of the legal shell itself, kept out of `:root` because that block
+   is checked token-for-token against src/styles.css. */
+html {
+  --legal-safe-top: env(safe-area-inset-top, 0px);
+  --legal-tab-h: 40px; /* page tab row, also the shell hit-target height */
+  --legal-bar-pad: 4px; /* above and below the tab row on phones */
+  --legal-bar-h: 64px; /* the single desktop row */
+  /* Visible height of the parked bar: the tab row, its padding and the border. */
+  --legal-sticky-h: calc(var(--legal-tab-h) + 2 * var(--legal-bar-pad) + 1px);
+  scroll-padding-top: calc(var(--legal-safe-top) + var(--legal-sticky-h) + 8px);
+}
+@media (pointer: coarse) {
+  html { --legal-tab-h: 44px; }
+}
+
 /* ------------------------------------------------------------------ base */
 *, ::before, ::after { box-sizing: border-box; }
 
@@ -177,14 +199,15 @@ svg { display: block; }
   font-weight: 600;
   text-decoration: none;
 }
-.skip-link:focus-visible { top: 12px; }
+.skip-link:focus-visible { top: calc(12px + var(--legal-safe-top)); }
 
 /* ------------------------------------------------------------------ top bar */
 .legal-topbar {
   position: sticky;
-  top: 0;
+  /* Phones: park the brand row above the viewport once the reader scrolls. */
+  top: calc(-1 * var(--topbar-h));
   z-index: 10;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--legal-safe-top);
   border-bottom: 1px solid var(--line);
   background: var(--bg);
   background: color-mix(in srgb, var(--bg) 90%, transparent);
@@ -192,16 +215,24 @@ svg { display: block; }
   backdrop-filter: blur(24px);
 }
 
+/* The bar carries the status-bar inset of an installed PWA as padding, so the
+   parked brand row's tail would still show under the clock. legal.js marks
+   the bar while it is parked; the row disappears until the reader scrolls back. */
+.legal-topbar.is-stuck .legal-brand,
+.legal-topbar.is-stuck .legal-topbar__action { visibility: hidden; }
+
 /* Phones: brand + Support on the first row, the page tabs on a second. */
 .legal-topbar__row {
   display: grid;
   grid-template-columns: 1fr auto;
+  grid-template-rows: var(--topbar-h) minmax(var(--legal-tab-h), auto);
   grid-template-areas:
     'brand action'
     'nav nav';
   align-items: center;
   column-gap: 12px;
-  padding-bottom: 6px;
+  row-gap: var(--legal-bar-pad);
+  padding-bottom: var(--legal-bar-pad);
 }
 
 .legal-brand {
@@ -233,7 +264,7 @@ svg { display: block; }
 .legal-topbar__action {
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  min-height: var(--legal-tab-h);
   padding: 0 10px;
   border-radius: var(--radius-sm);
   color: var(--text-2);
@@ -257,15 +288,15 @@ svg { display: block; }
 }
 .legal-topbar__action:hover { background: var(--surface-3); }
 
-@media (pointer: coarse) {
-  .legal-nav a, .legal-topbar__action { min-height: 44px; }
-}
-
 @media (min-width: 640px) {
+  html { --legal-sticky-h: calc(var(--legal-bar-h) + 1px); }
+  .legal-topbar { top: 0; }
+  .legal-topbar.is-stuck .legal-brand,
+  .legal-topbar.is-stuck .legal-topbar__action { visibility: visible; }
   .legal-topbar__row {
     grid-template-columns: auto 1fr auto;
+    grid-template-rows: minmax(var(--legal-bar-h), auto);
     grid-template-areas: 'brand nav action';
-    min-height: 64px;
     padding-bottom: 0;
   }
   .legal-nav { justify-self: end; margin: 0; }
@@ -399,6 +430,16 @@ svg { display: block; }
   }
 }
 
+/* Forced colours (Windows high contrast) replace `background-color`, which is
+   what paints the masked icons, and drop the tinted background that marks the
+   current tab; draw the icons in the text colour and underline the tab. */
+@media (forced-colors: active) {
+  .legal-doc .notice::before,
+  .legal-doc .warning::before { background-color: CanvasText; forced-color-adjust: none; }
+  .legal-nav a[aria-current='page'],
+  .legal-footer a[aria-current='page'] { text-decoration: underline; text-underline-offset: 3px; }
+}
+
 @media (min-width: 768px) {
   .legal-container { padding-left: 24px; padding-right: 24px; }
   .legal-doc h1 { font-size: var(--text-3xl); line-height: var(--text-3xl--line-height); }
@@ -433,8 +474,10 @@ svg { display: block; }
 .legal-footer a {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 40px;
   min-height: 40px;
-  padding: 0 2px;
+  padding: 0 4px;
   border-radius: var(--radius-xs);
   text-decoration: none;
   transition: color var(--duration-1) var(--ease-out);
@@ -466,7 +509,10 @@ svg { display: block; }
   .legal-container { max-width: none; padding: 0; }
   .legal-topbar__row { display: block; min-height: 0; padding: 0 0 12pt; }
   .legal-brand { min-height: 0; margin: 0; padding: 0; }
-  .legal-brand__word { color: var(--text-1); }
+  /* `.dark .legal-brand__word` outranks a plain override, so name it here too. */
+  .legal-brand__word, .dark .legal-brand__word { color: var(--text-1); }
+  /* A page printed mid-scroll on a phone still carries the parked-row class. */
+  .legal-topbar.is-stuck .legal-brand, .legal-topbar.is-stuck .legal-topbar__action { visibility: visible; }
   .legal-main { padding: 0; }
   .legal-doc { max-width: none; }
   .legal-doc h1 { font-size: 22pt; line-height: 1.2; }
@@ -479,5 +525,5 @@ svg { display: block; }
   .legal-doc a { color: inherit; text-decoration: underline; text-decoration-color: currentColor; }
   .legal-footer { margin-top: 18pt; padding: 0; }
   .legal-footer__row { padding: 9pt 0 0; }
-  .legal-footer a { min-height: 0; padding: 0; }
+  .legal-footer a { min-width: 0; min-height: 0; padding: 0; }
 }

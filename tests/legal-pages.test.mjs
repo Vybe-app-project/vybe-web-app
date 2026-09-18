@@ -164,3 +164,56 @@ test('the legal shell has print and reduced-motion treatments and no forbidden c
   assert.doesNotMatch(css, /@import|url\(\s*["']?https?:/i, 'legal.css must not pull remote resources');
   assert.doesNotMatch(css, /!important/);
 });
+
+test('the sticky bar geometry and the scroll padding that compensates for it agree', () => {
+  const css = read('public/legal.css');
+  // What stays on screen once a phone scrolls: the tab row, its padding, the border.
+  assert.match(css, /^html \{[^}]*--legal-sticky-h: calc\(var\(--legal-tab-h\) \+ 2 \* var\(--legal-bar-pad\) \+ 1px\);/m);
+  assert.match(css, /^html \{[^}]*scroll-padding-top: calc\(var\(--legal-safe-top\) \+ var\(--legal-sticky-h\) \+ 8px\);/m);
+  assert.match(css, /\.legal-topbar \{[^}]*top: calc\(-1 \* var\(--topbar-h\)\);[^}]*border-bottom: 1px solid var\(--line\);/);
+  assert.match(css, /\.legal-topbar__row \{[^}]*grid-template-rows: var\(--topbar-h\) minmax\(var\(--legal-tab-h\), auto\);[^}]*row-gap: var\(--legal-bar-pad\);[^}]*padding-bottom: var\(--legal-bar-pad\);/);
+  assert.match(css, /\.legal-nav a,\s*\.legal-topbar__action \{[^}]*min-height: var\(--legal-tab-h\);/);
+  assert.match(css, /\.legal-topbar\.is-stuck \.legal-brand,\s*\.legal-topbar\.is-stuck \.legal-topbar__action \{ visibility: hidden; \}/);
+
+  // Wider screens: one row, nothing parked.
+  const desktop = css.match(/@media \(min-width: 640px\) \{([\s\S]*?)\n\}/);
+  assert.ok(desktop, 'legal.css has no 640px layout block');
+  assert.match(desktop[1], /html \{ --legal-sticky-h: calc\(var\(--legal-bar-h\) \+ 1px\); \}/);
+  assert.match(desktop[1], /\.legal-topbar \{ top: 0; \}/);
+  assert.match(desktop[1], /grid-template-rows: minmax\(var\(--legal-bar-h\), auto\);/);
+
+  // legal.js is the only writer of the parked-state class.
+  const js = read('public/legal.js');
+  assert.match(js, /classList\.toggle\('is-stuck', stuck\)/);
+  assert.match(js, /addEventListener\('scroll', schedule, \{ passive: true \}\)/);
+});
+
+test('print keeps the wordmark in ink from dark mode and shows the parked brand row', () => {
+  const css = read('public/legal.css');
+  const print = css.match(/@media print \{([\s\S]*)\n\}/);
+  assert.ok(print, 'legal.css has no print block');
+  assert.match(print[1], /\.legal-brand__word, \.dark \.legal-brand__word \{ color: var\(--text-1\); \}/);
+  assert.match(print[1], /\.legal-topbar\.is-stuck \.legal-brand, \.legal-topbar\.is-stuck \.legal-topbar__action \{ visibility: visible; \}/);
+});
+
+test('forced-colours mode keeps the callout icons and the current tab visible', () => {
+  const css = read('public/legal.css');
+  const forced = css.match(/@media \(forced-colors: active\) \{([\s\S]*?)\n\}/);
+  assert.ok(forced, 'legal.css has no forced-colors block');
+  assert.match(forced[1], /\.legal-doc \.notice::before,\s*\.legal-doc \.warning::before \{ background-color: CanvasText; forced-color-adjust: none; \}/);
+  assert.match(forced[1], /a\[aria-current='page'\][^}]*text-decoration: underline/);
+});
+
+test('shell links are 40px targets in both directions and the skip link clears the status bar', () => {
+  const css = read('public/legal.css');
+  assert.match(css, /\.legal-footer a \{[^}]*min-width: 40px;[^}]*min-height: 40px;/);
+  assert.match(css, /\.skip-link \{[^}]*min-height: 40px;/);
+  assert.match(css, /\.skip-link:focus-visible \{ top: calc\(12px \+ var\(--legal-safe-top\)\); \}/);
+});
+
+test('the Archivo licence ships next to the font, byte for byte', () => {
+  const ours = fs.readFileSync(path.join(root, 'public/fonts/LICENSE-Archivo.txt'));
+  const packaged = fs.readFileSync(path.join(root, 'node_modules/@fontsource-variable/archivo/LICENSE'));
+  assert.ok(ours.equals(packaged), 'public/fonts/LICENSE-Archivo.txt differs from the package LICENSE');
+  assert.match(ours.toString('utf8'), /SIL Open Font License, Version 1\.1/);
+});

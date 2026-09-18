@@ -26,6 +26,7 @@ for (const relative of [
   'legal.css',
   'legal.js',
   'fonts/archivo-latin-wdth-normal.woff2',
+  'fonts/LICENSE-Archivo.txt',
   'healthz.json',
   'robots.txt',
 ]) {
