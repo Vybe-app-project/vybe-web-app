@@ -190,6 +190,9 @@ closes Chromium, restarts it with the same unique worktree-local profile, explic
 resumes/retries and verifies one database log plus cleared IndexedDB. That
 test database and profile are removed afterward. It never inherits a
 production connection string or uses production credentials.
+Its browser blocks requests outside the local fixture origin, and the
+intercepted create does not follow redirects. Build the client with the default
+relative `/api` base; this is not a way to smoke-test a production origin.
 
 User/workout indexes finish initializing before the transaction test starts.
 Cleanup attempts browser, HTTP server, database, profile and source-pinning

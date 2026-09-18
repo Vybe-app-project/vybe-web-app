@@ -33,6 +33,7 @@ if (!backend || !playwright) {
     const profile = await mkdtemp(path.join(root, '.draft-validation', 'local-e2e-'));
     let context, server, app;
     let connected = false;
+    let nonLocalRequests = 0;
     const types = { '.js': 'text/javascript', '.html': 'text/html', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
     try {
       const dist = path.join(root, 'dist');
@@ -47,6 +48,8 @@ if (!backend || !playwright) {
       await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
       const origin = `http://127.0.0.1:${server.address().port}`;
       process.env.CORS_ORIGINS = origin;
+      process.env.PUBLIC_BASE_URL = origin;
+      process.env.FRONTEND_URL = origin;
       app = require(path.join(expectedBackend, 'app.js'));
       await setup.connect();
       connected = true;
@@ -55,10 +58,20 @@ if (!backend || !playwright) {
       await Promise.all([User.init(), WorkoutLog.init()]);
       const { authedToken } = require(path.join(expectedBackend, 'tests/helpers.js'));
       const token = await authedToken({ email: 'draft-local-e2e@test.dev', username: 'draft-local-e2e' });
-      const launch = () => chromium.launchPersistentContext(profile, {
-        headless: true, serviceWorkers: 'block', viewport: { width: 390, height: 844 },
-        executablePath: process.env.VYBE_CHROMIUM_EXECUTABLE,
-      });
+      const launch = async () => {
+        const browser = await chromium.launchPersistentContext(profile, {
+          headless: true, serviceWorkers: 'block', viewport: { width: 390, height: 844 },
+          executablePath: process.env.VYBE_CHROMIUM_EXECUTABLE,
+        });
+        await browser.route('**/*', route => {
+          if (new URL(route.request().url()).origin !== origin) {
+            nonLocalRequests += 1;
+            return route.abort('blockedbyclient');
+          }
+          return route.continue();
+        });
+        return browser;
+      };
       context = await launch();
       let page = await context.newPage();
       await page.goto(`${origin}/login`);
@@ -75,7 +88,7 @@ if (!backend || !playwright) {
       await page.route('**/api/workouts/logs', async route => {
         if (route.request().method() !== 'POST') { await route.continue(); return; }
         originalPayload = route.request().postDataJSON();
-        const response = await route.fetch();
+        const response = await route.fetch({ maxRedirects: 0 });
         assert.equal(response.status(), 201);
         await route.abort('failed');
       });
@@ -112,6 +125,7 @@ if (!backend || !playwright) {
         };
       }));
       assert.equal(count, 0);
+      assert.equal(nonLocalRequests, 0, 'Fixture browser requests must remain on its loopback origin');
     } finally {
       await cleanupWorkoutFixture([
         async () => context?.close(),
@@ -124,6 +138,7 @@ if (!backend || !playwright) {
         async () => connected ? setup.disconnect() : mongoose.disconnect(),
         async () => rm(profile, { recursive: true, force: true }),
         async () => assertBackendUnchanged(pinned),
+        async () => assert.equal(nonLocalRequests, 0, 'A non-local fixture request was blocked'),
       ]);
     }
   });
