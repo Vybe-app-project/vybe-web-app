@@ -227,17 +227,39 @@ checks even if an earlier cleanup step fails, then reports any failures.
 `tests/workout-e2e-fixture.test.mjs` pins the loopback/database isolation,
 source identity and cleanup behavior without requiring Mongo.
 
-**That real-backend E2E was not run for the concurrency package.** Its browser
-inspection was updated to database version 2, but Mongo/API/process-restart
-qualification remains separately gated with the backend QA owner. Existing
-mocked-API lost-ack recovery is not a substitute for that proof.
+**The earlier concurrency-only package did not run real-backend E2E.**
+The final combined qualification below subsequently passed that gate.
+Mocked-API lost-ack recovery alone is not a substitute for the recorded proof.
 
 Without the browser/backend environment variables, optional suites explicitly
 skip; those skips are not proof. The live smoke script is **not run** here.
 Native/device, actual production, notifications and full W3/W5 completion
 remain parent-owned/out of scope.
 
-## Current-main compatibility verification — 2026-09-18
+## Final combined verification — 2026-09-18
+
+Application source `4679a9de8357793a7cc5d6143b641d4694a542e9`, including main
+`77c14ec`, passed **362 tests, zero failures/skips/cancellations** against its
+built artifact. The real API used clean backend
+`f9d0c53888ef625f2894d64777ef1e78b5152e1b`. The lost acknowledgement, actual
+Chromium process restart, identical replay, one persisted log and cleared
+IndexedDB were all verified. No recovery write occurred before the explicit
+Resume/Retry actions.
+
+The full run used `node --test --test-concurrency=1 tests/*.test.mjs` with
+`VYBE_TEST_BACKEND`, `VYBE_TEST_BACKEND_COMMIT`, and `VYBE_PLAYWRIGHT` set.
+An owned loopback Mongo fixture was selected by `VYBE_E2E_MONGO_PORT=27189`
+and `VYBE_E2E_REPLICA_SET=a656Recovery`; every database/profile was unique.
+The environment did not inherit production credentials or connections.
+Local-only browser enforcement, source-before/after checks and cleanup passed.
+The fixture was removed after testing.
+
+Artifact verification and the route audit against that exact backend also
+passed. Raw evidence remains in `logs/recovery-e2e/`. A future repeat requires
+a running isolated replica set and restored matching test dependencies; this
+record does not imply the fixture is left running or the feature is deployed.
+
+## Frontend compatibility verification before final combined run — 2026-09-18
 
 The current merge passes all 34 pure/mock-browser files: **361 tests, zero
 failures/skips/cancellations**, including six Chromium suites. `npm run verify`
@@ -254,9 +276,9 @@ input visible); same-account stale-tab conflicts still retain unsaved input.
 Store tests cover late 401/success/refresh/login callbacks and scoped bootstrap
 dedup. Existing CAS/ABA/immutable-retry/timer tests remain passing.
 
-The parent-provided real-backend harness is unchanged and was **not executed**
-for this merge. Its earlier five passes preceded current main; a new parent
-run is required. Matching dependency links/caches remain for that run. See
+The parent-provided real-backend harness was unchanged and **not executed**
+by the compatibility agent. Its earlier five passes preceded current main;
+the subsequent final parent run above closed that gate. See
 `logs/fleet-web-current-main-compat/` for this bounded frontend evidence.
 
 ## Historical concurrency-package verification (da7b4d6) — 2026-09-18
