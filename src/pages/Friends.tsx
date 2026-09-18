@@ -1,9 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg } from '../lib/api';
-import { displayName, useDebounced, type PublicUser } from '../lib/hooks';
+import { displayName, type PublicUser } from '../lib/hooks';
 import {
   Avatar,
   Badge,
@@ -24,6 +24,7 @@ import {
 } from './ui';
 import { Check, Compass, MessageCircle, User, UserPlus, Users, X } from './icons';
 import { ROW_LINK, UserBadges } from './UserRow';
+import PeopleSearch, { type Person } from './PeopleSearch';
 
 type FriendRequest = {
   _id: string;
@@ -113,6 +114,7 @@ function ListShell({
 export default function Friends() {
   const qc = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tabParam = params.get('tab');
   const tab: TabKey = isTab(tabParam) ? tabParam : 'friends';
@@ -128,7 +130,6 @@ export default function Friends() {
 
   const [filter, setFilter] = useState('');
   const [peopleQuery, setPeopleQuery] = useState('');
-  const debouncedPeople = useDebounced(peopleQuery.trim(), 300);
   const [removeTarget, setRemoveTarget] = useState<PublicUser | null>(null);
 
   const invalidate = () => {
@@ -165,15 +166,6 @@ export default function Friends() {
     queryFn: async () => {
       const { data } = await api.get('/users/follow-requests');
       return (data.requests || []) as FollowRequest[];
-    },
-  });
-
-  const people = useQuery({
-    queryKey: ['people-search', debouncedPeople],
-    enabled: debouncedPeople.length >= 2,
-    queryFn: async () => {
-      const { data } = await api.get('/users/all/search', { params: { q: debouncedPeople } });
-      return (data.users || []) as PublicUser[];
     },
   });
 
@@ -270,7 +262,7 @@ export default function Friends() {
     { key: 'follows', label: 'Follow requests', count: followRequests.data?.length || undefined },
   ];
 
-  const searching = debouncedPeople.length >= 2;
+  const searching = peopleQuery.trim().length >= 1;
 
   return (
     <div className="mx-auto w-full max-w-[52rem] space-y-6">
@@ -289,81 +281,66 @@ export default function Friends() {
         }
       />
 
-      {/* Add a friend: search by name or username instead of pasting an ID. */}
+      {/* Add a friend: the shared people typeahead, results as you type. */}
       <Card className="space-y-3">
-        <SearchField
+        <PeopleSearch
+          query={peopleQuery}
+          onQueryChange={setPeopleQuery}
           label="Add a friend"
+          hideLabel={false}
           hint={searching ? undefined : 'Search by name or username.'}
           placeholder="Search people"
-          value={peopleQuery}
-          onChange={(e) => setPeopleQuery(e.target.value)}
-          enterKeyHint="search"
+          recent={false}
+          trailingInteractive
+          emptyState={<span className="sr-only">Type to search people on Vybe.</span>}
+          listClassName="min-h-0 max-h-[24rem]"
+          onPick={(u) => navigate(`/u/${u._id}`, { viewTransition: true })}
+          trailing={(u: Person) => {
+            const rel = relationship.get(String(u._id));
+            if (rel?.status === 'friends' || u.isFriend) {
+              return (
+                <Badge tone="brand" className="h-10 px-3">
+                  <Check size={14} />
+                  Friends
+                </Badge>
+              );
+            }
+            if (rel?.status === 'incoming' && rel.requestId) {
+              return (
+                <Button
+                  variant="primary"
+                  icon={<Check size={16} />}
+                  loading={acceptFriend.isPending && acceptFriend.variables === rel.requestId}
+                  onClick={() => acceptFriend.mutate(rel.requestId!)}
+                >
+                  Accept
+                </Button>
+              );
+            }
+            if (rel?.status === 'requested' || u.friendStatus === 'requested') {
+              return (
+                <Button
+                  variant="secondary"
+                  title="Withdraw request"
+                  loading={declineFriend.isPending && declineFriend.variables === rel?.requestId}
+                  onClick={() => rel?.requestId && declineFriend.mutate(rel.requestId)}
+                >
+                  Requested
+                </Button>
+              );
+            }
+            return (
+              <Button
+                variant="primary"
+                icon={<UserPlus size={16} />}
+                loading={sendRequest.isPending && sendRequest.variables === u._id}
+                onClick={() => sendRequest.mutate(u._id)}
+              >
+                Add
+              </Button>
+            );
+          }}
         />
-        {searching ? (
-          people.isLoading ? (
-            <div className="space-y-1" aria-busy="true">
-              <SkeletonRow />
-              <SkeletonRow />
-            </div>
-          ) : people.isError ? (
-            <ErrorState error={people.error} title="Search failed" onRetry={() => people.refetch()} className="py-6" />
-          ) : !people.data?.length ? (
-            <EmptyState
-              variant="no-results"
-              size="sm"
-              title={`No one matches “${debouncedPeople}”`}
-              message="Check the spelling, or explore people who train near you."
-              action={{ label: 'Explore people', to: '/discover', variant: 'secondary' }}
-            />
-          ) : (
-            <ul className="-mx-4 divide-y divide-line border-t border-line sm:-mx-5">
-              {people.data.slice(0, 8).map((u) => {
-                const rel = relationship.get(String(u._id));
-                return (
-                  <PersonRow
-                    key={u._id}
-                    user={u}
-                    actions={
-                      rel?.status === 'friends' ? (
-                        <Badge tone="brand" className="h-10 px-3">
-                          <Check size={14} />
-                          Friends
-                        </Badge>
-                      ) : rel?.status === 'incoming' && rel.requestId ? (
-                        <Button
-                          variant="primary"
-                          icon={<Check size={16} />}
-                          loading={acceptFriend.isPending && acceptFriend.variables === rel.requestId}
-                          onClick={() => acceptFriend.mutate(rel.requestId!)}
-                        >
-                          Accept
-                        </Button>
-                      ) : rel?.status === 'requested' ? (
-                        <Button
-                          variant="secondary"
-                          title="Withdraw request"
-                          loading={declineFriend.isPending && declineFriend.variables === rel.requestId}
-                          onClick={() => rel.requestId && declineFriend.mutate(rel.requestId)}
-                        >
-                          Requested
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="primary"
-                          icon={<UserPlus size={16} />}
-                          loading={sendRequest.isPending && sendRequest.variables === u._id}
-                          onClick={() => sendRequest.mutate(u._id)}
-                        >
-                          Add
-                        </Button>
-                      )
-                    }
-                  />
-                );
-              })}
-            </ul>
-          )
-        ) : null}
       </Card>
 
       <section className="space-y-4" aria-label="Friends and requests">
@@ -404,7 +381,7 @@ export default function Friends() {
                     user={u}
                     actions={
                       <>
-                        <IconButton to={`/messages?to=${u._id}`} label={`Message ${displayName(u)}`}>
+                        <IconButton to={`/messages/new?to=${u._id}`} state={{ peer: u }} label={`Message ${displayName(u)}`}>
                           <MessageCircle size={20} />
                         </IconButton>
                         <Menu

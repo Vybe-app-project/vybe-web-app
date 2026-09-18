@@ -307,7 +307,7 @@ export default function UserProfile() {
             <div className="flex flex-wrap items-center gap-2 sm:pb-1">
               <FollowButton user={user} onChanged={() => userQuery.refetch()} />
               {friendControl}
-              <IconButton to={`/messages?to=${user._id}`} label={`Message ${name}`} variant="secondary">
+              <IconButton to={`/messages/new?to=${user._id}`} state={{ peer: user }} label={`Message ${name}`} variant="secondary">
                 <MessageCircle size={20} />
               </IconButton>
               <span className="hidden lg:inline-flex">
