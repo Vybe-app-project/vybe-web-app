@@ -31,7 +31,10 @@ export default defineConfig({
       ],
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2,webmanifest}'],
-        globIgnores: ['privacy-policy.html', 'terms-and-conditions.html', 'account-deletion.html'],
+        // The legal pages are fetched fresh so an updated policy is never served
+        // stale, and their Archivo subset (a copy of the app font, used only by
+        // those pages) would add 90 KB to every install's precache for nothing.
+        globIgnores: ['privacy-policy.html', 'terms-and-conditions.html', 'account-deletion.html', 'fonts/**'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//, /\.[a-z0-9]+$/i],
         cleanupOutdatedCaches: true,
