@@ -244,7 +244,7 @@ export function PostMediaGrid({
               onOpen ? (
                 <button
                   type="button"
-                  onClick={() => onOpen(i)}
+                  onClick={() => onOpen(GRID_PREVIEW)}
                   aria-label={`Show all ${count} attachments`}
                   className="type-stat absolute inset-0 z-[2] grid place-items-center bg-scrim text-xl text-[var(--navy-50)] transition-colors dur-1 hover:bg-[rgba(11,30,43,0.7)] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-focus"
                 >

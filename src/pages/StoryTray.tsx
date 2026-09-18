@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -269,6 +269,8 @@ function ResponderRow({ user, secondary, trailing }: { user: Responder; secondar
   );
 }
 
+const EMPTY_RESPONSES: StoryResponses = { viewers: [], reactions: [], replies: [] };
+
 /**
  * Who saw, reacted to and replied to one of your stories
  * (GET /story/:id/responses — author only). Sheet on phones, dialog on desktop.
@@ -278,6 +280,9 @@ export function StoryResponsesModal({ storyId, open, onClose }: { storyId: strin
   const q = useQuery({
     queryKey: ['stories', 'responses', storyId],
     enabled: open && !!storyId,
+    // Closing clears storyId; keeping the last answer on screen lets the sheet
+    // fade out with its content instead of flashing a skeleton.
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const { data } = await api.get(`/story/${storyId}/responses`);
       const r = (data.responses || {}) as Partial<StoryResponses>;
@@ -289,7 +294,12 @@ export function StoryResponsesModal({ storyId, open, onClose }: { storyId: strin
     if (!open) setTab('viewers');
   }, [open]);
 
-  const counts = q.data ? { viewers: q.data.viewers.length, reactions: q.data.reactions.length, replies: q.data.replies.length } : null;
+  // A disabled query (sheet closed, or no story yet) is *pending* with no data
+  // and is not "loading", so the body must never assume `q.data` exists: the
+  // first build read it unconditionally and unmounted the whole app the moment
+  // any story viewer opened. Branch on `isPending` and read through `data`.
+  const data = q.data ?? EMPTY_RESPONSES;
+  const counts = q.data ? { viewers: data.viewers.length, reactions: data.reactions.length, replies: data.replies.length } : null;
   const tabs = [
     { value: 'viewers', label: 'Viewers', count: counts?.viewers },
     { value: 'reactions', label: 'Reactions', count: counts?.reactions },
@@ -300,7 +310,7 @@ export function StoryResponsesModal({ storyId, open, onClose }: { storyId: strin
     <Modal open={open} onClose={onClose} size="sm" title="Story responses" description="Only you can see who viewed, reacted or replied.">
       <div className="space-y-3">
         <SegmentedControl aria-label="Response type" fill size="sm" tabs={tabs} value={tab} onChange={(v) => setTab(v as typeof tab)} />
-        {q.isLoading ? (
+        {q.isPending ? (
           <div className="space-y-3 py-2" aria-busy="true">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3">
@@ -312,9 +322,9 @@ export function StoryResponsesModal({ storyId, open, onClose }: { storyId: strin
         ) : q.isError ? (
           <ErrorState error={q.error} title="Responses didn’t load" onRetry={() => q.refetch()} className="py-6" />
         ) : tab === 'viewers' ? (
-          q.data!.viewers.length ? (
+          data.viewers.length ? (
             <ul className="divide-y divide-line" aria-label="Viewers">
-              {q.data!.viewers.map((v) => {
+              {data.viewers.map((v) => {
                 const r = reactionIcon(v.reaction);
                 return (
                   <ResponderRow
@@ -330,9 +340,9 @@ export function StoryResponsesModal({ storyId, open, onClose }: { storyId: strin
             <EmptyState size="sm" variant="no-results" icon={<Eye size={22} />} title="No views yet" message="Views show up here as people watch." />
           )
         ) : tab === 'reactions' ? (
-          q.data!.reactions.length ? (
+          data.reactions.length ? (
             <ul className="divide-y divide-line" aria-label="Reactions">
-              {q.data!.reactions.map((v) => {
+              {data.reactions.map((v) => {
                 const r = reactionIcon(v.reaction);
                 return (
                   <ResponderRow
@@ -347,9 +357,9 @@ export function StoryResponsesModal({ storyId, open, onClose }: { storyId: strin
           ) : (
             <EmptyState size="sm" variant="no-results" icon={<Heart size={22} />} title="No reactions yet" message="Reactions land here the moment someone taps one." />
           )
-        ) : q.data!.replies.length ? (
+        ) : data.replies.length ? (
           <ul className="divide-y divide-line" aria-label="Replies">
-            {q.data!.replies.map((r) => (
+            {data.replies.map((r) => (
               <ResponderRow
                 key={r._id}
                 user={r.user}
@@ -1038,9 +1048,9 @@ export function StoryTray({ variant = 'page' }: { variant?: 'home' | 'page' }) {
         type="button"
         onClick={openComposer}
         aria-label="Add to your story"
-        className="absolute right-1 top-11 grid h-7 w-7 place-items-center rounded-full bg-brand text-on-brand ring-2 ring-bg transition-colors dur-1 hover:bg-brand-hover before:absolute before:-inset-2 before:content-['']"
+        className="absolute right-0.5 top-[47px] grid h-6 w-6 place-items-center rounded-full bg-brand text-on-brand ring-2 ring-bg transition-colors dur-1 hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus before:absolute before:-inset-1.5 before:content-['']"
       >
-        <Plus size={16} />
+        <Plus size={14} />
       </button>
     </Bubble>
   ) : null;

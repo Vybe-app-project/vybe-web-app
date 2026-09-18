@@ -179,3 +179,26 @@ test('the labels the live suites key on are still present', () => {
     assert.ok(sources.includes(label), `label "${label}" must survive`);
   }
 });
+
+test('the responses sheet never reads a disabled query, and render errors get a fallback instead of a blank page', () => {
+  const tray = read('src/pages/StoryTray.tsx');
+  // A disabled TanStack query is pending with no data and is not "loading";
+  // reading it unconditionally unmounted the whole app when a viewer opened.
+  assert.doesNotMatch(tray, /q\.data!/);
+  assert.match(tray, /const data = q\.data \?\? EMPTY_RESPONSES;/);
+  assert.match(tray, /placeholderData: keepPreviousData,/);
+  assert.match(tray, /\{q\.isPending \? \(/);
+  // The "Add to your story" badge sits on the avatar corner and no longer
+  // intercepts a tap on the centre of the bubble itself.
+  assert.match(tray, /aria-label="Add to your story"\n\s+className="absolute right-0\.5 top-\[47px\] grid h-6 w-6/);
+  assert.doesNotMatch(tray, /before:-inset-2/);
+
+  const card = read('src/pages/PostCard.tsx');
+  assert.match(card, /onClick=\{\(\) => onOpen\(GRID_PREVIEW\)\}/, 'the +N tile opens the lightbox on the first hidden photo');
+
+  const boundary = read('src/components/ErrorBoundary.tsx');
+  assert.match(boundary, /static getDerivedStateFromError\(error: Error\): State/);
+  assert.match(boundary, /export function RouteErrorBoundary/);
+  assert.match(read('src/App.tsx'), /<RouteErrorBoundary>\n\s+<Routes>/, 'every routed screen renders inside a boundary');
+  assert.match(read('src/components/Layout.tsx'), /<RouteErrorBoundary>\{children \?\? <Outlet \/>\}<\/RouteErrorBoundary>/, 'the shell survives a broken page');
+});

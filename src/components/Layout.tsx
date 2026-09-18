@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom';
+import { RouteErrorBoundary } from './ErrorBoundary';
 import { useQuery } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { api } from '../lib/api';
@@ -803,7 +804,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
 
         <div className={cx('mx-auto flex w-full gap-8 px-4 md:px-6 lg:px-8', feedWidth ? 'max-w-[62rem] justify-center' : 'max-w-[1200px]')}>
           <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none lg:pt-6', chrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'lg:max-w-feed')}>
-            {children ?? <Outlet />}
+            <RouteErrorBoundary>{children ?? <Outlet />}</RouteErrorBoundary>
           </main>
           {rail ? (
             <aside aria-label="Highlights" className="hidden w-72 shrink-0 pt-6 lg:block xl:w-80">
