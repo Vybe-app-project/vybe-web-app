@@ -97,13 +97,6 @@ test('the sign-in page shows one arrival notice and turns credential failures in
   assert.deepEqual(loginFailure({ response: { status: 500, data: {} } }, { fallback }), { text: fallback, offerReset: false });
 });
 
-test('the welcome hand-off appends ?welcome=1 to whatever page sign-up lands on', () => {
-  const { withWelcomeParam } = redirect;
-  assert.equal(withWelcomeParam('/'), '/?welcome=1');
-  assert.equal(withWelcomeParam('/messages?room=1'), '/messages?room=1&welcome=1');
-  assert.equal(withWelcomeParam('/settings#appearance'), '/settings?welcome=1#appearance');
-});
-
 /* ------------------------------------------------------------------ drafts */
 
 function memoryStorage(initial = {}) {
@@ -157,6 +150,20 @@ test('a restored step 3 needs a live registration proof; a dead one goes back to
   assert.deepEqual(readRegisterDraft(storage, now), { step: 1, email: 'qa8@mrmosby.com' });
   writeRegisterDraft(storage, { step: 3, email: 'qa8@mrmosby.com', preToken: jwtWithExp(Math.floor(now / 1000) + 2) });
   assert.deepEqual(readRegisterDraft(storage, now), { step: 1, email: 'qa8@mrmosby.com' });
+});
+
+test('the welcome marker is one-shot and survives a storage failure quietly', () => {
+  const { markWelcomePending, takeWelcomePending, WELCOME_PENDING_KEY } = drafts;
+  const storage = memoryStorage();
+  assert.equal(takeWelcomePending(storage), false);
+  markWelcomePending(storage);
+  assert.equal(storage.getItem(WELCOME_PENDING_KEY), '1');
+  assert.equal(takeWelcomePending(storage), true, 'first read opens the sheet');
+  assert.equal(takeWelcomePending(storage), false, 'second read (a reload) does not');
+  assert.equal(storage.getItem(WELCOME_PENDING_KEY), null);
+  const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+  assert.doesNotThrow(() => markWelcomePending(broken));
+  assert.equal(takeWelcomePending(broken), false);
 });
 
 test('drafts never hold a password and survive corrupt or unavailable storage', () => {
@@ -236,8 +243,10 @@ test('sign-in errors are human, focus lands on the first invalid field, and the 
   assert.match(login, /focusField\(next\.email \? 'login-email' : 'login-password'\)/);
   assert.match(login, /error\.offerReset \? \(/);
   assert.match(login, /to="\/forgot-password"[\s\S]{0,80}state=\{\{ email: email\.trim\(\) \}\}/);
-  assert.match(login, /export function focusField\(id: string\)/);
-  assert.match(login, /requestAnimationFrame\(\(\) => document\.getElementById\(id\)\?\.focus\(\)\)/);
+  assert.match(login, /export function focusField\(id: string, attempts = 6\)/);
+  // A field is still disabled for a frame after a failed request; focus must retry, not give up.
+  assert.match(login, /if \(el && !\(el as HTMLInputElement\)\.disabled\) \{/);
+  assert.match(login, /if \(attempts > 1\) focusField\(id, attempts - 1\);/);
   // Typed email survives a reload; the password never persists.
   assert.match(login, /readDraftEmail\(sessionStorage\)/);
   assert.match(login, /writeDraftEmail\(sessionStorage, email\.trim\(\)\)/);
@@ -292,8 +301,12 @@ test('sign-up names the field in a 409, checks availability while typing, persis
   assert.match(register, /toast\.info\(`You already had an account, so we signed you in as \$\{handle\}\.`/);
   assert.match(register, /Enter the code to confirm your email or sign in\./);
   assert.match(register, /If this address already has an account, the code signs you in\./);
-  // First run: land on the welcome sheet, not a bare Home.
-  assert.match(register, /navigate\(withWelcomeParam\(target\), \{ replace: true \}\)/);
+  // First run: the welcome marker is set before the store update (GuestOnly's
+  // redirect fires the moment the store has a user), then the shared target rule lands the person.
+  const created = register.slice(register.indexOf("throw new Error('Registration did not return a session token.')"));
+  assert.ok(created.indexOf('markWelcomePending(sessionStorage)') < created.indexOf('setUser(data.user)'), 'marker must precede setUser');
+  assert.match(created, /navigate\(target, \{ replace: true \}\)/);
+  assert.doesNotMatch(register, /welcome=1/, 'sign-up must not depend on a URL param GuestOnly can drop');
   // Step handlers validate into field errors, not just the top callout.
   assert.match(register, /setErrors\(\{ email: 'Enter a valid email address\.' \}, \['email'\]\)/);
   assert.match(register, /setErrors\(\{ otp: /);
@@ -305,7 +318,8 @@ test('the first-run sheet is mounted for every signed-in route and offers a phot
   assert.match(app, /import WelcomeSheet from '\.\/pages\/WelcomeSheet'/);
   assert.match(app, /<RequireAuth><Layout \/><WelcomeSheet \/><\/RequireAuth>/);
   const sheet = read('src/pages/WelcomeSheet.tsx');
-  assert.match(sheet, /params\.get\(WELCOME_PARAM\) === '1'/);
+  assert.match(sheet, /params\.get\(WELCOME_PARAM\) === '1'/, '?welcome=1 stays a deep link');
+  assert.match(sheet, /takeWelcomePending\(sessionStorage\)/, 'sign-up hands off through the one-shot marker');
   assert.match(sheet, /next\.delete\(WELCOME_PARAM\)/, 'the param is consumed so a reload does not reopen the sheet');
   assert.match(sheet, /title=\{`Welcome to Vybe, \$\{firstName\}`\}/);
   assert.match(sheet, /api\.get\('\/searching\/suggest'\)/);

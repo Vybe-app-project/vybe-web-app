@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { WELCOME_PARAM } from '../lib/authRedirect';
+import { takeWelcomePending } from '../lib/authDrafts';
 import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, displayName, uploadImage, type PublicUser } from '../lib/hooks';
 import { Avatar, Button, ButtonLink, Modal, Spinner, useToast } from './ui';
 import { Camera, Compass } from './icons';
@@ -13,10 +14,12 @@ const SUGGESTION_COUNT = 5;
 
 /**
  * First-run moment after sign-up, matching the mobile onboarding (add a
- * photo with Skip, then "Welcome to Vybe, {name}"). Sign-up lands on
- * `?welcome=1`; the param is consumed on open so a reload does not bring the
- * sheet back. Both steps are optional and live on one sheet: a photo, and a
- * few people to follow so the feed is not quiet on the first visit.
+ * photo with Skip, then "Welcome to Vybe, {name}"). Sign-up sets a one-shot
+ * sessionStorage marker (see authDrafts.markWelcomePending); `?welcome=1`
+ * opens the same sheet as a deep link. Both are consumed on open so a reload
+ * does not bring the sheet back. Both steps are optional and live on one
+ * sheet: a photo, and a few people to follow so the feed is not quiet on the
+ * first visit.
  */
 export default function WelcomeSheet() {
   const [params, setParams] = useSearchParams();
@@ -28,14 +31,17 @@ export default function WelcomeSheet() {
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const requested = params.get(WELCOME_PARAM) === '1';
+  const viaParam = params.get(WELCOME_PARAM) === '1';
   useEffect(() => {
-    if (!requested) return;
+    const viaMarker = takeWelcomePending(sessionStorage);
+    if (!viaParam && !viaMarker) return;
     setOpen(true);
-    const next = new URLSearchParams(params);
-    next.delete(WELCOME_PARAM);
-    setParams(next, { replace: true });
-  }, [requested, params, setParams]);
+    if (viaParam) {
+      const next = new URLSearchParams(params);
+      next.delete(WELCOME_PARAM);
+      setParams(next, { replace: true });
+    }
+  }, [viaParam, params, setParams]);
 
   const people = useQuery({
     queryKey: ['welcome-people'],

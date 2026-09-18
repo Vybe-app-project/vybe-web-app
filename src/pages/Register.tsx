@@ -4,9 +4,10 @@ import axios, { type AxiosError } from 'axios';
 import { useQuery } from '@tanstack/react-query';
 import { API_BASE, api, errMsg, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { postLoginTarget, withWelcomeParam, type FromLocation } from '../lib/authRedirect';
+import { postLoginTarget, type FromLocation } from '../lib/authRedirect';
 import {
   clearRegisterDraft,
+  markWelcomePending,
   readRegisterDraft,
   resendSecondsLeft,
   writeRegisterDraft,
@@ -311,10 +312,13 @@ export default function Register() {
       );
 
       if (!data?.token) throw new Error('Registration did not return a session token.');
+      // First run: the welcome sheet opens on whatever page sign-up lands on.
+      // Marked before the store update so GuestOnly's redirect cannot lose it.
+      markWelcomePending(sessionStorage);
+      clearRegisterDraft(sessionStorage);
       tokenStore.set(data.token);
       if (data.user) setUser(data.user);
-      clearRegisterDraft(sessionStorage);
-      navigate(withWelcomeParam(target), { replace: true });
+      navigate(target, { replace: true });
     } catch (e2) {
       const response = (e2 as AxiosError<ConflictBody>)?.response;
       const body = response?.data;

@@ -83,11 +83,20 @@ export function AuthShell({
 
 /**
  * Move focus to the first field in error so keyboard and screen-reader users
- * hear it at once. Deferred a frame so the error text (aria-describedby) is
- * in the DOM when focus lands.
+ * hear it at once. Deferred by frames so the error text (aria-describedby)
+ * is in the DOM when focus lands, and retried for a few frames because after
+ * a failed request the field is still `disabled` until the submitting state
+ * commits -- a disabled input silently refuses focus.
  */
-export function focusField(id: string) {
-  requestAnimationFrame(() => document.getElementById(id)?.focus());
+export function focusField(id: string, attempts = 6) {
+  requestAnimationFrame(() => {
+    const el = document.getElementById(id) as HTMLElement | null;
+    if (el && !(el as HTMLInputElement).disabled) {
+      el.focus();
+      if (document.activeElement === el) return;
+    }
+    if (attempts > 1) focusField(id, attempts - 1);
+  });
 }
 
 /** Password input with a 40 px show/hide control that keeps the field's label. */

@@ -96,13 +96,5 @@ export function loginFailure(error: unknown, { online = true, fallback }: { onli
   return { text: message || fallback, offerReset: false };
 }
 
+/** `?welcome=1` opens the first-run sheet on any signed-in page (deep link / QA); sign-up itself uses the sessionStorage marker in authDrafts.ts. */
 export const WELCOME_PARAM = 'welcome';
-
-/** The one-time first-run sheet is keyed on `?welcome=1`, on whatever page sign-up lands on. */
-export function withWelcomeParam(target: string): string {
-  const [pathAndQuery, hash] = target.split('#');
-  const [pathname, query = ''] = pathAndQuery.split('?');
-  const params = new URLSearchParams(query);
-  params.set(WELCOME_PARAM, '1');
-  return `${pathname}?${params.toString()}${hash ? `#${hash}` : ''}`;
-}

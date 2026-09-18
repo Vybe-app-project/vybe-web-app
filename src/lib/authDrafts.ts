@@ -13,6 +13,7 @@
 
 export const REGISTER_DRAFT_KEY = 'vybe.registerDraft';
 export const LOGIN_EMAIL_DRAFT_KEY = 'vybe.loginEmail';
+export const WELCOME_PENDING_KEY = 'vybe.welcomePending';
 
 /** The API expires codes after 5 minutes; a resend is allowed after 45 s. */
 export const OTP_VALID_MS = 5 * 60 * 1000;
@@ -138,4 +139,31 @@ export function writeDraftEmail(storage: StorageLike | null | undefined, email: 
 
 export function clearDraftEmail(storage: StorageLike | null | undefined): void {
   writeDraftEmail(storage, '');
+}
+
+/**
+ * Sign-up hands off to the first-run sheet with this one-shot marker rather
+ * than a URL param alone: the moment the store has a user, GuestOnly (still
+ * mounted on /register) renders its own redirect to the post-sign-in target,
+ * which wins the race against a `navigate('/?welcome=1')` and drops the
+ * param. The marker is set before the store update and read once by the
+ * sheet, so it also survives a hard reload in between.
+ */
+export function markWelcomePending(storage: StorageLike | null | undefined): void {
+  try {
+    storage?.setItem(WELCOME_PENDING_KEY, '1');
+  } catch {
+    // Without storage the sheet simply does not open; sign-up still completes.
+  }
+}
+
+/** Reads and clears the marker; true exactly once per sign-up. */
+export function takeWelcomePending(storage: StorageLike | null | undefined): boolean {
+  try {
+    const pending = storage?.getItem(WELCOME_PENDING_KEY) === '1';
+    if (pending) storage?.removeItem(WELCOME_PENDING_KEY);
+    return pending;
+  } catch {
+    return false;
+  }
 }
