@@ -1678,6 +1678,17 @@ export default function Messages() {
   /* --- which thread --- */
   const isDraft = roomId === DRAFT_ROOM_ID;
   const draftPeerId = isDraft ? params.get('to') || '' : '';
+  // `/messages?to=<id>` with no room is the same intent as `/messages/new?to=<id>`;
+  // without this it landed on the empty inbox ("Pick a conversation on the left").
+  const bareRecipient = !roomId ? params.get('to') || '' : '';
+  useEffect(() => {
+    if (!bareRecipient) return;
+    navigate(`/messages/${DRAFT_ROOM_ID}?to=${encodeURIComponent(bareRecipient)}`, {
+      replace: true,
+      state: location.state,
+      viewTransition: true,
+    });
+  }, [bareRecipient, navigate, location.state]);
   const statePeer = (location.state as { peer?: ChatUser } | null)?.peer;
 
   const activeRoom = useMemo(() => (roomId && !isDraft ? (rooms.data || []).find((r) => r._id === roomId) || null : null), [rooms.data, roomId, isDraft]);
