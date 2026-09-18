@@ -190,6 +190,8 @@ test('sheets only start a drag from a finger and never from a control', () => {
   const ui = read('src/components/ui.tsx');
   assert.match(ui, /if \(e\.pointerType !== 'touch'\) return;/);
   assert.match(ui, /closest\?\.\('button, a, input, textarea, select, \[role="button"\]'\)\) return;/);
+  // Escape on an open menu must not reach the Modal's window listener.
+  assert.match(ui, /case 'Escape':\s*case 'Tab':\s*e\.preventDefault\(\);[\s\S]{0,400}?e\.stopPropagation\(\);\s*setOpen\(false\);/);
 });
 
 test('community posts say where they were posted', () => {

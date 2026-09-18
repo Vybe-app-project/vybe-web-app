@@ -1970,6 +1970,10 @@ export function Menu({
       case 'Escape':
       case 'Tab':
         e.preventDefault();
+        // Escape belongs to the menu while it is open: the Modal listens for
+        // it on window, and without this a member menu inside a community
+        // sheet took the whole sheet down with it.
+        e.stopPropagation();
         setOpen(false);
         wrapRef.current?.querySelector<HTMLElement>('button')?.focus();
         break;
