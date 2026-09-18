@@ -1,12 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  differenceInCalendarDays,
-  format,
-  formatDistanceToNowStrict,
-  isValid,
-  parseISO,
-} from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
+import { challengeTimeLeft } from '../lib/challengeTime';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
@@ -206,17 +201,8 @@ const fmtDate = (iso?: string) => {
   return isValid(d) ? format(d, 'MMM d') : '—';
 };
 
-/** Time-left badge: closed / ended / ending soon (ember) / N left (mint). */
-function timeBadge(c: Challenge): { label: string; tone: BadgeTone; urgent: boolean } {
-  if (c.isActive === false) return { label: 'Closed', tone: 'neutral', urgent: false };
-  const d = parseISO(c.endDate);
-  if (!isValid(d)) return { label: 'Open', tone: 'success', urgent: false };
-  if (d.getTime() <= Date.now()) return { label: 'Ended', tone: 'neutral', urgent: false };
-  const days = differenceInCalendarDays(d, new Date());
-  if (days <= 0) return { label: 'Ends today', tone: 'accent', urgent: true };
-  if (days <= 2) return { label: `${days} ${days === 1 ? 'day' : 'days'} left`, tone: 'accent', urgent: true };
-  return { label: `${formatDistanceToNowStrict(d, { unit: days > 60 ? 'month' : 'day' })} left`, tone: 'success', urgent: false };
-}
+/** Time-left badge: closed / ended / ending soon (ember) / N left (mint) / "Ends Nov 2036" beyond a year. */
+const timeBadge = (c: Challenge): { label: string; tone: BadgeTone; urgent: boolean } => challengeTimeLeft(c);
 
 const pctOf = (value: number, goal: number) => (goal > 0 ? Math.min((value / goal) * 100, 100) : 0);
 
@@ -1467,8 +1453,8 @@ export default function Challenges() {
           </Button>
         }
         mobileActions={
-          <IconButton label="New challenge" variant="primary" size={40} onClick={() => setCreateOpen(true)}>
-            <Plus size={20} />
+          <IconButton label="New challenge" onClick={() => setCreateOpen(true)}>
+            <Plus size={22} />
           </IconButton>
         }
       />

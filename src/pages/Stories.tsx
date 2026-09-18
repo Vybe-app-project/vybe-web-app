@@ -888,6 +888,7 @@ export default function Stories() {
   });
 
   const groups = useMemo(() => tray.data || [], [tray.data]);
+  const ownIndex = useMemo(() => groups.findIndex((g) => g.author._id === me?._id), [groups, me?._id]);
   const openComposer = () => setComposerOpen(true);
 
   const meAsAuthor: StoryAuthor | null = me
@@ -929,7 +930,29 @@ export default function Stories() {
               <ErrorState error={tray.error} title="Couldn’t load stories" onRetry={() => tray.refetch()} />
             ) : (
               <div className="snap-row no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 py-2 scroll-pl-4 md:-mx-6 md:px-6 md:scroll-pl-6">
-                {meAsAuthor ? (
+                {/* One tile for yourself. With an active story it is your ring (tap to watch) with a
+                    "+" badge that opens the composer; without one the whole tile is the add action. */}
+                {meAsAuthor && ownIndex >= 0 ? (
+                  <div className="snap-item relative flex w-19 shrink-0 flex-col items-center gap-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => setViewer({ groups, start: ownIndex })}
+                      aria-label="Watch your stories"
+                      className="flex w-full flex-col items-center gap-2 rounded-sm"
+                    >
+                      <Avatar src={meAsAuthor.avatar} name={authorName(meAsAuthor)} size={64} ring ringTone="brand" />
+                      <span className="w-full truncate text-center text-xs font-semibold text-text-1">Your story</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openComposer}
+                      aria-label="Add to your story"
+                      className="absolute right-0 top-11 grid h-7 w-7 place-items-center rounded-full bg-brand text-on-brand ring-2 ring-bg transition-transform dur-1 before:absolute before:-inset-2 before:content-[''] active:scale-95"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                ) : meAsAuthor ? (
                   <button type="button" onClick={openComposer} className="snap-item flex w-19 shrink-0 flex-col items-center gap-2 rounded-sm py-1">
                     <span className="relative">
                       <Avatar src={meAsAuthor.avatar} name={authorName(meAsAuthor)} size={64} />
@@ -941,19 +964,19 @@ export default function Stories() {
                   </button>
                 ) : null}
                 {groups.map((g, i) => {
+                  if (i === ownIndex) return null;
                   const unseen = g.stories.some((s) => !s.hasViewed);
-                  const own = g.author._id === me?._id;
                   return (
                     <button
                       key={g.author._id}
                       type="button"
                       onClick={() => setViewer({ groups, start: i })}
-                      aria-label={`${unseen ? 'New stories' : 'Stories'} from ${own ? 'you' : authorName(g.author)}`}
+                      aria-label={`${unseen ? 'New stories' : 'Stories'} from ${authorName(g.author)}`}
                       className="snap-item flex w-19 shrink-0 flex-col items-center gap-2 rounded-sm py-1"
                     >
                       <Avatar src={g.author.avatar} name={authorName(g.author)} size={64} ring ringTone={unseen ? 'brand' : 'neutral'} />
                       <span className={cx('w-full truncate text-center text-xs', unseen ? 'font-semibold text-text-1' : 'font-medium text-text-2')}>
-                        {own ? 'You' : g.author.username || g.author.fullName}
+                        {g.author.username || g.author.fullName}
                       </span>
                     </button>
                   );

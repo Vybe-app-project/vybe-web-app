@@ -311,7 +311,7 @@ export default function Water() {
         subtitle={`Every glass counts toward a ${DAILY_GOAL_OZ} oz daily goal.`}
         actions={logButton}
         mobileActions={
-          <IconButton label="Log water" variant="primary" onClick={() => setLogOpen(true)}>
+          <IconButton label="Log water" onClick={() => setLogOpen(true)}>
             <Plus size={22} />
           </IconButton>
         }

@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios';
+import { signInRedirect } from './sessionRedirect';
 
 export const API_BASE =
   (import.meta.env.VITE_API_BASE as string | undefined) || '/api';
@@ -71,14 +72,18 @@ adminApi.interceptors.request.use((config) => {
   return config;
 });
 
-/** Session-version invalidation: the API revokes tokens on password change. */
+/**
+ * Session-version invalidation: the API revokes tokens on password change and
+ * on sign-out from another device. Members land on sign-in with a reason and
+ * a way back (lib/sessionRedirect.ts); the console goes to its own sign-in.
+ */
 function onUnauthorized(kind: 'user' | 'admin') {
   if (kind === 'admin') {
     tokenStore.clearAdmin();
     if (!location.pathname.startsWith('/admin/login')) location.href = '/admin/login';
   } else {
     tokenStore.clear();
-    if (!location.pathname.startsWith('/login')) location.href = '/login';
+    if (!location.pathname.startsWith('/login')) location.href = signInRedirect(location.pathname, location.search);
   }
 }
 

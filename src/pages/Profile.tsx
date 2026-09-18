@@ -28,14 +28,11 @@ import {
   PairFigure,
   Section,
   Skeleton,
-  SkeletonTile,
   Spinner,
-  StatGrid,
-  StatTile,
+  StatStrip,
   Tabs,
   Textarea,
   cx,
-  formatStat,
   useToast,
 } from './ui';
 import { Award, Calendar, Camera, ChevronRight, Edit, MapPin, Settings as SettingsIcon, ShareUp, Users } from './icons';
@@ -359,11 +356,7 @@ export default function Profile() {
             </div>
           </div>
         </Card>
-        <StatGrid>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonTile key={i} />
-          ))}
-        </StatGrid>
+        <Skeleton className="h-16 w-full rounded-lg" />
       </div>
     );
   }
@@ -449,12 +442,15 @@ export default function Profile() {
         </div>
       </Card>
 
-      <StatGrid>
-        <StatTile label="Posts" value={formatStat(postCount(me))} onClick={() => setTab('posts')} />
-        <StatTile label="Followers" value={formatStat(followerCount(me))} to="/friends" />
-        <StatTile label="Following" value={formatStat(followingCount(me))} to="/friends" />
-        <StatTile label="Workouts" value={formatStat(me.stats?.workouts || 0)} onClick={() => setTab('workouts')} tone="brand" />
-      </StatGrid>
+      <StatStrip
+        aria-label="Profile stats"
+        items={[
+          { label: 'Posts', value: postCount(me), onClick: () => setTab('posts') },
+          { label: 'Followers', value: followerCount(me), to: '/friends' },
+          { label: 'Following', value: followingCount(me), to: '/friends' },
+          { label: 'Workouts', value: me.stats?.workouts || 0, onClick: () => setTab('workouts'), tone: 'brand' },
+        ]}
+      />
 
       <ProfileShortcuts />
 

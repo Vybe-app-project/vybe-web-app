@@ -1567,7 +1567,12 @@ function Thread({
                 return (
                   <li key={item.key} className={cx('flex gap-2', item.mine ? 'justify-end' : 'items-end justify-start')}>
                     {!item.mine ? (
-                      <Link to={item.senderId ? `/u/${item.senderId}` : '/friends'} viewTransition aria-label={senderName} className="relative mb-5 shrink-0 rounded-full before:absolute before:-inset-2 before:content-['']">
+                      <Link
+                        to={item.senderId ? `/u/${item.senderId}` : '/friends'}
+                        viewTransition
+                        aria-label={senderName}
+                        className="-m-2 mb-3 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                      >
                         <Avatar src={item.sender?.avatar} name={senderName} size={28} />
                       </Link>
                     ) : null}

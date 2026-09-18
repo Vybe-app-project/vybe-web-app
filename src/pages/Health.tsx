@@ -472,7 +472,7 @@ export default function Health() {
         title="Health"
         subtitle="Training, nutrition and body stats, built from what you log."
         actions={logButton}
-        mobileActions={<IconButton label="Log weight or steps" variant="primary" onClick={openNewEntry}><Plus size={22} /></IconButton>}
+        mobileActions={<IconButton label="Log weight or steps" onClick={openNewEntry}><Plus size={22} /></IconButton>}
       />
 
       <Tabs

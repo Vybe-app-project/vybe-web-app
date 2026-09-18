@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { isEmail } from '../lib/hooks';
-import { Brand, BrandMark, Button, Callout, IconButton, Input, cx } from './ui';
+import { Brand, BrandMark, Button, Callout, IconButton, Input, cx, useDocumentTitle } from './ui';
 import { Eye, EyeOff } from './icons';
 
 /* ------------------------------------------------------------------ *
@@ -30,6 +30,7 @@ export function AuthShell({
   headline?: string;
   tagline?: string;
 }) {
+  useDocumentTitle(title);
   return (
     <div className="min-h-dvh bg-bg text-text-1 lg:grid lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
       <aside className="dark safe-top relative flex flex-col bg-bg text-text-1 lg:min-h-dvh lg:justify-between lg:px-14 lg:py-12">
@@ -146,6 +147,8 @@ export default function Login() {
       : params.get('registered') === '1'
         ? 'Account created. Welcome to Vybe.'
         : null;
+  // The API interceptor sends revoked sessions here (sign-out elsewhere, password change, expiry).
+  const expired = params.get('reason') === 'expired';
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -178,6 +181,10 @@ export default function Login() {
       {notice ? (
         <Callout tone="success" className="mb-5">
           {notice}
+        </Callout>
+      ) : expired ? (
+        <Callout tone="info" title="You were signed out" className="mb-5">
+          Your session ended — that happens after a password change or a sign-out on another device. Sign in again to pick up where you left off.
         </Callout>
       ) : null}
 

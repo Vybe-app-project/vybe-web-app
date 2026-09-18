@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { compactNumber, useDebounced, type Post, type PublicUser } from '../lib/hooks';
+import { dedupeRecentSearches } from '../lib/searchHistory';
 import {
   Avatar,
   Button,
@@ -117,7 +118,8 @@ export default function Search() {
     queryKey: ['search-recent'],
     queryFn: async () => {
       const { data } = await api.get('/search/recent', { params: { limit: 10 } });
-      return (data.recentSearches || []) as RecentSearch[];
+      // The API de-duplicates too; this covers cached or older responses.
+      return dedupeRecentSearches((data.recentSearches || []) as RecentSearch[]);
     },
   });
 

@@ -670,7 +670,7 @@ export default function ProgressPhotos() {
         subtitle={firstName ? `Proof of the work, ${firstName}. Track the change the scale misses.` : 'Proof of the work. Track the change the scale misses.'}
         actions={newButton}
         mobileActions={
-          <IconButton label="New check-in" variant="primary" onClick={() => setUploadOpen(true)}>
+          <IconButton label="New check-in" onClick={() => setUploadOpen(true)}>
             <Plus size={22} />
           </IconButton>
         }
