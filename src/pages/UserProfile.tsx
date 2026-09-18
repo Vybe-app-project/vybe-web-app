@@ -132,6 +132,19 @@ export default function UserProfile() {
     onError: (e) => toast.error(errMsg(e, 'Could not accept the request.')),
   });
 
+  // The receiver's route. DELETE /friends/requests/:id is the sender's
+  // withdraw and answers 404 for the receiver.
+  const declineFriend = useMutation({
+    mutationFn: async (requestId: string) => {
+      await api.delete(`/friends/incoming/${requestId}`);
+    },
+    onSuccess: () => {
+      toast.success('Friend request declined');
+      refreshRelationship();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not decline the request.')),
+  });
+
   const removeFriend = useMutation({
     mutationFn: async () => {
       await api.delete(`/friends/${id}`);
@@ -231,7 +244,7 @@ export default function UserProfile() {
   const friendStatus: FriendStatus = user.friendStatus || 'none';
   const requestId = user.friendRequestId;
   const joined = joinedLabel(user.createdAt);
-  const friendBusy = addFriend.isPending || cancelFriend.isPending || acceptFriend.isPending;
+  const friendBusy = addFriend.isPending || cancelFriend.isPending || acceptFriend.isPending || declineFriend.isPending;
 
   const menuItems: MenuItem[] = [
     { label: 'Share profile', icon: <ShareUp size={18} />, onSelect: shareProfile },
@@ -256,15 +269,26 @@ export default function UserProfile() {
         Friends
       </Badge>
     ) : friendStatus === 'incoming' && requestId ? (
-      <Button
-        variant="secondary"
-        icon={<Check size={18} />}
-        loading={acceptFriend.isPending}
-        disabled={friendBusy}
-        onClick={() => acceptFriend.mutate(requestId)}
-      >
-        Accept request
-      </Button>
+      <>
+        <Button
+          variant="secondary"
+          icon={<Check size={18} />}
+          loading={acceptFriend.isPending}
+          disabled={friendBusy}
+          onClick={() => acceptFriend.mutate(requestId)}
+        >
+          Accept request
+        </Button>
+        <IconButton
+          label={`Decline ${name}’s friend request`}
+          variant="secondary"
+          disabled={friendBusy}
+          aria-busy={declineFriend.isPending || undefined}
+          onClick={() => declineFriend.mutate(requestId)}
+        >
+          <X size={20} />
+        </IconButton>
+      </>
     ) : friendStatus === 'requested' || friendStatus === 'pending' ? (
       <Button
         variant="secondary"
@@ -305,7 +329,16 @@ export default function UserProfile() {
             <div className="flex flex-wrap items-center gap-2 sm:pb-1">
               <FollowButton user={user} onChanged={() => userQuery.refetch()} />
               {friendControl}
-              <IconButton to={`/messages?to=${user._id}`} label={`Message ${name}`} variant="secondary">
+              <IconButton
+                label={`Message ${name}`}
+                variant="secondary"
+                onClick={() =>
+                  navigate(`/messages/new?to=${encodeURIComponent(user._id)}`, {
+                    state: { peer: { _id: user._id, username: user.username, fullName: user.fullName, avatar: user.avatar } },
+                    viewTransition: true,
+                  })
+                }
+              >
                 <MessageCircle size={20} />
               </IconButton>
               <span className="hidden lg:inline-flex">
@@ -354,8 +387,18 @@ export default function UserProfile() {
 
       <StatGrid>
         <StatTile label="Posts" value={formatStat(postCount(user))} onClick={canViewContent ? () => setTab('posts') : undefined} />
-        <StatTile label="Followers" value={formatStat(followerCount(user))} />
-        <StatTile label="Following" value={formatStat(followingCount(user))} />
+        <StatTile
+          label="Followers"
+          value={formatStat(followerCount(user))}
+          to={canViewContent ? `/u/${user._id}/followers` : undefined}
+          hint={canViewContent ? undefined : 'Private'}
+        />
+        <StatTile
+          label="Following"
+          value={formatStat(followingCount(user))}
+          to={canViewContent ? `/u/${user._id}/following` : undefined}
+          hint={canViewContent ? undefined : 'Private'}
+        />
         <StatTile
           label="Workouts"
           value={formatStat(user.stats?.workouts || 0)}
@@ -405,7 +448,7 @@ export default function UserProfile() {
       <ConfirmDialog
         open={confirmBlock}
         title={`Block ${name}?`}
-        message="You will no longer see each other’s posts, comments or messages, and any follow or friend relationship is removed."
+        message="You will no longer see each other’s posts, comments or messages, and any follow or friend relationship is removed. You can unblock them later under Settings › Blocked accounts."
         confirmLabel="Block"
         destructive
         loading={block.isPending}

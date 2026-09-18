@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg } from '../lib/api';
@@ -20,10 +20,14 @@ import {
   SkeletonRow,
   Tabs,
   cx,
+  useIsCompact,
   useToast,
 } from './ui';
-import { Check, Compass, MessageCircle, User, UserPlus, Users, X } from './icons';
-import { ROW_LINK, UserBadges } from './UserRow';
+import { Check, Compass, MessageCircle, Search as SearchIcon, User, UserPlus, Users, X } from './icons';
+import { PrivateMark, ROW_LINK, UserBadges } from './UserRow';
+
+/** People-search rows shown before "Show all". */
+const PEOPLE_PREVIEW = 8;
 
 type FriendRequest = {
   _id: string;
@@ -72,7 +76,10 @@ function PersonRow({ user, meta, actions }: { user?: PublicUser; meta?: string; 
           <UserBadges user={user} compact />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-2">
-          <span className="truncate">@{user.username}</span>
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <span className="truncate">@{user.username}</span>
+            <PrivateMark user={user} />
+          </span>
           {meta ? <span className="shrink-0 text-text-3">{meta}</span> : null}
         </div>
       </div>
@@ -113,6 +120,8 @@ function ListShell({
 export default function Friends() {
   const qc = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
+  const compact = useIsCompact();
   const [params, setParams] = useSearchParams();
   const tabParam = params.get('tab');
   const tab: TabKey = isTab(tabParam) ? tabParam : 'friends';
@@ -129,6 +138,8 @@ export default function Friends() {
   const [filter, setFilter] = useState('');
   const [peopleQuery, setPeopleQuery] = useState('');
   const debouncedPeople = useDebounced(peopleQuery.trim(), 300);
+  const [showAllPeople, setShowAllPeople] = useState(false);
+  useEffect(() => setShowAllPeople(false), [debouncedPeople]);
   const [removeTarget, setRemoveTarget] = useState<PublicUser | null>(null);
 
   const invalidate = () => {
@@ -199,15 +210,30 @@ export default function Friends() {
     onError: (e) => toast.error(errMsg(e, 'Could not accept the request.')),
   });
 
+  // Two different routes for two different people. The receiver declines an
+  // incoming request through /friends/incoming/:id; the sender withdraws one
+  // through /friends/requests/:id. Declining used to call the sender's route
+  // and always failed with "Request not found".
   const declineFriend = useMutation({
+    mutationFn: async (requestId: string) => {
+      await api.delete(`/friends/incoming/${requestId}`);
+    },
+    onSuccess: () => {
+      toast.success('Request declined');
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not decline the request.')),
+  });
+
+  const withdrawRequest = useMutation({
     mutationFn: async (requestId: string) => {
       await api.delete(`/friends/requests/${requestId}`);
     },
     onSuccess: () => {
-      toast.success('Request removed');
+      toast.success('Request withdrawn');
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not remove the request.')),
+    onError: (e) => toast.error(errMsg(e, 'Could not withdraw the request.')),
   });
 
   const removeFriend = useMutation({
@@ -263,14 +289,26 @@ export default function Friends() {
     return map;
   }, [friends.data, sent.data, pending.data]);
 
+  // At 390 px the four tabs with icons overflowed and "Follow requests" was
+  // clipped to "Fo…"; the compact strip drops the icons and tightens the
+  // size so every tab is visible without scrolling.
   const tabs = [
-    { key: 'friends', label: 'Friends', count: friends.data?.length, icon: <Users size={16} /> },
-    { key: 'pending', label: 'Requests', count: pending.data?.length || undefined, icon: <UserPlus size={16} /> },
+    { key: 'friends', label: 'Friends', count: friends.data?.length, icon: compact ? undefined : <Users size={16} /> },
+    { key: 'pending', label: 'Requests', count: pending.data?.length || undefined, icon: compact ? undefined : <UserPlus size={16} /> },
     { key: 'sent', label: 'Sent', count: sent.data?.length || undefined },
     { key: 'follows', label: 'Follow requests', count: followRequests.data?.length || undefined },
   ];
 
   const searching = debouncedPeople.length >= 2;
+  const peopleTotal = people.data?.length || 0;
+  const visiblePeople = showAllPeople ? people.data || [] : (people.data || []).slice(0, PEOPLE_PREVIEW);
+  const hiddenPeople = peopleTotal - visiblePeople.length;
+
+  const openMessage = (u: PublicUser) =>
+    navigate(`/messages/new?to=${encodeURIComponent(u._id)}`, {
+      state: { peer: { _id: u._id, username: u.username, fullName: u.fullName, avatar: u.avatar } },
+      viewTransition: true,
+    });
 
   return (
     <div className="mx-auto w-full max-w-[52rem] space-y-6">
@@ -316,8 +354,8 @@ export default function Friends() {
               action={{ label: 'Explore people', to: '/discover', variant: 'secondary' }}
             />
           ) : (
-            <ul className="-mx-4 divide-y divide-line border-t border-line sm:-mx-5">
-              {people.data.slice(0, 8).map((u) => {
+            <ul className="-mx-4 divide-y divide-line border-t border-line sm:-mx-5" aria-label="People">
+              {visiblePeople.map((u) => {
                 const rel = relationship.get(String(u._id));
                 return (
                   <PersonRow
@@ -342,8 +380,8 @@ export default function Friends() {
                         <Button
                           variant="secondary"
                           title="Withdraw request"
-                          loading={declineFriend.isPending && declineFriend.variables === rel.requestId}
-                          onClick={() => rel.requestId && declineFriend.mutate(rel.requestId)}
+                          loading={withdrawRequest.isPending && withdrawRequest.variables === rel.requestId}
+                          onClick={() => rel.requestId && withdrawRequest.mutate(rel.requestId)}
                         >
                           Requested
                         </Button>
@@ -361,13 +399,32 @@ export default function Friends() {
                   />
                 );
               })}
+              {hiddenPeople > 0 || peopleTotal > PEOPLE_PREVIEW ? (
+                <li className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-4">
+                  {hiddenPeople > 0 ? (
+                    <Button variant="ghost" size="sm" onClick={() => setShowAllPeople(true)}>
+                      Show all {peopleTotal} results
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-text-3">Showing all {peopleTotal} results</span>
+                  )}
+                  <ButtonLink
+                    to={`/search?q=${encodeURIComponent(debouncedPeople)}&type=users`}
+                    variant="ghost"
+                    size="sm"
+                    icon={<SearchIcon size={16} />}
+                  >
+                    Search everyone
+                  </ButtonLink>
+                </li>
+              ) : null}
             </ul>
           )
         ) : null}
       </Card>
 
       <section className="space-y-4" aria-label="Friends and requests">
-        <Tabs aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} />
+        <Tabs aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} size={compact ? 'sm' : 'md'} />
 
         <Card padded={false} className={cx('overflow-hidden', 'anim-fade-in')} key={tab}>
           {tab === 'friends' && (
@@ -392,7 +449,7 @@ export default function Friends() {
                   ) : (
                     <EmptyState
                       title="No friends yet"
-                      message="Search for people above, or explore who is training near you. Friends see each other’s private posts."
+                      message="Search for people above, or explore who is training near you. Friends can message each other and share meal templates directly."
                       action={{ label: 'Explore people', to: '/discover', icon: <Compass size={18} /> }}
                     />
                   )
@@ -404,7 +461,7 @@ export default function Friends() {
                     user={u}
                     actions={
                       <>
-                        <IconButton to={`/messages?to=${u._id}`} label={`Message ${displayName(u)}`}>
+                        <IconButton label={`Message ${displayName(u)}`} onClick={() => openMessage(u)}>
                           <MessageCircle size={20} />
                         </IconButton>
                         <Menu
@@ -487,8 +544,8 @@ export default function Friends() {
                   actions={
                     <Button
                       variant="secondary"
-                      loading={declineFriend.isPending && declineFriend.variables === r._id}
-                      onClick={() => declineFriend.mutate(r._id)}
+                      loading={withdrawRequest.isPending && withdrawRequest.variables === r._id}
+                      onClick={() => withdrawRequest.mutate(r._id)}
                     >
                       Withdraw
                     </Button>
@@ -508,7 +565,7 @@ export default function Friends() {
                   icon={<Users size={26} />}
                   title="No follow requests"
                   message="When your profile is private, people asking to follow you appear here for approval."
-                  action={{ label: 'Privacy settings', to: '/settings', variant: 'secondary' }}
+                  action={{ label: 'Privacy settings', to: '/settings#privacy', variant: 'secondary' }}
                 />
               }
             >
