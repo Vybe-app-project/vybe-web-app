@@ -146,9 +146,18 @@ export const useAuth = create<AuthState>((set, get) => ({
       // Administrators page. Unwrap every shape the API has used.
       const admin = data?.data?.admin ?? data?.admin ?? data;
       set({ admin: admin && typeof admin === 'object' ? admin : null, adminLoading: false });
-    } catch {
-      tokenStore.clearAdmin();
-      set({ admin: null, adminLoading: false });
+    } catch (error) {
+      // Only a 401/403 means the session is bad (the 401 has already been
+      // handled by the adminApi interceptor). A 429 from the rate limiter or
+      // a network failure used to clear the token too, so RequireAdmin
+      // bounced a signed-in operator to /admin/login; now the token stays
+      // and an empty identity keeps the console mounted until /admins/me
+      // answers again through useCurrentAdmin.
+      if (isSessionRejected(error)) {
+        tokenStore.clearAdmin();
+        return set({ admin: null, adminLoading: false });
+      }
+      set({ admin: get().admin ?? {}, adminLoading: false });
     }
   },
 

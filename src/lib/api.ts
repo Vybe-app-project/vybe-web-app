@@ -185,7 +185,9 @@ export function errMsg(e: unknown, fallback = 'Something went wrong'): string {
   const ax = e as AxiosError<{ message?: string; error?: string; errors?: any[] }>;
   const d = ax?.response?.data as any;
   if (d?.message) return d.message;
-  if (d?.error) return d.error;
+  // The final-handler envelope is { error: { code, message, requestId } }; older routes send a string.
+  if (d?.error && typeof d.error === 'object' && typeof d.error.message === 'string') return d.error.message;
+  if (typeof d?.error === 'string') return d.error;
   if (Array.isArray(d?.errors) && d.errors[0]?.msg) return d.errors[0].msg;
   if (ax?.message) return ax.message;
   return fallback;
