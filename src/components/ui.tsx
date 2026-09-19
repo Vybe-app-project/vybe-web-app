@@ -99,8 +99,10 @@ export function formatStat(n?: number | null, opts: { compact?: boolean } = {}):
 
 /* ================================================================== motion */
 
+/** The OS preference OR the account's `settings.accessibility.reduceMotion` (lib/accessibility sets the <html> attribute). */
 export function prefersReducedMotion(): boolean {
-  return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
+  return typeof document !== 'undefined' && document.documentElement.getAttribute('data-reduce-motion') === 'true';
 }
 
 export function useMediaQuery(query: string): boolean {
