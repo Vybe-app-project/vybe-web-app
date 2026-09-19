@@ -3,12 +3,13 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { fmtStamp, isoStamp } from '../../lib/format';
+import { plural } from '../../lib/format';
 import {
   Avatar,
   Badge,
   BrandMark,
   Button,
+  CountBadge,
   IconButton,
   Skeleton,
   ThemeControl,
@@ -32,6 +33,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from '../../components/icons';
+import { TimeStamp } from './adminCards';
 import '../../styles.admin.css';
 
 type AdminIdentity = {
@@ -49,11 +51,13 @@ const NAV: Array<{
   end?: boolean;
   /** Only super administrators can open it; hidden from other staff once the role is known. */
   superOnly?: boolean;
+  /** Which queue counts to show beside the label (useQueueCounts). */
+  badge?: 'reports';
 }> = [
   { to: '/admin', label: 'Dashboard', Icon: Dashboard, end: true },
   { to: '/admin/users', label: 'Users', Icon: Users },
   { to: '/admin/posts', label: 'Posts', Icon: FileText },
-  { to: '/admin/reports', label: 'Reports', Icon: Flag },
+  { to: '/admin/reports', label: 'Reports', Icon: Flag, badge: 'reports' },
   { to: '/admin/support', label: 'Support', Icon: LifeBuoy },
   { to: '/admin/trainers', label: 'Trainers', Icon: Award },
   { to: '/admin/catalog', label: 'Catalog', Icon: Dumbbell },
@@ -178,13 +182,9 @@ export function Stamp({
   dateOnly?: boolean;
   className?: string;
 }) {
-  const value = isoStamp(iso);
-  if (!value) return <span className={cx('tabular', className)}>—</span>;
-  return (
-    <time className={cx('tabular', className)} dateTime={value} title={value}>
-      {fmtStamp(iso, { seconds, dateOnly })}
-    </time>
-  );
+  // The implementation lives in adminCards.tsx so the prop-driven cards can
+  // render under node --test without this file's stylesheet import.
+  return <TimeStamp iso={iso} seconds={seconds} dateOnly={dateOnly} className={className} />;
 }
 
 /** GET /admins/me -> { success, data: { admin } } */
@@ -199,6 +199,33 @@ export function useCurrentAdmin() {
   });
 }
 
+/**
+ * Sidebar queue counts. There is no count route; the cheapest truthful
+ * source is the list total with one row each: GET /admin/reports
+ * ?status=pending&limit=1 and ?appeal=open&limit=1 (each is a find, a
+ * countDocuments and one locateTarget for the single row). Polled every
+ * minute while the tab is visible, never retried, silent on failure: the
+ * sidebar is not the place for a toast. Reports mutations invalidate
+ * ['admin', 'queue'] so a decision updates the badge at once.
+ */
+export function useQueueCounts(enabled = true) {
+  return useQuery<{ pending: number; appeals: number }>({
+    queryKey: ['admin', 'queue'],
+    queryFn: async () => {
+      const [pending, appeals] = await Promise.all([
+        adminApi.get('/admin/reports', { params: { status: 'pending', limit: 1 } }),
+        adminApi.get('/admin/reports', { params: { appeal: 'open', limit: 1 } }),
+      ]);
+      return { pending: Number(pending.data?.total) || 0, appeals: Number(appeals.data?.total) || 0 };
+    },
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    retry: false,
+    enabled,
+  });
+}
+
 /* ------------------------------------------------------------------ shell */
 
 export default function AdminLayout() {
@@ -207,6 +234,7 @@ export default function AdminLayout() {
   const adminLogout = useAuth((s) => s.adminLogout);
   const storeAdmin = useAuth((s) => s.admin) as AdminIdentity | null;
   const { data, isLoading } = useCurrentAdmin();
+  const queue = useQueueCounts();
   const [open, setOpen] = useState(false);
 
   const me: AdminIdentity = data ?? storeAdmin ?? {};
@@ -248,12 +276,31 @@ export default function AdminLayout() {
       </div>
 
       <nav aria-label="Console sections" className="flex-1 space-y-0.5 overflow-y-auto p-3">
-        {visibleNav.map(({ to, label, Icon, end }) => (
-          <NavLink key={to} to={to} end={end === true} className="admin-nav-link">
-            <Icon size={18} className="shrink-0" />
-            <span className="truncate">{label}</span>
-          </NavLink>
-        ))}
+        {visibleNav.map(({ to, label, Icon, end, badge }) => {
+          const pending = badge === 'reports' ? queue.data?.pending ?? 0 : 0;
+          const appeals = badge === 'reports' ? queue.data?.appeals ?? 0 : 0;
+          const counted = [
+            pending > 0 ? plural(pending, 'pending report') : null,
+            appeals > 0 ? plural(appeals, 'open appeal') : null,
+          ].filter(Boolean);
+          return (
+            <NavLink key={to} to={to} end={end === true} className="admin-nav-link">
+              <Icon size={18} className="shrink-0" />
+              <span className="truncate">{label}</span>
+              {counted.length > 0 ? (
+                <span className="ml-auto flex shrink-0 items-center gap-1" aria-hidden="true">
+                  {pending > 0 ? <span title="Pending reports"><CountBadge value={pending} /></span> : null}
+                  {appeals > 0 ? (
+                    <span title="Open appeals" className="[&>span]:bg-warning">
+                      <CountBadge value={appeals} />
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              {counted.length > 0 ? <span className="sr-only">{counted.join(', ')}</span> : null}
+            </NavLink>
+          );
+        })}
       </nav>
 
       <div className="space-y-3 border-t border-line p-3">

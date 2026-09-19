@@ -33,7 +33,7 @@ type Suspension = {
   restoredAt?: string | null;
 };
 
-/** Verified / Admin / Deleted — shared by the table and the phone list. */
+/** Verified / Admin / Deleted — shared by the table and the phone list. The API sends no premium flag (utils/publicUser). */
 function UserStatusBadges({ u }: { u: AdminUser }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">

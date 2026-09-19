@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import { adminApi, errMsg } from '../../lib/api';
+import { adoptionRows, type ClientAdoption } from '../../lib/adminOps';
 import {
   Avatar,
   Badge,
@@ -44,6 +45,7 @@ import {
   BarChart as BarChartIcon,
 } from '../../components/icons';
 import { AdminPageHeader } from './AdminLayout';
+import { ClientAdoptionTable } from './adminCards';
 
 /* --------------------------------------------------------------- types */
 
@@ -57,6 +59,8 @@ type Analytics = {
   active30d?: number;
   userGrowth?: Array<Record<string, any>>;
   postGrowth?: Array<Record<string, any>>;
+  /** services/clientPolicy.clientAdoption(): members seen per platform release in the window. */
+  clientAdoption?: ClientAdoption;
   [k: string]: any;
 };
 
@@ -292,6 +296,8 @@ export default function AdminDashboard() {
   );
 
   const trending = more.data?.trendingPosts ?? [];
+  const adoption = useMemo(() => adoptionRows(a.clientAdoption), [a]);
+  const adoptionWindow = num(a.clientAdoption?.windowDays) ?? 7;
 
   if (analytics.isLoading) return <DashboardSkeleton />;
   if (analytics.isError) {
@@ -361,6 +367,16 @@ export default function AdminDashboard() {
           <GrowthChart data={postGrowth} name="Posts" color={seriesAt(1)} gradientId="admin-posts-fill" />
         </ChartCard>
       </div>
+
+      {/* Client adoption: full width, its own card (not another two-column grid). */}
+      <Card className="min-w-0 overflow-hidden">
+        <CardHeader
+          title="Client adoption"
+          subtitle={`Members active in the last ${plural(adoptionWindow, 'day')} by app release`}
+          action={adoption.length > 0 ? <Badge tone="neutral"><span className="tabular">{plural(adoption.length, 'release')}</span></Badge> : null}
+        />
+        <ClientAdoptionTable adoption={a.clientAdoption} />
+      </Card>
 
       {/* Breakdowns */}
       <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
