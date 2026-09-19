@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type { AxiosError } from 'axios';
 import { api, tokenStore, adminApi, revokeSession, signOutReason } from './api';
 import { disposeSocket } from './socket';
+import type { AccountFields } from './accountTypes';
 
 /**
  * Field names follow the backend `User` model: the photo is `avatar`
@@ -22,10 +23,27 @@ export type User = {
   isIdentityVerified?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
-  isPremium?: boolean;
   followersCount?: number;
   followingCount?: number;
+  /** Owner-only account fields from GET /users/me (lib/accountTypes). */
+  settings?: AccountFields['settings'];
+  hiddenWords?: AccountFields['hiddenWords'];
+  pendingDeletion?: AccountFields['pendingDeletion'];
+  deletion?: AccountFields['deletion'];
+  hasPassword?: AccountFields['hasPassword'];
   [k: string]: any;
+};
+
+/**
+ * PUT /users/settings and PUT /users/me answer the whole account WITHOUT
+ * `hasPassword` (only GET /users/me adds it). Storing that answer verbatim
+ * would drop the flag, so every settings writer merges through here: the
+ * next copy wins, and `hasPassword` is kept from the previous copy of the
+ * same account when the new one does not carry it.
+ */
+export const mergeAccount = (prev: User | null | undefined, next: User): User => {
+  if (next.hasPassword !== undefined || !prev || String(prev._id) !== String(next._id) || prev.hasPassword === undefined) return next;
+  return { ...next, hasPassword: prev.hasPassword };
 };
 
 export type LoginOptions = {
@@ -154,7 +172,8 @@ export const useAuth = create<AuthState>((set, get) => ({
 
   setUser: (u) => {
     rememberSnapshot(u);
-    set({ user: u });
+    // Settings writers hand back the account without hasPassword; keep it.
+    set((s) => ({ user: u ? mergeAccount(s.user, u) : null }));
   },
 
   login: async (email, password, { remember = true }: LoginOptions = {}) => {

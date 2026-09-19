@@ -148,7 +148,6 @@ export function UserBadges({ user, compact = false }: { user: PublicUser; compac
         </Badge>
       ) : null}
       {user.isCoach || user.isTrainer ? <Badge tone="info">Coach</Badge> : null}
-      {user.isPremium ? <Badge tone="accent">Premium</Badge> : null}
     </>
   );
 }
