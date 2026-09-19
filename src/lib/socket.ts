@@ -1,7 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
-import { ORIGIN_BASE, tokenStore } from './api';
+import { ORIGIN_BASE, clientHeaders, tokenStore } from './api';
 
 /**
  * One authenticated Socket.IO connection for the whole app.
@@ -56,6 +56,9 @@ export function getSocket(): Socket | null {
       shared = io(socketUrl(), {
         auth: (cb) => cb({ token: tokenStore.get() ?? '' }),
         transports: ['websocket', 'polling'],
+        // Browsers can only add headers to the polling transport; the
+        // websocket handshake identifies itself through auth.token alone.
+        extraHeaders: clientHeaders(),
         reconnectionDelay: 1000,
         reconnectionDelayMax: 10_000,
         timeout: 10_000,

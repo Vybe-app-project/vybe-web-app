@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import axios, { type AxiosError } from 'axios';
 import { useQuery } from '@tanstack/react-query';
-import { API_BASE, api, errMsg, tokenStore } from '../lib/api';
+import { API_BASE, api, errMsg, installClientInterceptors, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { postLoginTarget, type FromLocation } from '../lib/authRedirect';
 import {
@@ -32,6 +32,9 @@ const registrationApi = axios.create({
   baseURL: API_BASE,
   timeout: 30_000,
 });
+// Identity headers and the 426/429 hand-offs, but no session token and no
+// 401 redirect: this client runs before there is a session.
+installClientInterceptors(registrationApi, null);
 
 const STEPS: { n: Step; label: string }[] = [
   { n: 1, label: 'Email' },

@@ -1,4 +1,4 @@
-import { API_BASE, tokenStore } from './api';
+import { API_BASE, clientHeaders, tokenStore } from './api';
 import {
   HOST_MEDIA_CONSTRAINTS,
   RELAXED_MEDIA_CONSTRAINTS,
@@ -101,7 +101,7 @@ export function endLivestreamOnUnload(streamId: string): void {
     void fetch(`${API_BASE.replace(/\/$/, '')}/livestreams/${encodeURIComponent(streamId)}/end`, {
       method: 'PUT',
       keepalive: true,
-      headers: { Authorization: `Bearer ${token}`, 'X-Platform': 'web' },
+      headers: { Authorization: `Bearer ${token}`, ...clientHeaders() },
     }).catch(() => undefined);
   } catch {
     // Nothing else to do during unload.
@@ -116,7 +116,7 @@ export function leaveLivestreamOnUnload(streamId: string): void {
     void fetch(`${API_BASE.replace(/\/$/, '')}/livestreams/${encodeURIComponent(streamId)}/leave`, {
       method: 'POST',
       keepalive: true,
-      headers: { Authorization: `Bearer ${token}`, 'X-Platform': 'web' },
+      headers: { Authorization: `Bearer ${token}`, ...clientHeaders() },
     }).catch(() => undefined);
   } catch {
     // Nothing else to do during unload.
