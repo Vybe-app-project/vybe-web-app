@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { WorkoutSummary } from './workoutSummary';
 import { api } from './api';
 
 /* ------------------------------------------------------------------ *
@@ -78,6 +79,8 @@ export type Post = {
   category?: string;
   /** Populated by the API for community posts (name, vicinity). */
   community?: { _id: string; name?: string; vicinity?: string } | null;
+  /** Server-built snapshot of the workout the post was shared from (see lib/workoutSummary). */
+  workoutSummary?: WorkoutSummary;
 };
 
 export type PagedPosts = {

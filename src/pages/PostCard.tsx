@@ -49,6 +49,8 @@ import {
   X,
 } from './icons';
 import { useReportModal } from './Report';
+import { WorkoutSummaryCard } from './WorkoutSummaryCard';
+import { hasWorkoutSummary } from '../lib/workoutSummary';
 
 /* ------------------------------------------------------------------ */
 /* Hidden authors (client-side mute)                                   */
@@ -911,8 +913,9 @@ export default function PostCard({
         </Link>
       ) : null}
 
-      {/* media first, then text */}
+      {/* media first, then the workout card, then text */}
       <PostMediaGrid post={post} className="mt-3" expanded={expandMedia} onOpen={setLightbox} />
+      {hasWorkoutSummary(post.workoutSummary) ? <WorkoutSummaryCard summary={post.workoutSummary} className="mt-3" /> : null}
       <PostContent text={post.content} hashtags={post.hashtags} className="mt-3" clamp={!expandMedia} />
 
       {/* action bar */}

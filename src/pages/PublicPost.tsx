@@ -7,6 +7,8 @@ import { PublicShell } from '../components/PublicShell';
 import { Avatar, Badge, ButtonLink, Card, EmptyState, Skeleton, formatStat } from './ui';
 import { BadgeCheck, Heart, Lock, MessageCircle } from './icons';
 import { MediaLightbox, PostContent, PostMediaGrid } from './PostCard';
+import { WorkoutSummaryCard } from './WorkoutSummaryCard';
+import { hasWorkoutSummary } from '../lib/workoutSummary';
 
 const OBJECT_ID = /^[a-f0-9]{24}$/i;
 
@@ -90,6 +92,7 @@ export default function PublicPost() {
         </div>
 
         <PostMediaGrid post={post} className="mt-3" expanded onOpen={setLightbox} />
+        {hasWorkoutSummary(post.workoutSummary) ? <WorkoutSummaryCard summary={post.workoutSummary} className="mt-3" /> : null}
         <PostContent text={post.content} hashtags={post.hashtags} className="mt-3" />
 
         <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-sm text-text-2">
