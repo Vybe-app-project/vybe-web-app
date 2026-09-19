@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WorkoutSummary } from './workoutSummary';
+import type { RecapSummary } from './recapSummary';
 import { api } from './api';
 import type { AccountFields } from './accountTypes';
 
@@ -91,6 +92,8 @@ export type Post = {
   community?: { _id: string; name?: string; vicinity?: string } | null;
   /** Server-built snapshot of the workout the post was shared from (see lib/workoutSummary). */
   workoutSummary?: WorkoutSummary;
+  /** Server-built snapshot of a shared weekly or monthly recap (see lib/recapSummary). */
+  recapSummary?: RecapSummary;
 };
 
 export type PagedPosts = {
