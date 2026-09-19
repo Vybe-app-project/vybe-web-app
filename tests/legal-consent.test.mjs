@@ -151,6 +151,7 @@ test('the title follows which documents changed, word for word with the mobile a
   assert.equal(legal.legalTitle(BOTH), 'Our terms and privacy policy have changed');
   assert.equal(legal.legalTitle(PRIVACY_ONLY), 'Our privacy policy has changed');
   assert.equal(legal.legalTitle([{ document: 'terms' }]), 'Our terms have changed');
+  assert.equal(legal.legalTitle(BOTH, false), 'Our terms and privacy policy have changed');
   assert.equal(legal.readLabel({ document: 'terms' }), 'Read the full terms');
   assert.equal(legal.readLabel({ document: 'privacy' }), 'Read the full privacy policy');
   assert.equal(legal.LEGAL_COPY.agree, 'Agree and continue');
@@ -160,6 +161,30 @@ test('the title follows which documents changed, word for word with the mobile a
   assert.equal(legal.LEGAL_COPY.accepted, 'Thanks. You’re all set.');
   assert.equal(legal.LEGAL_COPY.stale, 'These documents changed again just now. Here is the latest.');
   assert.ok(Object.isFrozen(legal.LEGAL_COPY));
+});
+
+test('an account with no acceptance row of any version is asked to review, not told the documents changed', () => {
+  const none = { terms: null, privacy: null };
+  assert.equal(legal.isFirstAgreement(BOTH, none), true);
+  assert.equal(legal.isFirstAgreement(PRIVACY_ONLY, none), true);
+  assert.equal(legal.legalTitle(BOTH, legal.isFirstAgreement(BOTH, none)), 'Please review our terms and privacy policy');
+  assert.equal(legal.legalTitle(PRIVACY_ONLY, true), 'Please review our privacy policy');
+  assert.equal(legal.legalTitle([{ document: 'terms' }], true), 'Please review our terms');
+  // An older row on any pending document is a genuine version bump: the mobile wording.
+  const older = { version: '2026-01-01', acceptedAt: '2026-02-01T00:00:00.000Z', surface: 'signup' };
+  assert.equal(legal.isFirstAgreement(BOTH, { terms: older, privacy: older }), false);
+  assert.equal(legal.isFirstAgreement(BOTH, { terms: older, privacy: null }), false, 'one document changed for this account');
+  assert.equal(legal.legalTitle(BOTH, legal.isFirstAgreement(BOTH, { terms: older, privacy: older })), 'Our terms and privacy policy have changed');
+  // Only the pending documents count: a current terms row with no privacy row is a first agreement for the privacy policy.
+  const current = { version: '2026-07-28', acceptedAt: '2026-09-19T16:00:00.000Z', surface: 'signup' };
+  assert.equal(legal.isFirstAgreement(PRIVACY_ONLY, { terms: current, privacy: null }), true);
+  // No state to read, or nothing pending: never claims a first agreement.
+  assert.equal(legal.isFirstAgreement(BOTH, null), false);
+  assert.equal(legal.isFirstAgreement(BOTH, undefined), false);
+  assert.equal(legal.isFirstAgreement([], none), false);
+  // Straight from the live body: every pre-existing web account arrives like this.
+  const fresh = legal.normalizeLegalState(acceptancesBody(['terms', 'privacy']));
+  assert.equal(legal.isFirstAgreement(legal.pendingDocuments(fresh), fresh.accepted), true);
 });
 
 /* ------------------------------------------------------------------ pure: the acceptance payload */
@@ -283,8 +308,9 @@ test('the dialog for both documents is a labelled modal with every summary line,
 
   const buttons = [...html.matchAll(/<button\s([^>]*)>/g)].map((m) => m[1]);
   assert.equal(buttons.length, 2, 'Agree and continue, then Sign out; no close');
-  assert.match(buttons[0], /aria-label="Agree to the updated documents and continue"/);
+  for (const attributes of buttons) assert.doesNotMatch(attributes, /aria-label/, 'the visible text is the accessible name (WCAG 2.5.3)');
   assert.match(buttons[0], /type="button"/);
+  assert.match(buttons[0], /data-testid="legal-consent-agree"/);
   assert.equal(count(html, '>Agree and continue<'), 1);
   assert.ok(html.indexOf('>Agree and continue<') < html.indexOf('>Sign out<'), 'the exit sits under the agreement');
   assert.doesNotMatch(html, /aria-label="Close"/);
@@ -292,15 +318,47 @@ test('the dialog for both documents is a labelled modal with every summary line,
   assert.doesNotMatch(html, /90|noticeDays|days/, 'no notice-period claim the documents do not make');
   assert.match(html, /z-\[200\]/);
   assert.doesNotMatch(html, /role="alert"/, 'no error line until an accept fails');
+
+  // The documents scroll inside the panel and the buttons are a pinned footer, so Agree is never below the fold.
+  const panel = html.match(/<div class="([^"]*max-h-\[calc\(100dvh-2rem\)\][^"]*)"/);
+  assert.ok(panel, 'the panel caps its height to the viewport');
+  assert.match(panel[1], /\bflex\b/);
+  assert.match(panel[1], /\bflex-col\b/);
+  assert.doesNotMatch(panel[1], /overflow-y-auto/, 'the panel itself does not scroll');
+  const body = html.match(/<div [^>]*id="legal-consent-body"[^>]*class="([^"]*)"/) ?? html.match(/<div [^>]*class="([^"]*)"[^>]*id="legal-consent-body"/);
+  assert.ok(body, 'the described body is the scroll region');
+  for (const utility of ['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain']) assert.ok(body[1].split(' ').includes(utility), `body has ${utility}`);
+  const footer = html.indexOf('data-testid="legal-consent-footer"');
+  assert.ok(footer > html.indexOf('id="legal-consent-body"'), 'the footer follows the body');
+  assert.ok(footer < html.indexOf('data-testid="legal-consent-agree"'), 'Agree lives in the footer');
+  assert.ok(footer < html.indexOf('data-testid="legal-consent-sign-out"'), 'so does Sign out');
+  assert.match(html.slice(footer - 200, footer), /shrink-0/);
+});
+
+test('a first agreement is titled as a review, a version bump as a change; the summaries and buttons are the same', () => {
+  const first = decode(mount(h(LegalConsentDialog, { documents: BOTH, firstAgreement: true, onAgree() {}, onSignOut() {} })));
+  assert.match(first, /id="legal-consent-title"[^>]*>Please review our terms and privacy policy</);
+  assert.doesNotMatch(first, /have changed|has changed/);
+  assert.equal(count(first, '>Agree and continue<'), 1);
+  assert.equal(count(first, 'Read the full'), 2);
+  const privacy = decode(mount(h(LegalConsentDialog, { documents: PRIVACY_ONLY, firstAgreement: true, onAgree() {}, onSignOut() {} })));
+  assert.match(privacy, /id="legal-consent-title"[^>]*>Please review our privacy policy</);
+  const bump = decode(mount(h(LegalConsentDialog, { documents: BOTH, firstAgreement: false, onAgree() {}, onSignOut() {} })));
+  assert.match(bump, /id="legal-consent-title"[^>]*>Our terms and privacy policy have changed</);
+  assert.doesNotMatch(bump, /Please review/);
 });
 
 test('an accept failure is announced inline and the dialog stays; a busy dialog shows Saving', () => {
   const failed = decode(mount(h(LegalConsentDialog, { documents: BOTH, error: 'These documents changed again just now. Here is the latest.', onAgree() {}, onSignOut() {} })));
   assert.match(failed, /role="alert"[^>]*>These documents changed again just now\. Here is the latest\.</);
   assert.match(failed, /role="dialog"/);
+  assert.ok(failed.indexOf('data-testid="legal-consent-footer"') < failed.indexOf('role="alert"'), 'the error sits in the pinned footer, above the buttons');
+  assert.ok(failed.indexOf('role="alert"') < failed.indexOf('data-testid="legal-consent-agree"'));
   const busy = decode(mount(h(LegalConsentDialog, { documents: BOTH, busy: true, onAgree() {}, onSignOut() {} })));
-  assert.match(busy, /aria-label="Agree to the updated documents and continue"[^>]*aria-busy="true"|aria-busy="true"[^>]*aria-label="Agree to the updated documents and continue"/);
+  assert.match(busy, /<button[^>]*aria-busy="true"[^>]*data-testid="legal-consent-agree"|<button[^>]*data-testid="legal-consent-agree"[^>]*aria-busy="true"/);
+  for (const attributes of [...busy.matchAll(/<button\s([^>]*)>/g)].map((m) => m[1])) assert.doesNotMatch(attributes, /aria-label/, 'no aria-label on the buttons: the visible text is the name');
   assert.match(busy, /Saving…/);
+  assert.ok(busy.indexOf('data-testid="legal-consent-footer"') < busy.indexOf('role="alert"') || !busy.includes('role="alert"'), 'the error line, when present, sits in the footer');
   assert.match(busy, /role="status"[^>]*>Saving…</, 'assistive tech hears the saving state');
   assert.doesNotMatch(busy, />Agree and continue</);
   assert.match(busy, /<button[^>]*disabled/);
@@ -326,7 +384,8 @@ test('the non-material notice is a note, not a dialog, with the shared copy and 
   assert.match(html, /Nothing you need to do\. Read the changes when you like\./);
   const buttons = [...html.matchAll(/<button\s([^>]*)>/g)].map((m) => m[1]);
   assert.equal(buttons.length, 1);
-  assert.match(buttons[0], /aria-label="Dismiss this notice"/);
+  assert.doesNotMatch(buttons[0], /aria-label/, '"Got it" is the accessible name, so "click Got it" works (WCAG 2.5.3)');
+  assert.match(buttons[0], /data-testid="legal-consent-dismiss"/);
   assert.equal(count(html, '>Got it<'), 1);
   assert.equal(count(html, 'Read the full'), 2);
   assert.match(html, /pointer-events-none/);
@@ -446,12 +505,31 @@ test('the dialog is an overlay with the shared lock and trap, not a Modal, and n
   assert.match(gate, /aria-modal="true"/);
   for (const forbidden of ['I have read', 'I agree to the', 'checkbox', 'Checkbox']) assert.ok(!gate.includes(forbidden), `gate must not contain "${forbidden}"`);
   assert.doesNotMatch(gate, /noticeDays/, 'the notice-period number is not quoted in the UI');
-  assert.match(gate, /LEGAL_COPY\.agreeLabel/);
+  // WCAG 2.5.3 Label in Name: the buttons' visible text is their accessible name. Mobile's
+  // accessibilityLabel strings stay in LEGAL_COPY so the block mirrors mobile, but never reach the DOM.
+  assert.doesNotMatch(gate, /aria-label=/, 'no aria-label anywhere in the gate');
+  assert.doesNotMatch(gate, /agreeLabel|gotItLabel/);
   assert.match(gate, /logout\(\)/, 'the web-only exit');
+  // The pinned footer: the documents scroll, the buttons do not, and an edge with more content fades.
+  assert.match(gate, /useScrollEdges\(bodyRef, 'y'\)/);
+  assert.match(gate, /fadeClass\(edges, 'y'\)/);
+  assert.match(gate, /max-h-\[calc\(100dvh-2rem\)\]/);
   const lib = read('src/lib/legalConsent.ts');
-  for (const copy of ['Our terms and privacy policy have changed', 'Our privacy policy has changed', 'Our terms have changed', 'Agree and continue', 'Agree to the updated documents and continue', 'A small update to our terms', 'Got it', 'Dismiss this notice']) {
+  for (const copy of ['Our terms and privacy policy have changed', 'Our privacy policy has changed', 'Our terms have changed', 'Please review our terms and privacy policy', 'Please review our privacy policy', 'Please review our terms', 'Agree and continue', 'Agree to the updated documents and continue', 'A small update to our terms', 'Got it', 'Dismiss this notice']) {
     assert.ok(lib.includes(`'${copy}'`), `copy "${copy}" pinned`);
   }
+});
+
+test('the gate re-checks on the sign-in edge without a second request on a page load, and the hook comment no longer promises re-login', () => {
+  const gate = read('src/components/LegalConsentGate.tsx');
+  const effect = gate.slice(gate.indexOf('useEffect(() => {'), gate.indexOf('}, [enabled, userId, qc]);'));
+  assert.match(effect, /if \(!enabled\) return;/);
+  assert.match(effect, /getQueryState\(entry\)\?\.dataUpdatedAt/, 'only an entry that already holds data is invalidated');
+  assert.match(effect, /invalidateQueries\(\{ queryKey: entry \}\)/);
+  const apiFile = read('src/lib/legalConsentApi.ts');
+  assert.doesNotMatch(apiFile, /noticed on reload or re-login/);
+  assert.match(apiFile, /sign-in edge/);
+  assert.match(apiFile, /full navigation/);
 });
 
 test('sign-up needs an explicit, unticked agreement on the one account-creation form and sends nothing extra', () => {

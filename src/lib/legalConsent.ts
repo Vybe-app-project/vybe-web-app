@@ -77,11 +77,26 @@ export const APP_VERSION_PATTERN = /^[A-Za-z0-9.+-]{1,40}$/;
 export const LEGAL_QUERY_KEY = 'legal-acceptances';
 export const legalQueryKey = (userId: string | null | undefined) => [LEGAL_QUERY_KEY, userId ?? null] as const;
 
-/** Copy shared with the mobile app (src/strings/account.ts, `legal`); the STABLE strings must not change. */
+/**
+ * Copy shared with the mobile app (src/strings/account.ts, `legal`); the
+ * STABLE strings must not change. `agreeLabel` and `gotItLabel` are mobile's
+ * accessibilityLabel values, kept so this block mirrors that one; the web
+ * does not apply them (WCAG 2.5.3, Label in Name: the visible text is the
+ * accessible name). The three `titleFirst*` strings are web only.
+ */
 export const LEGAL_COPY = Object.freeze({
   titleTerms: 'Our terms have changed',
   titlePrivacy: 'Our privacy policy has changed',
   titleBoth: 'Our terms and privacy policy have changed',
+  /**
+   * Web only. The API lists a document as pending when the account has no
+   * acceptance row at all, which is every web account that signed up before
+   * the rows existed; for them nothing has changed since sign-up, so the
+   * "have changed" titles would not be true.
+   */
+  titleFirstTerms: 'Please review our terms',
+  titleFirstPrivacy: 'Please review our privacy policy',
+  titleFirstBoth: 'Please review our terms and privacy policy',
   noticeTitle: 'A small update to our terms',
   noticeBody: 'Nothing you need to do. Read the changes when you like.',
   effective: (date: string) => `Effective ${date}.`,
@@ -202,10 +217,34 @@ export function pendingDocuments(state: LegalState | null | undefined): LegalDoc
 export const isMaterial = (documents: ReadonlyArray<Pick<LegalDocument, 'material'>>): boolean =>
   documents.some((doc) => doc.material);
 
-/** Which title the set of pending documents takes (mobile legalInterstitialTitle). */
-export function legalTitle(documents: ReadonlyArray<Pick<LegalDocument, 'document'>>): string {
+/**
+ * True when none of the pending documents has ever been agreed to by this
+ * account (no row of any version), so the dialog is a first agreement rather
+ * than a re-consent. An older row on any pending document is a genuine
+ * version bump. Unknown `accepted` (no state) is treated as a version bump,
+ * the mobile wording.
+ */
+export function isFirstAgreement(
+  documents: ReadonlyArray<Pick<LegalDocument, 'document'>>,
+  accepted: Partial<Record<LegalDocumentKind, LegalAcceptanceRecord | null>> | null | undefined,
+): boolean {
+  if (!accepted || documents.length === 0) return false;
+  return documents.every((doc) => accepted[doc.document] == null);
+}
+
+/**
+ * Which title the set of pending documents takes: mobile's
+ * legalInterstitialTitle for a version bump, the web-only first-agreement
+ * wording when `firstAgreement` is set (isFirstAgreement).
+ */
+export function legalTitle(documents: ReadonlyArray<Pick<LegalDocument, 'document'>>, firstAgreement = false): string {
   const hasTerms = documents.some((doc) => doc.document === 'terms');
   const hasPrivacy = documents.some((doc) => doc.document === 'privacy');
+  if (firstAgreement) {
+    if (hasTerms && hasPrivacy) return LEGAL_COPY.titleFirstBoth;
+    if (hasPrivacy) return LEGAL_COPY.titleFirstPrivacy;
+    return LEGAL_COPY.titleFirstTerms;
+  }
   if (hasTerms && hasPrivacy) return LEGAL_COPY.titleBoth;
   if (hasPrivacy) return LEGAL_COPY.titlePrivacy;
   return LEGAL_COPY.titleTerms;

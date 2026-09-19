@@ -72,8 +72,12 @@ export function useLegalState() {
     queryKey: legalQueryKey(userId),
     queryFn: getLegalState,
     enabled,
-    // A version bump while a tab is open is noticed on reload or re-login;
-    // an "Agree" in that window answers 409 and the stale path refetches.
+    // Never refetched on its own. What re-runs the check: a page load (every
+    // sign-out path in lib/auth.ts and the 401 hand-off in lib/api.ts end in
+    // a full navigation, so a re-sign-in starts cold), the sign-in edge in
+    // LegalConsentGate for a session that ends and restarts in place,
+    // SessionRefresh's invalidate-all after a long absence, and a 409 on
+    // "Agree", which refetches and redraws with the latest version.
     staleTime: Infinity,
     gcTime: Infinity,
   });

@@ -262,8 +262,13 @@ if (!PLAYWRIGHT) {
     }
 
     const signedIn = { script: () => localStorage.setItem('vybe.token', 'stub.session.token') };
-    const GATE = /Our terms and privacy policy have changed/;
-    const AGREE = 'Agree to the updated documents and continue';
+    // No acceptance row of any version (every pre-existing web account): a first agreement, not a change.
+    const GATE = /Please review our terms and privacy policy/;
+    // Rows on an older version: a genuine version bump, the wording mobile uses.
+    const CHANGED = /Our terms and privacy policy have changed/;
+    // The visible text is the accessible name (WCAG 2.5.3); `exact` so a longer aria-label could not pass.
+    const AGREE = 'Agree and continue';
+    const agreeButton = (scope) => scope.getByRole('button', { name: AGREE, exact: true });
     const focusInside = (page, testId) => page.evaluate((id) => Boolean(document.activeElement?.closest(`[data-testid="${id}"]`)), testId);
     const topmostAt = (page, x, y) => page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[role="dialog"]')?.getAttribute('aria-labelledby') ?? null, [x, y]);
 
@@ -274,6 +279,11 @@ if (!PLAYWRIGHT) {
       await dialog.waitFor();
       assert.equal(await dialog.getAttribute('aria-modal'), 'true');
       assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden', 'body scroll is locked');
+      assert.equal(await dialog.getByText(CHANGED).count(), 0, 'nothing changed for an account that never agreed');
+      const snapshot = await dialog.ariaSnapshot();
+      assert.match(snapshot, /button "Agree and continue"/, 'the accessible name is the visible text');
+      assert.match(snapshot, /button "Sign out"/);
+      assert.doesNotMatch(snapshot, /Agree to the updated documents/);
       assert.equal(await dialog.locator('input[type="checkbox"]').count(), 0, 'one button is the agreement');
       assert.equal(await dialog.getByRole('link').count(), 2);
       for (const name of [/Read the full terms/, /Read the full privacy policy/]) {
@@ -299,7 +309,7 @@ if (!PLAYWRIGHT) {
       assert.equal(await dialog.count(), 1, 'Escape does not dismiss');
 
       // Agree: one POST with the body the API validates, then the dialog is gone and the toast says so.
-      await dialog.getByRole('button', { name: AGREE }).click();
+      await agreeButton(dialog).click();
       await page.waitForFunction(() => document.querySelectorAll('[data-testid="legal-consent-dialog"]').length === 0);
       const posts = requests.filter((r) => r.key === 'POST /api/legal/accept');
       assert.equal(posts.length, 1);
@@ -327,16 +337,70 @@ if (!PLAYWRIGHT) {
       await context.close();
     });
 
+    test('rows on an older version make it a change: the title says so and Agree posts the current version', async () => {
+      const acceptedAt = '2026-02-01T09:00:00.000Z';
+      const legal = legalServer({ rows: { terms: { version: '2026-01-01', acceptedAt, surface: 'signup' }, privacy: { version: '2026-01-01', acceptedAt, surface: 'signup' } } });
+      const { page, context, errors, requests } = await open('/', { seed: signedIn, legal });
+      const dialog = page.getByRole('dialog', { name: CHANGED });
+      await dialog.waitFor();
+      assert.equal(await page.getByRole('dialog', { name: GATE }).count(), 0);
+      await agreeButton(dialog).click();
+      await page.waitForFunction(() => document.querySelectorAll('[data-testid="legal-consent-dialog"]').length === 0);
+      const posts = requests.filter((r) => r.key === 'POST /api/legal/accept');
+      assert.equal(posts.length, 1);
+      assert.deepEqual(posts[0].body.acceptances.map((a) => a.version), [VERSION, VERSION]);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    test('on a short phone screen the documents scroll and Agree and Sign out stay on screen, with a fade where there is more to read', async () => {
+      const legal = legalServer();
+      const { page, context, errors } = await open('/', { width: 390, height: 664, seed: signedIn, legal });
+      const dialog = page.getByRole('dialog', { name: GATE });
+      await dialog.waitFor();
+      await page.waitForTimeout(300);
+      const body = dialog.getByTestId('legal-consent-body');
+      const metrics = await body.evaluate((el) => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, scrollTop: el.scrollTop, classes: el.className }));
+      assert.ok(metrics.scrollHeight > metrics.clientHeight + 40, `the body is what scrolls (${metrics.scrollHeight} in ${metrics.clientHeight})`);
+      assert.match(metrics.classes, /mask-fade-b/, 'more below: the bottom edge fades');
+      const footer = dialog.getByTestId('legal-consent-footer');
+      assert.match(await footer.evaluate((el) => el.className), /border-t/, 'a hairline separates the pinned footer from the scrolling body');
+      for (const [name, testId] of [[AGREE, 'legal-consent-agree'], ['Sign out', 'legal-consent-sign-out']]) {
+        const box = await dialog.getByRole('button', { name, exact: true }).boundingBox();
+        assert.ok(box, `${name} is laid out`);
+        assert.ok(box.y >= 0 && box.y + box.height <= 664, `${name} is inside the 664px viewport (bottom edge at ${Math.round(box.y + box.height)})`);
+        assert.equal(await page.evaluate(([id]) => { const el = document.querySelector(`[data-testid="${id}"]`); const r = el.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest(`[data-testid="${id}"]`) === el; }, [testId]), true, `${name} is what the pointer reaches`);
+      }
+      // Scrolled to the end, the last link is fully visible and the fade moves to the top edge.
+      await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await page.waitForFunction(() => /mask-fade-t/.test(document.querySelector('[data-testid="legal-consent-body"]')?.className ?? '') && !/mask-fade-b|mask-fade-y/.test(document.querySelector('[data-testid="legal-consent-body"]')?.className ?? ''));
+      const lastLink = dialog.getByRole('link', { name: /Read the full privacy policy/ });
+      const linkBox = await lastLink.boundingBox();
+      const bodyBox = await body.boundingBox();
+      assert.ok(linkBox.y + linkBox.height <= bodyBox.y + bodyBox.height + 1, 'the last read link is not under the footer');
+      // Keyboard: Tab from the dialog walks the links, reaches Agree and never leaves.
+      await page.waitForFunction(() => Boolean(document.activeElement?.closest('[data-testid="legal-consent-dialog"]')));
+      let reachedAgree = false;
+      for (let i = 0; i < 6 && !reachedAgree; i += 1) {
+        await page.keyboard.press('Tab');
+        assert.equal(await focusInside(page, 'legal-consent-dialog'), true, `Tab ${i + 1} stays inside`);
+        reachedAgree = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'legal-consent-agree');
+      }
+      assert.equal(reachedAgree, true, 'Agree is reachable by keyboard');
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
     test('a 409 LEGAL_VERSION_STALE keeps the dialog, says so, refetches and posts the newer version next', async () => {
       const legal = legalServer({ staleOnce: true });
       const { page, context, errors, requests } = await open('/', { seed: signedIn, legal });
       const dialog = page.getByRole('dialog', { name: GATE });
       await dialog.waitFor();
-      await dialog.getByRole('button', { name: AGREE }).click();
+      await agreeButton(dialog).click();
       await dialog.getByRole('alert').filter({ hasText: 'These documents changed again just now. Here is the latest.' }).waitFor();
       await dialog.getByText(`Effective September 19, 2026.`).first().waitFor();
       assert.equal(await dialog.count(), 1, 'the dialog stays');
-      await dialog.getByRole('button', { name: AGREE }).click();
+      await agreeButton(dialog).click();
       await page.waitForFunction(() => document.querySelectorAll('[data-testid="legal-consent-dialog"]').length === 0);
       const posts = requests.filter((r) => r.key === 'POST /api/legal/accept').map((r) => r.body.acceptances.map((a) => a.version));
       assert.deepEqual(posts, [[VERSION, VERSION], [NEWER, NEWER]]);
@@ -362,6 +426,25 @@ if (!PLAYWRIGHT) {
       await context.close();
     });
 
+    test('a non-material change is a notice whose Got it is named by its text and records the acknowledgement', async () => {
+      const legal = legalServer({ material: false });
+      const { page, context, errors, requests } = await open('/', { width: 390, height: 844, seed: signedIn, legal });
+      const notice = page.getByTestId('legal-consent-notice');
+      await notice.waitFor();
+      assert.equal(await page.getByRole('dialog').count(), 0, 'never a gate');
+      const snapshot = await notice.ariaSnapshot();
+      assert.match(snapshot, /button "Got it"/, 'the accessible name is the visible text');
+      assert.doesNotMatch(snapshot, /Dismiss this notice/);
+      await notice.getByRole('button', { name: 'Got it', exact: true }).click();
+      await page.waitForFunction(() => document.querySelectorAll('[data-testid="legal-consent-notice"]').length === 0);
+      for (let i = 0; i < 20 && !requests.some((r) => r.key === 'POST /api/legal/accept'); i += 1) await page.waitForTimeout(100);
+      const posts = requests.filter((r) => r.key === 'POST /api/legal/accept');
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0].body.surface, 'interstitial');
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
     test('the gate sits above the first-run welcome sheet and keeps Tab; agreeing reveals the sheet', async () => {
       const legal = legalServer();
       const { page, context, errors } = await open('/', {
@@ -378,7 +461,7 @@ if (!PLAYWRIGHT) {
         await page.keyboard.press('Tab');
         assert.equal(await focusInside(page, 'legal-consent-dialog'), true, `Tab ${i + 1} stays in the gate`);
       }
-      await gate.getByRole('button', { name: AGREE }).click();
+      await agreeButton(gate).click();
       await page.waitForFunction(() => document.querySelectorAll('[data-testid="legal-consent-dialog"]').length === 0);
       assert.equal(await welcome.count(), 1, 'the welcome sheet is there once the agreement is recorded');
       assert.deepEqual(errors, []);

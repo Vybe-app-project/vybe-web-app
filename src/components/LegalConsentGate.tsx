@@ -1,12 +1,13 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Button, Callout, useFocusTrap, useLockBody, useToast } from './ui';
+import { Button, Callout, cx, fadeClass, useFocusTrap, useLockBody, useScrollEdges, useToast } from './ui';
 import { FileText } from './icons';
 import { errMsg, parseApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   LEGAL_COPY,
   formatEffectiveDate,
+  isFirstAgreement,
   isLegalVersionStale,
   isMaterial,
   legalPagePath,
@@ -27,6 +28,14 @@ import { acceptLegal, useLegalState } from '../lib/legalConsentApi';
  * full text and one "Agree and continue". Nothing is pre-ticked and there is
  * no dismiss; the one button is the agreement. A non-material change is a
  * bottom notice with "Got it" that never blocks.
+ *
+ * The documents scroll inside the panel and the buttons are a pinned footer
+ * (the way Modal pins its footer), so on a short phone screen "Agree and
+ * continue" is never below the fold; the body fades at an edge that has more
+ * content. The buttons carry no aria-label: their visible text is their
+ * accessible name (WCAG 2.5.3), so "click Agree and continue" works for
+ * speech input. The title distinguishes a first agreement (no acceptance row
+ * of any version on this account) from a genuine version bump.
  *
  * Built like UpdateRequiredScreen rather than with Modal: Modal closes on
  * Escape for the topmost entry, the first-run WelcomeSheet is a Modal too
@@ -74,25 +83,30 @@ function DocumentSummary({ document }: { document: LegalDocument }) {
 
 export function LegalConsentDialog({
   documents,
+  firstAgreement = false,
   busy = false,
   error = null,
   onAgree,
   onSignOut,
 }: {
   documents: LegalDocument[];
+  /** No acceptance row of any version for these documents: "Please review" rather than "have changed". */
+  firstAgreement?: boolean;
   busy?: boolean;
-  /** Inline under the documents after a failed accept; the dialog stays. */
+  /** Inline above the buttons after a failed accept; the dialog stays. */
   error?: string | null;
   onAgree: () => void;
   onSignOut: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useLockBody(true);
   // Initial focus lands on the dialog itself so the title and the documents
   // are announced before the first link; Tab then walks the links to the
   // button and wraps. Escape does nothing: there is no close.
   useFocusTrap(true, ref, ref);
-  const title = legalTitle(documents);
+  const edges = useScrollEdges(bodyRef, 'y');
+  const title = legalTitle(documents, firstAgreement);
 
   return (
     <div
@@ -105,40 +119,40 @@ export function LegalConsentDialog({
       data-testid="legal-consent-dialog"
       className="fixed inset-0 z-[200] flex items-center justify-center bg-scrim p-4 outline-none"
     >
-      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-lg border border-line bg-surface-1 p-6 text-text-1 shadow-3">
-        <FileText size={32} className="text-brand-text" aria-hidden="true" />
-        <h1 id="legal-consent-title" className="type-heading mt-3 text-xl">
-          {title}
-        </h1>
-        <div id="legal-consent-body" className="mt-5 space-y-6">
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col rounded-lg border border-line bg-surface-1 text-text-1 shadow-3">
+        <div className="shrink-0 px-6 pt-6">
+          <FileText size={32} className="text-brand-text" aria-hidden="true" />
+          <h1 id="legal-consent-title" className="type-heading mt-3 text-xl">
+            {title}
+          </h1>
+        </div>
+        <div
+          ref={bodyRef}
+          id="legal-consent-body"
+          data-testid="legal-consent-body"
+          className={cx('min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-6 pb-2 pt-5', fadeClass(edges, 'y'))}
+        >
           {documents.map((document) => (
             <DocumentSummary key={document.document} document={document} />
           ))}
         </div>
-        {error ? (
-          <p role="alert" className="mt-4 text-sm text-danger" data-testid="legal-consent-error">
-            {error}
-          </p>
-        ) : null}
-        <div className="mt-6 space-y-2">
-          <Button
-            type="button"
-            variant="primary"
-            size="lg"
-            block
-            loading={busy}
-            aria-label={LEGAL_COPY.agreeLabel}
-            onClick={onAgree}
-            data-testid="legal-consent-agree"
-          >
-            {busy ? LEGAL_COPY.agreeing : LEGAL_COPY.agree}
-          </Button>
-          <span role="status" className="sr-only">
-            {busy ? LEGAL_COPY.agreeing : ''}
-          </span>
-          <Button type="button" variant="ghost" block disabled={busy} onClick={onSignOut} data-testid="legal-consent-sign-out">
-            {LEGAL_COPY.signOut}
-          </Button>
+        <div className={cx('shrink-0 px-6 pb-6 pt-4', edges.overflow && 'border-t border-line')} data-testid="legal-consent-footer">
+          {error ? (
+            <p role="alert" className="mb-3 text-sm text-danger" data-testid="legal-consent-error">
+              {error}
+            </p>
+          ) : null}
+          <div className="space-y-2">
+            <Button type="button" variant="primary" size="lg" block loading={busy} onClick={onAgree} data-testid="legal-consent-agree">
+              {busy ? LEGAL_COPY.agreeing : LEGAL_COPY.agree}
+            </Button>
+            <span role="status" className="sr-only">
+              {busy ? LEGAL_COPY.agreeing : ''}
+            </span>
+            <Button type="button" variant="ghost" block disabled={busy} onClick={onSignOut} data-testid="legal-consent-sign-out">
+              {LEGAL_COPY.signOut}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -162,7 +176,7 @@ export function LegalConsentNotice({
           tone="info"
           title={LEGAL_COPY.noticeTitle}
           action={
-            <Button variant="secondary" size="sm" aria-label={LEGAL_COPY.gotItLabel} disabled={busy} onClick={onDismiss} data-testid="legal-consent-dismiss">
+            <Button variant="secondary" size="sm" disabled={busy} onClick={onDismiss} data-testid="legal-consent-dismiss">
               {LEGAL_COPY.gotIt}
             </Button>
           }
@@ -200,6 +214,18 @@ export function LegalConsentGate() {
   const [error, setError] = useState<string | null>(null);
 
   const key = legalQueryKey(userId);
+
+  // The sign-in edge. The query is keyed by account with staleTime Infinity,
+  // so a session that ends and restarts in place for the same account (no
+  // page load in between) would otherwise reuse the answer from before and
+  // miss a version bump in the gap; mobile re-checks after each sign-in.
+  // Only an entry that already holds data is invalidated: on a page load the
+  // first enable finds none and the ordinary fetch runs once.
+  useEffect(() => {
+    if (!enabled) return;
+    const entry = legalQueryKey(userId);
+    if (qc.getQueryState(entry)?.dataUpdatedAt) void qc.invalidateQueries({ queryKey: entry });
+  }, [enabled, userId, qc]);
   const accept = useMutation({
     mutationFn: (documents: LegalDocument[]) => acceptLegal(documents),
     onMutate: () => setError(null),
@@ -229,6 +255,7 @@ export function LegalConsentGate() {
     return (
       <LegalConsentDialog
         documents={documents}
+        firstAgreement={isFirstAgreement(documents, query.data?.accepted)}
         busy={accept.isPending}
         error={error}
         onAgree={() => accept.mutate(documents)}
