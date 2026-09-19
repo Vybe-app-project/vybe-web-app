@@ -6,6 +6,8 @@ import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
 import { useQueryClient } from '@tanstack/react-query';
 import { RouteErrorBoundary } from './components/ErrorBoundary';
+import { ApiNotices } from './components/ApiNotices';
+import { UpdateRequiredScreen } from './components/UpdateRequiredScreen';
 import { postLoginTarget } from './lib/authRedirect';
 import WelcomeSheet from './pages/WelcomeSheet';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
@@ -233,6 +235,8 @@ export default function App() {
     <ToastProvider>
       <ScrollToTop />
       <PwaUpdates />
+      <UpdateRequiredScreen />
+      <ApiNotices />
       <SessionRefresh />
       <Suspense fallback={<FullPageSpinner />}>
         <RouteErrorBoundary>
