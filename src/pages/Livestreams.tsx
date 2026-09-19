@@ -29,7 +29,7 @@ import {
 } from './ui';
 import { CalendarDays, ChevronLeft, ChevronRight, Eye, Image as ImageIcon, Play, Plus, Radio, Users, X } from './icons';
 import LiveRoom from './LiveRoom';
-import { liveVideoEnabled, useCapabilities } from '../lib/capabilities';
+import { useLiveEnabled } from '../lib/capabilities';
 import { CATEGORY_OPTIONS, at, categoryLabel, hostOf, hostName, viewersOf, type Stream } from './liveTypes';
 
 /* ------------------------------------------------------------------ types */
@@ -422,8 +422,8 @@ export default function Livestreams() {
 
   useEffect(() => setPage(1), [tab]);
 
-  const capabilities = useCapabilities();
-  const enabled = liveVideoEnabled(capabilities.data);
+  const capabilities = useLiveEnabled();
+  const enabled = capabilities.enabled;
 
   const openStream = useCallback(
     (id: string, options?: { instant?: boolean }) =>
