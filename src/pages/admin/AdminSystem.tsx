@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { adminApi, ORIGIN_BASE, errMsg } from '../../lib/api';
+import { adminApi, ORIGIN_BASE } from '../../lib/api';
+import { apiErrorDetails, describeAdminError } from '../../lib/apiError';
+import { perfRows, perfTotals, rankByP95, type NotificationHealth, type PerfEntry } from '../../lib/adminOps';
 import {
   Badge,
   Button,
@@ -13,12 +15,14 @@ import {
   SkeletonTile,
   StatGrid,
   StatTile,
+  Tabs,
   cx,
   humanize,
   plural,
 } from '../../components/ui';
 import { Server, Refresh, Check, X, Alert, BarChart, Zap } from '../../components/icons';
 import { AdminPageHeader, Stamp } from './AdminLayout';
+import { ApiBuildCard, NotificationJobsCard, type ApiVersion } from './adminCards';
 
 /* --------------------------------------------------------------- types */
 
@@ -29,16 +33,12 @@ type Ready = {
   providers?: Record<string, unknown>;
 };
 type Capabilities = { success?: boolean; authenticated?: boolean; capabilities?: Record<string, unknown> };
-type PerfEntry = {
-  count?: number;
-  avgTime?: number;
-  minTime?: number;
-  maxTime?: number;
-  totalTime?: number;
-};
+/** utils/performance.js getPerformanceStats(): count/avg/min/max/total plus p50Time/p95Time over the last 200 samples. */
 type PerfResponse = { success?: boolean; stats?: Record<string, PerfEntry> };
+type RouteSort = 'requests' | 'p95';
 
 const POLL_MS = 10_000;
+const SLOW_POLL_MS = 30_000;
 /** Rows shown before "Show all"; the table is sorted by volume so this is the top 25. */
 const TOP_ROUTES = 25;
 
@@ -56,6 +56,19 @@ const TOP_ROUTES = 25;
 function asProbe<T extends object>(data: unknown): T | null {
   return data && typeof data === 'object' && !Array.isArray(data) ? (data as T) : null;
 }
+
+/**
+ * Poll interval that honours a 429. This page issues about 22 requests a
+ * minute against a global limit of 1000 per 15 minutes per IP, so several
+ * open tabs can trip it; when the last answer was rate limited the next
+ * fetch waits Retry-After (or a minute) instead of asking again on the
+ * normal cycle. A limited query also never retries on its own.
+ */
+const pollEvery = (baseMs: number) => (query: { state: { error: unknown } }): number | false => {
+  const d = apiErrorDetails(query.state.error);
+  return d.status === 429 ? Math.max(baseMs, (d.retryAfterSec ?? 60) * 1000) : baseMs;
+};
+const retryUnlessLimited = (count: number, err: unknown) => apiErrorDetails(err).status !== 429 && count < 2;
 
 /**
  * The provider capability booleans the API derives from its environment
@@ -123,7 +136,7 @@ function humanizeUptime(seconds?: number): string {
   return parts.join(' ');
 }
 
-function ms(v?: number): string {
+function ms(v?: number | null): string {
   if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
   return v >= 1000 ? `${(v / 1000).toFixed(2)} s` : `${Math.round(v)} ms`;
 }
@@ -137,22 +150,30 @@ function StatusPill({ ok, label }: { ok: boolean | null; label: string }) {
   );
 }
 
-/** Latency reads as plain numerals until it crosses the warning thresholds. */
-function Latency({ value }: { value: number }) {
+/** Latency reads as plain numerals until it crosses the warning thresholds; null means no sample yet. */
+function Latency({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-text-3" aria-label="No sample yet">—</span>;
   if (value > 1000) return <Badge tone="danger" className="tabular">{ms(value)}</Badge>;
   if (value > 300) return <Badge tone="warning" className="tabular">{ms(value)}</Badge>;
   return <span className="tabular">{ms(value)}</span>;
 }
 
+const SORT_TABS: Array<{ key: RouteSort; label: string }> = [
+  { key: 'requests', label: 'Requests' },
+  { key: 'p95', label: 'p95' },
+];
+
 /* ---------------------------------------------------------------- page */
 
 export default function AdminSystem() {
   const [showAllRoutes, setShowAllRoutes] = useState(false);
+  const [showAllPush, setShowAllPush] = useState(false);
+  const [sortBy, setSortBy] = useState<RouteSort>('requests');
 
   const health = useQuery<Health | null>({
     queryKey: ['system', 'health'],
     queryFn: async () => asProbe<Health>((await adminApi.get('/system/health')).data),
-    refetchInterval: POLL_MS,
+    refetchInterval: pollEvery(POLL_MS),
     refetchIntervalInBackground: false,
     retry: false,
     staleTime: 0,
@@ -170,7 +191,7 @@ export default function AdminSystem() {
         throw e;
       }
     },
-    refetchInterval: POLL_MS,
+    refetchInterval: pollEvery(POLL_MS),
     refetchIntervalInBackground: false,
     retry: false,
     staleTime: 0,
@@ -184,10 +205,30 @@ export default function AdminSystem() {
     staleTime: 60_000,
   });
 
+  // GET /api/version is public and computed once per API process: { sha, builtAt, node }.
+  const version = useQuery<ApiVersion>({
+    queryKey: ['system', 'version'],
+    queryFn: async () => (await adminApi.get('/version')).data ?? {},
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
   const perf = useQuery<PerfResponse>({
     queryKey: ['admin', 'performance'],
     queryFn: async () => (await adminApi.get('/admin/performance')).data ?? {},
-    refetchInterval: 30_000,
+    refetchInterval: pollEvery(SLOW_POLL_MS),
+    refetchIntervalInBackground: false,
+    retry: retryUnlessLimited,
+    staleTime: 0,
+  });
+
+  // Default deadLimit (10) is enough for the card; the payload never carries a job payload or a routing id.
+  const notif = useQuery<NotificationHealth>({
+    queryKey: ['admin', 'notifications', 'health'],
+    queryFn: async () => (await adminApi.get('/admin/notifications/health')).data ?? {},
+    refetchInterval: pollEvery(SLOW_POLL_MS),
+    refetchIntervalInBackground: false,
+    retry: retryUnlessLimited,
     staleTime: 0,
   });
 
@@ -205,32 +246,11 @@ export default function AdminSystem() {
       : null;
 
   const rows = useMemo(() => {
-    const stats = perf.data?.stats ?? {};
-    return Object.entries(stats)
-      .map(([key, v]) => ({
-        key,
-        count: Number(v?.count) || 0,
-        avgTime: Number(v?.avgTime) || 0,
-        minTime: Number(v?.minTime) || 0,
-        maxTime: Number(v?.maxTime) || 0,
-        totalTime: Number(v?.totalTime) || 0,
-      }))
-      .sort((a, b) => b.count - a.count);
-  }, [perf.data]);
+    const base = perfRows(perf.data?.stats);
+    return sortBy === 'p95' ? rankByP95(base) : base;
+  }, [perf.data, sortBy]);
 
-  const totals = useMemo(() => {
-    if (rows.length === 0) return null;
-    const requests = rows.reduce((n, r) => n + r.count, 0);
-    const totalTime = rows.reduce((n, r) => n + r.totalTime, 0);
-    const slowest = rows.reduce((a, b) => (b.maxTime > a.maxTime ? b : a), rows[0]);
-    return {
-      requests,
-      avg: requests > 0 ? totalTime / requests : 0,
-      slowestKey: slowest.key,
-      slowestMax: slowest.maxTime,
-      endpoints: rows.length,
-    };
-  }, [rows]);
+  const totals = useMemo(() => perfTotals(rows), [rows]);
 
   const capabilities = useMemo(() => {
     const raw = caps.data?.capabilities;
@@ -253,13 +273,15 @@ export default function AdminSystem() {
 
   const requiredProviders = ready.data?.providers;
   const visibleRows = showAllRoutes ? rows : rows.slice(0, TOP_ROUTES);
-  const anyFetching = health.isFetching || ready.isFetching || perf.isFetching || caps.isFetching;
+  const notifStatus = apiErrorDetails(notif.error).status;
+  const anyFetching =
+    health.isFetching || ready.isFetching || perf.isFetching || caps.isFetching || version.isFetching || notif.isFetching;
 
   return (
     <div className="space-y-5">
       <AdminPageHeader
         title="System"
-        subtitle="Liveness and readiness are polled every 10 seconds from the API origin; provider capabilities come from the API's own environment check."
+        subtitle="Liveness and readiness are polled every 10 seconds from the API origin; notification jobs and latency every 30 seconds. Provider capabilities come from the API's own environment check."
         actions={
           <IconButton
             label="Refresh now"
@@ -270,6 +292,8 @@ export default function AdminSystem() {
               void ready.refetch();
               void perf.refetch();
               void caps.refetch();
+              void version.refetch();
+              void notif.refetch();
             }}
           >
             <Refresh size={18} className={cx(anyFetching && 'animate-spin')} />
@@ -278,7 +302,7 @@ export default function AdminSystem() {
       />
 
       {/* Status */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader title="Liveness" subtitle={<span className="admin-code">GET /api/system/health</span>} />
           {health.isLoading ? (
@@ -299,7 +323,7 @@ export default function AdminSystem() {
               />
               <p className="tabular mt-3 text-xs text-text-2">
                 {health.isError
-                  ? errMsg(health.error, 'The API did not respond.')
+                  ? describeAdminError(health.error, 'The API did not respond.')
                   : healthNotExposed
                     ? 'The path answered, but not with the API probe. Check the edge routing for /api/system/*.'
                     : health.data?.timestamp
@@ -351,7 +375,7 @@ export default function AdminSystem() {
                 <p className="mt-3 text-xs text-text-2">No providers are marked required for readiness.</p>
               )}
               {ready.isError && !ready.data ? (
-                <p className="mt-3 text-xs text-danger">{errMsg(ready.error, 'Readiness probe failed.')}</p>
+                <p className="mt-3 text-xs text-danger">{describeAdminError(ready.error, 'Readiness probe failed.')}</p>
               ) : null}
             </>
           )}
@@ -372,6 +396,12 @@ export default function AdminSystem() {
             </>
           )}
         </Card>
+
+        <ApiBuildCard
+          version={version.data}
+          loading={version.isLoading}
+          error={version.isError ? describeAdminError(version.error, 'Could not read the API version.') : null}
+        />
       </div>
 
       {/* Provider capabilities */}
@@ -465,6 +495,17 @@ export default function AdminSystem() {
         )}
       </Card>
 
+      {/* Notification job queue */}
+      <NotificationJobsCard
+        health={notif.data}
+        loading={notif.isLoading}
+        forbidden={notifStatus === 403}
+        error={notif.isError && notifStatus !== 403 ? describeAdminError(notif.error, 'The API did not answer.') : null}
+        showAllPush={showAllPush}
+        onTogglePush={() => setShowAllPush((v) => !v)}
+        onRetry={() => void notif.refetch()}
+      />
+
       {/* Aggregate request stats */}
       <Card>
         <CardHeader title="Request throughput" subtitle="Aggregated from the in-process performance cache" />
@@ -477,6 +518,7 @@ export default function AdminSystem() {
             error={perf.error}
             retry={() => void perf.refetch()}
             title="Could not load performance stats"
+            message={describeAdminError(perf.error, 'Try again in a moment.')}
             className="py-6"
           />
         ) : !totals ? (
@@ -489,10 +531,15 @@ export default function AdminSystem() {
           />
         ) : (
           <StatGrid>
-            <StatTile label="Requests sampled" value={totals.requests.toLocaleString()} />
+            <StatTile label="Requests sampled" value={totals.requests.toLocaleString()} hint={`Across ${plural(totals.endpoints, 'tracked route')}`} />
             <StatTile label="Average latency" value={ms(totals.avg)} hint="Across all tracked routes" />
             <StatTile label="Worst case" value={ms(totals.slowestMax)} hint={totals.slowestKey} tone={totals.slowestMax > 1000 ? 'accent' : 'neutral'} />
-            <StatTile label="Tracked routes" value={String(totals.endpoints)} />
+            <StatTile
+              label="Worst p95"
+              value={ms(totals.worstP95)}
+              hint={totals.worstP95Key ?? 'No percentile samples yet'}
+              tone={(totals.worstP95 ?? 0) > 1000 ? 'accent' : 'neutral'}
+            />
           </StatGrid>
         )}
       </Card>
@@ -503,14 +550,24 @@ export default function AdminSystem() {
           <div>
             <h3 className="text-md font-semibold text-text-1">Latency by route</h3>
             <p className="mt-0.5 text-xs text-text-2">
-              One row per route template, sorted by request volume. Refreshes every 30 seconds.
+              One row per route template, sorted by {sortBy === 'p95' ? 'p95 latency' : 'request volume'}. Percentiles cover the last 200 requests per route. Refreshes every 30 seconds.
             </p>
           </div>
-          {rows.length > TOP_ROUTES ? (
-            <Button size="sm" variant="ghost" onClick={() => setShowAllRoutes((v) => !v)} aria-expanded={showAllRoutes}>
-              {showAllRoutes ? `Show top ${TOP_ROUTES}` : `Show all ${plural(rows.length, 'route')}`}
-            </Button>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Tabs
+              variant="segmented"
+              size="sm"
+              aria-label="Sort routes"
+              tabs={SORT_TABS}
+              active={sortBy}
+              onChange={(k) => setSortBy(k === 'p95' ? 'p95' : 'requests')}
+            />
+            {rows.length > TOP_ROUTES ? (
+              <Button size="sm" variant="ghost" onClick={() => setShowAllRoutes((v) => !v)} aria-expanded={showAllRoutes}>
+                {showAllRoutes ? `Show top ${TOP_ROUTES}` : `Show all ${plural(rows.length, 'route')}`}
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {perf.isLoading ? (
@@ -528,12 +585,14 @@ export default function AdminSystem() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="admin-table min-w-[640px]">
+            <table className="admin-table min-w-[800px]">
               <thead>
                 <tr>
                   <th scope="col">Route</th>
                   <th scope="col" className="num">Requests</th>
                   <th scope="col" className="num">Average</th>
+                  <th scope="col" className="num">p50</th>
+                  <th scope="col" className="num">p95</th>
                   <th scope="col" className="num">Min</th>
                   <th scope="col" className="num">Max</th>
                   <th scope="col" className="num">Total</th>
@@ -547,6 +606,8 @@ export default function AdminSystem() {
                     </td>
                     <td className="num">{r.count.toLocaleString()}</td>
                     <td className="num"><Latency value={r.avgTime} /></td>
+                    <td className="num"><Latency value={r.p50Time} /></td>
+                    <td className="num"><Latency value={r.p95Time} /></td>
                     <td className="num text-text-2">{ms(r.minTime)}</td>
                     <td className="num text-text-2">{ms(r.maxTime)}</td>
                     <td className="num text-text-2">{ms(r.totalTime)}</td>

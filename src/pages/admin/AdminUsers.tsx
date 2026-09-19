@@ -33,14 +33,13 @@ type Suspension = {
   restoredAt?: string | null;
 };
 
-/** Verified / Admin / Premium / Deleted — shared by the table and the phone list. */
+/** Verified / Admin / Deleted — shared by the table and the phone list. The API sends no premium flag (utils/publicUser). */
 function UserStatusBadges({ u }: { u: AdminUser }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {u.isIdentityVerified ? <Badge tone="success"><Check size={12} /> Verified</Badge> : null}
       {u.isVerified ? null : <Badge tone="neutral">Email unconfirmed</Badge>}
       {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
-      {u.isPremium ? <Badge tone="info">Premium</Badge> : null}
       {u.isDeleted ? (
         <Badge tone="danger">Deleted</Badge>
       ) : u.isActive === false ? (
@@ -62,7 +61,6 @@ type AdminUser = {
   isVerified?: boolean;
   /** Operator-granted public badge; isVerified only means the e-mail was confirmed. */
   isIdentityVerified?: boolean;
-  isPremium?: boolean;
   createdAt?: string;
   lastLogin?: string | null;
   /** utils/publicUser ADMIN_USER_LIST_FIELDS: moderation state travels with the row. */
@@ -102,7 +100,6 @@ function StatusBadges({ user: u }: { user: AdminUser }) {
         <Badge tone="neutral">Unverified</Badge>
       )}
       {u.isAdmin ? <Badge tone="warning">Admin</Badge> : null}
-      {u.isPremium ? <Badge tone="info">Premium</Badge> : null}
       {u.isDeleted ? (
         <Badge tone="danger">Deleted</Badge>
       ) : suspended ? (
