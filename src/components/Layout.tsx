@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { liveVideoEnabled, useCapabilities } from '../lib/capabilities';
+import { useLiveEnabled } from '../lib/capabilities';
 import type { PublicUser } from '../lib/hooks';
 import { getSocket } from '../lib/socket';
 import { UNREAD_COUNT_KEY, useLiveNotifications } from '../lib/notificationsLive';
@@ -899,8 +899,7 @@ const EXPLORE_MORE: Array<{ to: string; label: string; Icon: IconComponent }> = 
 ];
 
 export function DefaultRail() {
-  const capabilities = useCapabilities();
-  const liveEnabled = liveVideoEnabled(capabilities.data);
+  const liveEnabled = useLiveEnabled().enabled;
   const tags = useQuery({
     queryKey: ['trending-hashtags'],
     queryFn: async () => {
@@ -1051,8 +1050,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
 
   useEffect(() => preloadWhenIdle(TAB_ROOT_PATHS), []);
 
-  const capabilities = useCapabilities();
-  const liveEnabled = liveVideoEnabled(capabilities.data);
+  const liveEnabled = useLiveEnabled().enabled;
 
   const unreadChats = useUnreadChats(!!user);
   const unreadNotifs = useUnreadNotifications(!!user);

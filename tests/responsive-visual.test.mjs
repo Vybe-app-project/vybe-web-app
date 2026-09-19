@@ -429,7 +429,8 @@ test('Live is only promoted when the server reports a relay, and the disabled co
   assert.match(live, /Live video isn’t available yet/);
   assert.match(live, /Watch stories or explore the community instead/);
   assert.doesNotMatch(live, /server setting|video relay/, 'no server-admin vocabulary for members');
-  assert.match(live, /import \{ liveVideoEnabled, useCapabilities \} from '\.\.\/lib\/capabilities';/, 'shell and page share one capability query');
+  assert.match(live, /import \{ useLiveEnabled \} from '\.\.\/lib\/capabilities';/, 'shell and page share one capability query');
+  assert.match(layout, /import \{ useLiveEnabled \} from '\.\.\/lib\/capabilities';/, 'shell and page share one capability query');
   // The route itself stays: deep links and the smoke suite open /live directly.
   assert.match(app, /<Route path="live" element=\{<Livestreams \/>\} \/>/);
 });

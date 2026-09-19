@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
 import { UnitsControl } from '../components/UnitsControl';
+import { VersionRow } from '../components/VersionRow';
 import {
   MAX_CREDENTIAL_URLS,
   MAX_TRAINER_FIELDS,
@@ -1028,6 +1029,7 @@ function AboutSection() {
             </li>
           );
         })}
+        <VersionRow />
       </ul>
     </SettingsCard>
   );

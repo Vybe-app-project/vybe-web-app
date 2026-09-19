@@ -1,10 +1,34 @@
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, type AxiosInstance } from 'axios';
 import { sessionExpiredLoginUrl } from './authRedirect';
+import { parseApiError, rateLimitedCopy } from './apiError';
+import { webBuildToken, webClientHeader } from './clientHeader';
+import { emitRateLimited, isUpdateRequiredResponse, useClientPolicy } from './clientPolicy';
 
 export const API_BASE =
   (import.meta.env.VITE_API_BASE as string | undefined) || '/api';
 
 export const ORIGIN_BASE = API_BASE.replace(/\/api\/?$/, '');
+
+/**
+ * Build identity. VITE_WEB_VERSION and VITE_WEB_BUILT_AT are defined by
+ * vite.config.ts from package.json and the build clock; VITE_WEB_BUILD is the
+ * deployed commit sha the release passes in (Dockerfile.release build arg).
+ * Read property by property so Vite can inline each one.
+ */
+const BUILD_ENV = {
+  VITE_WEB_VERSION: import.meta.env.VITE_WEB_VERSION as string | undefined,
+  VITE_WEB_BUILD: import.meta.env.VITE_WEB_BUILD as string | undefined,
+  VITE_WEB_BUILT_AT: import.meta.env.VITE_WEB_BUILT_AT as string | undefined,
+};
+export const WEB_VERSION: string | null = BUILD_ENV.VITE_WEB_VERSION || null;
+export const WEB_BUILD: string | null = webBuildToken(BUILD_ENV);
+/** `web/<version>+<build>`: what every request says about this bundle (services/clientPolicy.js). */
+export const CLIENT_HEADER_VALUE = webClientHeader(BUILD_ENV);
+
+/** The identity headers for a raw fetch that bypasses the axios instances. */
+export function clientHeaders(): Record<string, string> {
+  return { 'X-Vybe-Client': CLIENT_HEADER_VALUE, 'X-Platform': 'web' };
+}
 
 const TOKEN_KEY = 'vybe.token';
 const ADMIN_TOKEN_KEY = 'vybe.adminToken';
@@ -116,7 +140,7 @@ export function revokeSession(path: string, token: string | null): void {
     void fetch(`${API_BASE.replace(/\/$/, '')}${path}`, {
       method: 'POST',
       keepalive: true,
-      headers: { Authorization: `Bearer ${token}`, 'X-Platform': 'web', 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${token}`, ...clientHeaders(), 'Content-Type': 'application/json' },
       body: '{}',
     }).catch(() => undefined);
   } catch {
@@ -126,20 +150,6 @@ export function revokeSession(path: string, token: string | null): void {
 
 export const api = axios.create({ baseURL: API_BASE, timeout: 30000 });
 export const adminApi = axios.create({ baseURL: API_BASE, timeout: 30000 });
-
-api.interceptors.request.use((config) => {
-  const t = tokenStore.get();
-  if (t) config.headers.Authorization = `Bearer ${t}`;
-  config.headers['X-Platform'] = 'web';
-  return config;
-});
-
-adminApi.interceptors.request.use((config) => {
-  const t = tokenStore.getAdmin();
-  if (t) config.headers.Authorization = `Bearer ${t}`;
-  config.headers['X-Platform'] = 'web';
-  return config;
-});
 
 const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'];
 
@@ -166,30 +176,54 @@ function onUnauthorized(kind: 'user' | 'admin') {
   }
 }
 
-api.interceptors.response.use(
-  (r) => r,
-  (err: AxiosError) => {
-    if (err.response?.status === 401) onUnauthorized('user');
-    return Promise.reject(err);
-  },
-);
-adminApi.interceptors.response.use(
-  (r) => r,
-  (err: AxiosError) => {
-    if (err.response?.status === 401) onUnauthorized('admin');
-    return Promise.reject(err);
-  },
-);
-
-export function errMsg(e: unknown, fallback = 'Something went wrong'): string {
-  const ax = e as AxiosError<{ message?: string; error?: string; errors?: any[] }>;
-  const d = ax?.response?.data as any;
-  if (d?.message) return d.message;
-  if (d?.error) return d.error;
-  if (Array.isArray(d?.errors) && d.errors[0]?.msg) return d.errors[0].msg;
-  if (ax?.message) return ax.message;
-  return fallback;
+/**
+ * The one set of interceptors every axios instance gets. `kind` picks the
+ * token store and the 401 hand-off; null (the pre-token sign-up client) sends
+ * the identity headers only. Response side: a 426 with CLIENT_UPDATE_REQUIRED
+ * latches the reload prompt, a 429 is announced for the toast, a 401 ends the
+ * session. The error is always re-thrown so callers keep their own handling.
+ */
+export function installClientInterceptors(instance: AxiosInstance, kind: 'user' | 'admin' | null): void {
+  instance.interceptors.request.use((config) => {
+    const t = kind === 'admin' ? tokenStore.getAdmin() : kind === 'user' ? tokenStore.get() : null;
+    if (t) config.headers.Authorization = `Bearer ${t}`;
+    if (!config.headers.has('X-Vybe-Client')) config.headers.set('X-Vybe-Client', CLIENT_HEADER_VALUE);
+    config.headers['X-Platform'] = 'web';
+    return config;
+  });
+  instance.interceptors.response.use(
+    (r) => r,
+    (err: AxiosError) => {
+      const status = err.response?.status;
+      if (status === 426 && isUpdateRequiredResponse(status, err.response?.data)) {
+        useClientPolicy.getState().noteUpdateRequired(err.response?.data);
+      } else if (status === 429) {
+        emitRateLimited({ url: err.config?.url ?? '', retryAfterSec: parseApiError(err).retryAfterSec, at: Date.now() });
+      } else if (status === 401 && kind) {
+        onUnauthorized(kind);
+      }
+      return Promise.reject(err);
+    },
+  );
 }
+
+installClientInterceptors(api, 'user');
+installClientInterceptors(adminApi, 'admin');
+
+/**
+ * Copy for a person from anything a request threw. Reads every API error
+ * shape (src/lib/apiError.ts) and never returns axios's own text; a 429 is
+ * one sentence naming the wait ("Too many attempts. Try again in about 12
+ * minutes." on the auth routes, "You’re doing that too often. Try again
+ * in about 12 minutes." elsewhere), a 5xx without copy is "Something went
+ * wrong on our side."
+ */
+export function errMsg(e: unknown, fallback = 'Something went wrong'): string {
+  return parseApiError(e, fallback).message;
+}
+
+export { parseApiError, rateLimitedCopy };
+export type { ParsedApiError } from './apiError';
 
 /** Per-field messages from a 400 (`{ errors: { username: '…' } }`), when the API sent them. */
 export function fieldErrorsOf(e: unknown): Record<string, string> {

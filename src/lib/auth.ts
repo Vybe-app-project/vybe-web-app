@@ -22,7 +22,6 @@ export type User = {
   isIdentityVerified?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
-  isPremium?: boolean;
   followersCount?: number;
   followingCount?: number;
   [k: string]: any;

@@ -73,9 +73,73 @@ export const LOGIN_MISMATCH_COPY = 'That email and password don’t match. Check
 export const OFFLINE_COPY = 'Could not reach Vybe. Check your connection and try again.';
 
 /** The subset of an Axios error this module reads; typed structurally to stay import-free. */
-type HttpFailure = { code?: string; response?: { status?: number; data?: unknown } };
+type HttpFailure = { code?: string; response?: { status?: number; data?: unknown; headers?: unknown } };
 
-export type LoginFailure = { text: string; offerReset: boolean };
+export type LoginFailure = { text: string; offerReset: boolean; retryAfterSec?: number | null };
+
+/**
+ * How long until a 429 clears, for a person. The same function lives in
+ * apiError.ts; it is repeated here because this module must stay
+ * import-free, and tests/client-policy.test.mjs pins the two equal.
+ */
+export function retryWaitCopy(sec: number | null | undefined): string {
+  if (typeof sec !== 'number' || !Number.isFinite(sec) || sec <= 0) return 'in a moment';
+  const seconds = Math.ceil(sec);
+  if (seconds < 90) return `in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
+  if (seconds < 90 * 60) {
+    const minutes = Math.ceil(seconds / 60);
+    return `in about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  }
+  const hours = Math.ceil(seconds / 3600);
+  return `in about ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
+/**
+ * The 429 sentence for sign-in, where "attempts" is the honest word. Equal to
+ * apiError.ts's rateLimitedCopy(sec, 'attempts'); the pin is in
+ * tests/client-policy.test.mjs.
+ */
+export function rateLimitedCopy(sec: number | null | undefined): string {
+  return `Too many attempts. Try again ${retryWaitCopy(sec)}.`;
+}
+
+const positiveSeconds = (value: unknown): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? Math.ceil(value) : null;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return parsed > 0 ? parsed : null;
+  }
+  return null;
+};
+
+const headerOf = (headers: unknown, name: string): unknown => {
+  if (!headers || typeof headers !== 'object') return null;
+  const record = headers as Record<string, unknown> & { get?: (name: string) => unknown };
+  try {
+    if (typeof record.get === 'function') {
+      const got = record.get(name);
+      if (got !== undefined && got !== null) return got;
+    }
+  } catch {
+    // Plain lookup below.
+  }
+  const key = Object.keys(record).find((k) => k.toLowerCase() === name.toLowerCase());
+  return key ? record[key] : null;
+};
+
+/**
+ * Seconds until a 429 clears. The auth limiter (app.js authLimiter) sends
+ * only the Retry-After header; the per-account limiters put retryAfterSec
+ * in the body; data export spells it retryAfter.
+ */
+export function retryAfterSecondsOf(failure: HttpFailure): number | null {
+  const data = failure.response?.data as { retryAfterSec?: unknown; retryAfter?: unknown } | undefined;
+  return (
+    positiveSeconds(data?.retryAfterSec) ??
+    positiveSeconds(data?.retryAfter) ??
+    positiveSeconds(headerOf(failure.response?.headers, 'retry-after'))
+  );
+}
 
 /**
  * The API answers every credential failure with one neutral sentence (so it
@@ -91,6 +155,11 @@ export function loginFailure(error: unknown, { online = true, fallback }: { onli
 
   if (online === false || failure.code === 'ERR_NETWORK' || (!status && failure.code === 'ECONNABORTED')) {
     return { text: OFFLINE_COPY, offerReset: false };
+  }
+  if (status === 429) {
+    // The limiter's own text names no wait; the header does. Typed fields stay.
+    const retryAfterSec = retryAfterSecondsOf(failure);
+    return { text: rateLimitedCopy(retryAfterSec), offerReset: false, retryAfterSec };
   }
   if (status === 400 || status === 401) return { text: LOGIN_MISMATCH_COPY, offerReset: true };
   return { text: message || fallback, offerReset: false };
