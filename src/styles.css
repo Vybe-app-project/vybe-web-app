@@ -203,9 +203,11 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
   :root { --duration-1: 1ms; --duration-2: 1ms; --duration-3: 1ms; --duration-4: 1ms; }
 }
 /* Account accessibility flags (Settings > Accessibility, lib/accessibility.ts): the same
-   rules as the OS preference, keyed on <html data-reduce-motion> / <html data-large-text>. */
+   rules as the OS preference, keyed on <html data-reduce-motion> / <html data-large-text>.
+   Larger text is an absolute step from the 15px base above (a percentage here would resolve
+   against the browser default instead), and the rem-based type scale follows it. */
 :root[data-reduce-motion='true'] { --duration-1: 1ms; --duration-2: 1ms; --duration-3: 1ms; --duration-4: 1ms; }
-:root[data-large-text='true'] { font-size: 112.5%; }
+:root[data-large-text='true'] { font-size: 17px; }
 
 /* ------------------------------------------------------------------ utilities */
 @utility card {

@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
 import { mergeAccount, useAuth, type User } from './auth';
 import { applyAccessibility } from './accessibility';
 import { hydrateUnits, setUnitsPersister, type UnitSystem } from './units';
-import { browserTimeZone, timezoneSyncDecision } from './timezoneSync';
+import { browserTimeZone, forgetSentZone, readSentZone, rememberSentZone, timezoneSyncDecision, type StorageLike } from './timezoneSync';
 import type { SettingsPatch } from './accountTypes';
 import { useToast } from '../components/ui';
 
@@ -19,34 +19,38 @@ import { useToast } from '../components/ui';
  *                      on failure); the browser's IANA zone is sent as
  *                      `settings.timezone` at sign-in and when the tab comes
  *                      back into view, only when it differs from what the
- *                      account has and from what this session already sent.
+ *                      account has and from what this tab already sent for
+ *                      this account (a sign-out forgets it, so the next
+ *                      account on the tab is never mistaken for the last).
  *
  * Mounted once in App as <AccountPreferencesSync /> next to <SessionRefresh />.
  * It never writes for an account with `pendingDeletion` (every ordinary route
  * answers 401 for it, and the interceptor would sign the person out).
  */
 
-const TZ_SENT_KEY = 'vybe.tzSent';
-
-let lastSentZone: string | null = null;
-let timezoneInFlight: Promise<void> | null = null;
-
-const readSentZone = (): string | null => {
-  if (lastSentZone) return lastSentZone;
+/** sessionStorage when the browser allows it; null when even touching it throws. */
+const sessionStore = (): StorageLike | null => {
   try {
-    return sessionStorage.getItem(TZ_SENT_KEY);
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage;
   } catch {
     return null;
   }
 };
 
-const rememberSentZone = (zone: string) => {
-  lastSentZone = zone;
-  try {
-    sessionStorage.setItem(TZ_SENT_KEY, zone);
-  } catch {
-    // Memory alone still stops the loop for this page load.
-  }
+/** The memory copy for this page load, scoped to the account like the stored one. */
+let lastSent: { userId: string; zone: string } | null = null;
+let timezoneInFlight: Promise<void> | null = null;
+
+const sentZoneFor = (userId: string): string | null => (lastSent?.userId === userId ? lastSent.zone : readSentZone(sessionStore(), userId));
+
+const markSent = (userId: string, zone: string) => {
+  lastSent = { userId, zone };
+  rememberSentZone(sessionStore(), userId, zone);
+};
+
+const forgetSent = () => {
+  lastSent = null;
+  forgetSentZone(sessionStore());
 };
 
 /** Store the account a settings PUT answered with, keeping hasPassword and the ['me'] query in step. */
@@ -107,32 +111,32 @@ export function useAccountPreferencesSync() {
   }, [userId, reduceMotion, largeText]);
 
   // Timezone: at sign-in and on every return to the tab, when it would change something.
+  const previousUserId = useRef<string | null>(null);
   useEffect(() => {
     if (!userId) {
-      lastSentZone = null;
+      // A sign-out forgets what the last account sent, so the next account on this tab starts
+      // clean. The signed-out first render before bootstrap keeps it: that is what survives a reload.
+      if (previousUserId.current) forgetSent();
+      previousUserId.current = null;
       return;
     }
+    previousUserId.current = userId;
     const sync = () => {
       const decision = timezoneSyncDecision({
         browserZone: browserTimeZone(),
         storedZone: useAuth.getState().user?.settings?.timezone,
-        lastSentZone: readSentZone(),
+        lastSentZone: sentZoneFor(userId),
         visible: typeof document === 'undefined' || document.visibilityState !== 'hidden',
         pendingDeletion: useAuth.getState().user?.pendingDeletion === true,
       });
       if (decision.action !== 'put' || timezoneInFlight) return;
       const zone = decision.zone;
-      rememberSentZone(zone);
+      markSent(userId, zone);
       timezoneInFlight = putSettings({ timezone: zone })
         .then(applyAccount)
         .catch(() => {
           // Silent: nothing the person can act on, and the next foreground tries again.
-          lastSentZone = null;
-          try {
-            sessionStorage.removeItem(TZ_SENT_KEY);
-          } catch {
-            // Nothing to undo.
-          }
+          if (lastSent?.userId === userId) forgetSent();
         })
         .finally(() => {
           timezoneInFlight = null;

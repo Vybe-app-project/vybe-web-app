@@ -1,11 +1,12 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { mergeAccount, useAuth, type User } from '../lib/auth';
 import { applyAccessibility } from '../lib/accessibility';
 import { HIDDEN_WORDS_MAX_CUSTOM, HIDDEN_WORDS_MAX_LENGTH, formatHiddenWords, parseHiddenWords, sameHiddenWords } from '../lib/hiddenWords';
 import { COMMENT_POLICIES, type AccessibilitySettings, type CommentPolicy, type PublicUser, type SettingsPatch } from '../lib/hooks';
-import { Button, Card, Select, Switch, Textarea, cx, useToast, type SelectOption } from './ui';
+import { SettingsCard, ToggleRow } from './SettingsPieces';
+import { Button, Select, Textarea, useToast, type SelectOption } from './ui';
 
 /**
  * The account-preference cards Settings mounts once as <AccountPreferenceSections />:
@@ -21,36 +22,10 @@ import { Button, Card, Select, Switch, Textarea, cx, useToast, type SelectOption
  * survives (the PUT answers without it). Server errors are
  * `400 { message, field }`; the hidden-words message lands under the field.
  *
- * The card and row markup mirrors Settings.tsx's SettingsCard / ToggleRow so
- * the page reads as one; they stay private to that file to keep it a
- * single-mount-point change.
+ * The cards and toggle rows are the shared SettingsCard / ToggleRow from
+ * SettingsPieces.tsx, so the page reads as one and the Settings deep-link
+ * handler finds these cards the same way as the rest.
  */
-
-/* ------------------------------------------------------------------ pieces */
-
-function PrefCard({ id, title, description, children }: { id: string; title: string; description?: ReactNode; children: ReactNode }) {
-  return (
-    <Card id={id} role="region" aria-labelledby={`${id}-title`} className="scroll-mt-20">
-      <h2 id={`${id}-title`} className="type-heading text-lg text-text-1">
-        {title}
-      </h2>
-      {description ? <p className="mt-1 text-sm text-text-2">{description}</p> : null}
-      <div className="mt-4">{children}</div>
-    </Card>
-  );
-}
-
-function PrefToggleRow({ title, hint, checked, disabled, onChange }: { title: string; hint: string; checked: boolean; disabled?: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <div className={cx('flex min-h-11 items-center gap-4 py-2', disabled && 'opacity-70')}>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-text-1">{title}</p>
-        <p className="text-xs text-text-2">{hint}</p>
-      </div>
-      <Switch checked={checked} disabled={disabled} label={title} onChange={onChange} />
-    </div>
-  );
-}
 
 /* ------------------------------------------------------------------ data */
 
@@ -228,7 +203,7 @@ function CommentsSection() {
   const busy = save.isPending || !account;
 
   return (
-    <PrefCard
+    <SettingsCard
       id="comments"
       title="Comments and hidden words"
       description="Who can comment on your new posts, and the words that keep comments and message requests out of sight."
@@ -244,7 +219,7 @@ function CommentsSection() {
           if (isPolicy(value) && value !== policy) patchCommentDefault({ policy: value });
         }}
       />
-      <PrefToggleRow
+      <ToggleRow
         title="Approve comments first"
         hint="New comments wait for you before anyone else sees them."
         checked={approveFirst}
@@ -254,21 +229,21 @@ function CommentsSection() {
       <div className="mt-2 border-t border-line pt-4">
         <h3 className="text-sm font-semibold text-text-1">Hidden words</h3>
         <p className="text-xs text-text-2">Comments and message requests that match are hidden from you. Nobody is told.</p>
-        <PrefToggleRow
+        <ToggleRow
           title="Hide comments with hidden words"
           hint="Turn the filter on or off without losing your list."
           checked={hiddenEnabled}
           disabled={busy}
           onChange={(enabled) => patchHiddenWords({ enabled })}
         />
-        <PrefToggleRow
+        <ToggleRow
           title="Use Vybe’s default list"
           hint="Common insults and slurs, kept up to date by Vybe."
           checked={useDefaultList}
           disabled={busy || !hiddenEnabled}
           onChange={(useDefaultList) => patchHiddenWords({ useDefaultList })}
         />
-        <PrefToggleRow
+        <ToggleRow
           title="Also filter message requests"
           hint="Messages from people you are not connected with are checked too."
           checked={applyToRequests}
@@ -289,7 +264,7 @@ function CommentsSection() {
           }}
         />
       </div>
-    </PrefCard>
+    </SettingsCard>
   );
 }
 
@@ -317,8 +292,8 @@ function AccessibilitySection() {
   const busy = save.isPending || !account;
 
   return (
-    <PrefCard id="accessibility" title="Accessibility" description="These follow you to every device you sign in on. Your device’s own settings still apply.">
-      <PrefToggleRow
+    <SettingsCard id="accessibility" title="Accessibility" description="These follow you to every device you sign in on. Your device’s own settings still apply.">
+      <ToggleRow
         title="Reduce motion"
         hint="Fewer animations and transitions across Vybe."
         checked={reduceMotion}
@@ -327,7 +302,7 @@ function AccessibilitySection() {
           save.mutate({ patch: { accessibility: { reduceMotion } }, optimistic: (old) => withFlags(old, { reduceMotion }), rollback: apply({ reduceMotion }) })
         }
       />
-      <PrefToggleRow
+      <ToggleRow
         title="Larger text"
         hint="Slightly larger type everywhere."
         checked={largeText}
@@ -336,7 +311,7 @@ function AccessibilitySection() {
           save.mutate({ patch: { accessibility: { largeText } }, optimistic: (old) => withFlags(old, { largeText }), rollback: apply({ largeText }) })
         }
       />
-    </PrefCard>
+    </SettingsCard>
   );
 }
 

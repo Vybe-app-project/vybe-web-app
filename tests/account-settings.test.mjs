@@ -51,6 +51,50 @@ test('timezone sync: the decision table', () => {
   assert.equal(decide({ browserZone: NY, storedZone: undefined }).action, 'put');
 });
 
+test('the already-sent memory is scoped to the account that wrote it', () => {
+  const { TZ_SENT_KEY, readSentZone, rememberSentZone, forgetSentZone } = tz;
+  const NY = 'America/New_York';
+  const map = new Map();
+  const storage = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => void map.set(k, v), removeItem: (k) => void map.delete(k) };
+  assert.equal(TZ_SENT_KEY, 'vybe.tzSent');
+  assert.equal(readSentZone(storage, 'a'), null, 'nothing sent yet');
+
+  // Account A sends its zone; a reload of the same tab still knows it.
+  rememberSentZone(storage, 'a', NY);
+  assert.equal(readSentZone(storage, 'a'), NY);
+  assert.deepEqual(JSON.parse(map.get(TZ_SENT_KEY)), { userId: 'a', zone: NY }, 'stored with the account that sent it');
+
+  // A signs out, B signs in on the same tab (sessionStorage survives): B has sent nothing.
+  assert.equal(readSentZone(storage, 'b'), null, 'another account never inherits the entry');
+  assert.equal(tz.timezoneSyncDecision({ browserZone: NY, storedZone: undefined, lastSentZone: readSentZone(storage, 'b') }).action, 'put', 'so B gets a PUT');
+  assert.equal(tz.timezoneSyncDecision({ browserZone: NY, storedZone: undefined, lastSentZone: readSentZone(storage, 'a') }).action, 'skip', 'while A would not');
+
+  // B sending replaces A's entry outright.
+  rememberSentZone(storage, 'b', 'Europe/Paris');
+  assert.equal(readSentZone(storage, 'a'), null);
+  assert.equal(readSentZone(storage, 'b'), 'Europe/Paris');
+
+  // Forgetting clears it for everyone.
+  forgetSentZone(storage);
+  assert.equal(map.size, 0);
+  assert.equal(readSentZone(storage, 'b'), null);
+
+  // The legacy bare-zone value, a corrupt entry, a missing storage and a throwing storage all read as "nothing sent".
+  map.set(TZ_SENT_KEY, NY);
+  assert.equal(readSentZone(storage, 'a'), null, 'a pre-scoping value is not trusted');
+  map.set(TZ_SENT_KEY, '{"userId":"a"}');
+  assert.equal(readSentZone(storage, 'a'), null);
+  map.set(TZ_SENT_KEY, 'not json');
+  assert.equal(readSentZone(storage, 'a'), null);
+  assert.equal(readSentZone(null, 'a'), null);
+  assert.equal(readSentZone(storage, ''), null, 'no account, no memory');
+  const throwing = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+  assert.equal(readSentZone(throwing, 'a'), null);
+  assert.doesNotThrow(() => rememberSentZone(throwing, 'a', NY));
+  assert.doesNotThrow(() => forgetSentZone(throwing));
+  assert.doesNotThrow(() => rememberSentZone(null, 'a', NY));
+});
+
 test('browserTimeZone() answers a non-empty IANA name under Node 24 and never throws', () => {
   const zone = tz.browserTimeZone();
   assert.equal(typeof zone, 'string');
@@ -180,7 +224,21 @@ test('every PUT /users/settings body the web sends is inside the backend allow-l
 test('Settings mounts the preference cards once and the new controls send only their own key', () => {
   const settings = read('src/pages/Settings.tsx');
   const prefs = read('src/pages/SettingsPreferences.tsx');
+  const pieces = read('src/pages/SettingsPieces.tsx');
   assert.match(settings, /import AccountPreferenceSections from '\.\/SettingsPreferences';/);
+  // One SettingsCard / ToggleRow for the whole page, so the deep-link handler finds every card the same way.
+  assert.match(settings, /import \{ SettingsCard, ToggleRow \} from '\.\/SettingsPieces';/);
+  assert.match(prefs, /import \{ SettingsCard, ToggleRow \} from '\.\/SettingsPieces';/);
+  assert.match(pieces, /export function SettingsCard\(/);
+  assert.match(pieces, /export function ToggleRow\(/);
+  assert.match(pieces, /role="region" aria-labelledby=\{`\$\{id\}-title`\}/);
+  assert.match(settings, /getElementById\(`\$\{id\}-title`\)\?\.closest\('\[role="region"\]'\)/, 'the deep-link handler this shape serves');
+  for (const file of [settings, prefs]) {
+    assert.doesNotMatch(file, /function (SettingsCard|ToggleRow|PrefCard|PrefToggleRow)\(/, 'no private copy of the pieces');
+  }
+  assert.doesNotMatch(prefs, /Pref(Card|ToggleRow)/);
+  assert.match(prefs, /<SettingsCard\s+id="comments"/);
+  assert.match(prefs, /<SettingsCard id="accessibility"/);
   assert.equal((settings.match(/<AccountPreferenceSections \/>/g) || []).length, 1, 'one mount point');
   assert.match(settings, /<PrivacySection \/>\s*<AccountPreferenceSections \/>/, 'mounted right after Privacy');
   assert.match(settings, /<UnitsSection \/>/);
@@ -235,7 +293,12 @@ test('the preference sync is mounted once and guards the cases that must never w
   assert.equal((app.match(/<AccountPreferencesSync \/>/g) || []).length, 1);
   assert.match(sync, /pendingDeletion/);
   assert.match(sync, /visibilitychange/);
-  assert.match(sync, /sessionStorage\.setItem\(TZ_SENT_KEY, zone\)/, 'the last-sent zone survives a reload');
+  // The already-sent memory is read and written per account, survives a reload, and is dropped on sign-out only.
+  assert.match(sync, /lastSentZone: sentZoneFor\(userId\)/);
+  assert.match(sync, /markSent\(userId, zone\);/);
+  assert.match(sync, /rememberSentZone\(sessionStore\(\), userId, zone\)/, 'the last-sent zone survives a reload');
+  assert.match(sync, /if \(previousUserId\.current\) forgetSent\(\);/, 'a sign-out forgets it; the signed-out first render does not');
+  assert.doesNotMatch(sync, /sessionStorage\.(get|set|remove)Item/, 'storage access goes through the tested helpers');
   assert.match(sync, /if \(decision\.action !== 'put' \|\| timezoneInFlight\) return;/, 'one request in flight');
   assert.match(sync, /hydrateUnits\(units\);/);
   assert.match(sync, /setUnitsPersister\(null\)/, 'unregistered on sign-out');
@@ -252,7 +315,8 @@ test('reduced motion and large text: CSS mirrors the OS rules under the account 
   assert.match(css, /:root\[data-reduce-motion='true'\] \.anim-nav-progress \{ animation: none;/);
   assert.match(css, /:root\[data-reduce-motion='true'\] \.typing-dot \{ animation: none;/);
   assert.match(css, /:root\[data-reduce-motion='true'\]::view-transition-new\(\*\) \{ animation: none !important; \}/);
-  assert.match(css, /:root\[data-large-text='true'\] \{ font-size: 112\.5%; \}/);
+  assert.match(css, /^html \{[^}]*font-size: 15px;/m, 'the base the step is measured from');
+  assert.match(css, /:root\[data-large-text='true'\] \{ font-size: 17px; \}/, 'an absolute step from the 15px base, not a percentage of the browser default');
   assert.equal((css.match(/prefers-reduced-motion/g) || []).length, 5, 'the OS blocks are untouched');
   const ui = read('src/components/ui.tsx');
   assert.match(ui, /export function prefersReducedMotion\(\): boolean \{[\s\S]*?getAttribute\('data-reduce-motion'\) === 'true'/);
