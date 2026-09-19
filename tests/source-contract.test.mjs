@@ -290,7 +290,9 @@ test('settings: privacy switch, blocked accounts and inline username errors', ()
   // Deep links (#privacy from the Friends page) scroll to and focus the card.
   assert.match(settings, /const \{ hash \} = useLocation\(\);/);
   assert.match(settings, /card\.scrollIntoView\(/);
-  assert.match(settings, /<Card id=\{id\} role="region"/);
+  // The card shape the handler relies on lives in the shared SettingsPieces module every card on the page uses.
+  assert.match(read('src/pages/SettingsPieces.tsx'), /<Card id=\{id\} role="region"/);
+  assert.match(settings, /import \{ SettingsCard, ToggleRow \} from '\.\/SettingsPieces';/);
   // Username conflicts land under the field, with focus there.
   assert.match(settings, /document\.getElementById\('set-username'\)\?\.focus\(\)/);
   assert.match(settings, /<PrivacySection \/>/);

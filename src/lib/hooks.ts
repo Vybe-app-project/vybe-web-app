@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WorkoutSummary } from './workoutSummary';
 import { api } from './api';
+import type { AccountFields } from './accountTypes';
+
+/** Account-settings contract types (GET /users/me, PUT /users/settings) — see lib/accountTypes. */
+export * from './accountTypes';
 
 /* ------------------------------------------------------------------ *
  * Shared domain types used across the consumer pages.
@@ -39,7 +43,12 @@ export type PublicUser = {
     totalComments?: number;
     totalPosts?: number;
   };
-  settings?: { privacy?: string };
+  /** Another member's profile carries `{ privacy }` only; the owner's own account carries the rest (lib/accountTypes). */
+  settings?: AccountFields['settings'];
+  hiddenWords?: AccountFields['hiddenWords'];
+  pendingDeletion?: AccountFields['pendingDeletion'];
+  deletion?: AccountFields['deletion'];
+  hasPassword?: AccountFields['hasPassword'];
   [k: string]: any;
 };
 
