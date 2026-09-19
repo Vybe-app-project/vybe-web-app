@@ -514,3 +514,11 @@ test('the Settings mount and the sign-in notice render without a session (the SS
   assert.doesNotMatch(mount(h(SignInLifecycleNotice)), /role="(?:note|alert)"/, 'nothing to say without a notice');
   assert.doesNotMatch(mount(h(PendingDeletionInterstitial, { target: '/' })), /Cancel deletion|Sign out/, 'nothing without a pending account');
 });
+
+test('the contracts snapshot lists the lifecycle routes (the scanner follows named routers)', () => {
+  const snapshot = JSON.parse(fs.readFileSync(path.join(root, 'contracts/backend-routes.json'), 'utf8'));
+  const routes = new Set((snapshot.routes || snapshot).map((r) => `${r.method} ${r.path}`));
+  for (const route of ['POST /api/auth/reauth', 'GET /api/auth/reauth/methods', 'GET /api/users/me/deletion', 'POST /api/users/me/deletion', 'POST /api/users/me/deletion/cancel', 'GET /api/legal/current', 'GET /api/legal/acceptances']) {
+    assert.ok(routes.has(route), `${route} must be in contracts/backend-routes.json`);
+  }
+});

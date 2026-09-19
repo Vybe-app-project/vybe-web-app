@@ -2,16 +2,11 @@ import { API_BASE, tokenStore } from './api';
 import { lifecycleStatusCopy, type CancelDeletionResult, type DeletionStatus, type ReauthResult } from './accountLifecycle';
 
 /**
- * The three lifecycle routes that contracts/backend-routes.json cannot see
- * yet: routes/accountLifecycle.js names its routers `reauthRouter` and
- * `deletionRouter` and app.js mounts `require(...).deletionRouter`, which the
- * snapshot scanner (scripts/audit-api-contracts.cjs) does not match. Until the
- * integrator extends the scanner and regenerates the snapshot, these go over
- * `fetch` with the same headers the axios instance adds (the precedent is
- * revokeSession in api.ts); every other lifecycle call uses `api`.
- *
- * Two behaviours differ from `api` on purpose and should stay when this is
- * switched back to axios:
+ * The re-auth and deletion routes go over `fetch` rather than the shared axios
+ * instance on purpose (the precedent is revokeSession in api.ts); every other
+ * lifecycle call uses `api`. The contracts snapshot lists these routes (the
+ * scanner follows the named routers in routes/accountLifecycle.js), so this is
+ * not a workaround for the audit but for two behaviours `api` must not have:
  *   - a 401 here never signs the member out: REAUTH_REQUIRED means "prove it
  *     is you", and an account in its deletion grace period is refused by
  *     every ordinary route but allowed on these;

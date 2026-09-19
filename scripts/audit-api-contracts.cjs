@@ -297,22 +297,54 @@ function inventoryBackendSource() {
   }
 
   const mounts = [];
-  const mountPattern = /app\.use\(\s*(['"])(\/api[^'"]*)\1\s*,\s*require\(\s*(['"])(\.\/routes\/[^'"]+)\3\s*\)/g;
+  // A mount is `app.use('/api/x', require('./routes/x'))` or, for a file that
+  // exports several routers, `require('./routes/x').someRouter`.
+  const mountPattern = /app\.use\(\s*(['"])(\/api[^'"]*)\1\s*,\s*require\(\s*(['"])(\.\/routes\/[^'"]+)\3\s*\)(?:\s*\.\s*([A-Za-z_$][\w$]*))?/g;
   while ((match = mountPattern.exec(appSource))) {
     mounts.push({
       prefix: match[2],
       routeFile: path.resolve(backendRoot, `${match[4]}.js`),
+      exportName: match[5] || null,
     });
   }
 
-  const routePattern = /router\s*\.\s*(get|post|put|patch|delete)\s*\(\s*(['"])([^'"]*)\2/g;
+  // Routes are declared on `router` or on any `<name>Router` variable. When a
+  // file exports several routers (routes/accountLifecycle.js: reauthRouter,
+  // deletionRouter, legalRouter), each mount takes only the routes declared on
+  // the variable its export resolves to: `module.exports.<name> = <variable>`
+  // for a named mount, `module.exports = <variable>` for the default one.
+  const routePattern = /\b([A-Za-z_$][\w$]*)\s*\.\s*(get|post|put|patch|delete)\s*\(\s*(['"])([^'"]*)\3/g;
+  const exportPattern = /module\.exports(?:\s*\.\s*([A-Za-z_$][\w$]*))?\s*=\s*([A-Za-z_$][\w$]*)\s*;/g;
   for (const mount of mounts) {
     if (!fs.existsSync(mount.routeFile)) continue;
     const source = fs.readFileSync(mount.routeFile, 'utf8');
+    const routerVariables = new Set();
+    const exportsByName = new Map();
+    let defaultExport = null;
+    while ((match = exportPattern.exec(source))) {
+      if (match[1]) exportsByName.set(match[1], match[2]);
+      else defaultExport = match[2];
+    }
+    const declared = [];
     while ((match = routePattern.exec(source))) {
+      const variable = match[1];
+      if (variable !== 'router' && !/Router$/.test(variable)) continue;
+      routerVariables.add(variable);
+      declared.push({ variable, method: match[2].toUpperCase(), subPath: match[4] });
+    }
+    let wanted = null;
+    if (mount.exportName) wanted = exportsByName.get(mount.exportName) || null;
+    else if (routerVariables.size > 1) wanted = defaultExport;
+    if (mount.exportName && !wanted) {
+      throw new Error(
+        `${path.relative(backendRoot, mount.routeFile)} has no \`module.exports.${mount.exportName} = <router>\` for the mount at ${mount.prefix}`,
+      );
+    }
+    for (const route of declared) {
+      if (wanted && route.variable !== wanted) continue;
       routes.push({
-        method: match[1].toUpperCase(),
-        path: joinRoute(mount.prefix, match[3]),
+        method: route.method,
+        path: joinRoute(mount.prefix, route.subPath),
         file: path.relative(backendRoot, mount.routeFile).split(path.sep).join('/'),
         order: routes.length,
       });
