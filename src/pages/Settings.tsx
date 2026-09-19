@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
 import { UnitsControl } from '../components/UnitsControl';
+import AccountPreferenceSections from './SettingsPreferences';
 import {
   MAX_CREDENTIAL_URLS,
   MAX_TRAINER_FIELDS,
@@ -566,7 +567,7 @@ function UnitsSection() {
     <SettingsCard
       id="units"
       title="Units"
-      description="Weight, height and hydration are shown in these units everywhere on the web. Your saved goals are not changed."
+      description="Weight, height and hydration are shown in these units everywhere you sign in. Your saved goals are not changed."
     >
       <UnitsControl />
     </SettingsCard>
@@ -1141,6 +1142,7 @@ export default function Settings() {
         <AppearanceSection />
         <UnitsSection />
         <PrivacySection />
+        <AccountPreferenceSections />
         <CoachingSection />
         <PasswordSection />
         <SessionsSection />
