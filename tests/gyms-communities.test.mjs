@@ -126,6 +126,14 @@ test('communities have their own share type and canonical route', () => {
   // Directory gyms keep their route: the live smoke expects type=gym -> /gyms.
   assert.equal(share.shareDestination('gym', 'gym1'), '/gyms?gym=gym1');
   assert.equal(share.shareDestination('community', '../admin'), null);
+  // Newer app builds (mobile docs/deep-links.md, 2026-09-19) share four more kinds.
+  assert.equal(share.shareDestination('workout-plan', '6aad635402be1805f4b9ef72'), '/workouts/plans/6aad635402be1805f4b9ef72');
+  assert.equal(share.shareDestination('live', 'stream_1'), '/live/stream_1');
+  assert.equal(share.shareDestination('challenge', '6aad635402be1805f4b9ef72'), '/challenges?challenge=6aad635402be1805f4b9ef72');
+  assert.equal(share.shareDestination('hashtag', 'legday'), '/search?q=%23legday');
+  assert.equal(share.shareDestination('hashtag', '#legday'), '/search?q=%23legday');
+  assert.equal(share.shareDestination('hashtag', 'leg day'), null);
+  for (const type of share.SHARE_TYPES) assert.ok(share.SHARE_LABEL[type], `label for ${type}`);
 });
 
 /* ------------------------------------------------------------------ source contracts */

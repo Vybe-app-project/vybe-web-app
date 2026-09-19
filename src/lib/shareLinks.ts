@@ -5,7 +5,7 @@
  * target to its canonical route here. Keep the type list and the id rule in
  * step with the mobile module.
  */
-export const SHARE_TYPES = ['post', 'profile', 'meal', 'meal-template', 'meal-plan', 'workout', 'gym', 'community'] as const;
+export const SHARE_TYPES = ['post', 'profile', 'meal', 'meal-template', 'meal-plan', 'workout', 'workout-plan', 'gym', 'community', 'live', 'challenge', 'hashtag'] as const;
 export type ShareType = (typeof SHARE_TYPES)[number];
 
 const SHARE_ENTITY_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -17,8 +17,12 @@ export const SHARE_LABEL: Record<ShareType, string> = {
   'meal-template': 'meal template',
   'meal-plan': 'weekly meal plan',
   workout: 'workout',
+  'workout-plan': 'workout plan',
   gym: 'gym',
   community: 'community',
+  live: 'live stream',
+  challenge: 'challenge',
+  hashtag: 'hashtag',
 };
 
 export function isShareType(value: unknown): value is ShareType {
@@ -37,11 +41,17 @@ const MEAL_SHARE_TOKEN = /^[a-f0-9]{64}$/i;
  * community route when such an id is not a directory gym.) A meal travels as
  * its share token when the sender shared it from the app (the recipient may
  * not be allowed to see the meal by id), so a token lands on the shared-meal
- * page and only a plain id on the meal itself.
+ * page and only a plain id on the meal itself. Newer app builds also share
+ * workout plans, live streams, challenges and hashtags (mobile docs/deep-links.md):
+ * a hashtag travels as the bare tag (a leading # is tolerated) and lands on the
+ * search page; a challenge opens the Challenges page with its id in the query,
+ * which the page may use once it has a detail view.
  */
 export function shareDestination(type: string | null, id: string | null): string | null {
-  if (!isShareType(type) || typeof id !== 'string' || !SHARE_ENTITY_ID.test(id)) return null;
-  const q = encodeURIComponent(id);
+  if (!isShareType(type) || typeof id !== 'string') return null;
+  const entity = type === 'hashtag' ? id.replace(/^#/, '') : id;
+  if (!SHARE_ENTITY_ID.test(entity)) return null;
+  const q = encodeURIComponent(entity);
   switch (type) {
     case 'post':
       return `/p/${q}`;
@@ -55,10 +65,18 @@ export function shareDestination(type: string | null, id: string | null): string
       return `/meals/plans?shared=${q}`;
     case 'workout':
       return `/workouts/${q}`;
+    case 'workout-plan':
+      return `/workouts/plans/${q}`;
     case 'gym':
       return `/gyms?gym=${q}`;
     case 'community':
       return `/communities?community=${q}`;
+    case 'live':
+      return `/live/${q}`;
+    case 'challenge':
+      return `/challenges?challenge=${q}`;
+    case 'hashtag':
+      return `/search?q=%23${q}`;
   }
 }
 
