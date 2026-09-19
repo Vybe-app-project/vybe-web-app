@@ -181,7 +181,8 @@ function onUnauthorized(kind: 'user' | 'admin') {
  * token store and the 401 hand-off; null (the pre-token sign-up client) sends
  * the identity headers only. Response side: a 426 with CLIENT_UPDATE_REQUIRED
  * latches the reload prompt, a 429 is announced for the toast, a 401 ends the
- * session. The error is always re-thrown so callers keep their own handling.
+ * session unless it is REAUTH_REQUIRED (a step-up prompt, not a lost session).
+ * The error is always re-thrown so callers keep their own handling.
  */
 export function installClientInterceptors(instance: AxiosInstance, kind: 'user' | 'admin' | null): void {
   instance.interceptors.request.use((config) => {
@@ -200,7 +201,12 @@ export function installClientInterceptors(instance: AxiosInstance, kind: 'user' 
       } else if (status === 429) {
         emitRateLimited({ url: err.config?.url ?? '', retryAfterSec: parseApiError(err).retryAfterSec, at: Date.now() });
       } else if (status === 401 && kind) {
-        onUnauthorized(kind);
+        // 401 REAUTH_REQUIRED asks for a fresh X-Reauth token (the account
+        // lifecycle and data-export routes), not a new session; only the
+        // user client ever receives it.
+        const code = (err.response?.data as { code?: string } | undefined)?.code;
+        if (kind === 'admin') onUnauthorized('admin');
+        else if (code !== 'REAUTH_REQUIRED') onUnauthorized('user');
       }
       return Promise.reject(err);
     },

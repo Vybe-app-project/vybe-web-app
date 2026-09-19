@@ -89,10 +89,12 @@ test('tracked browser source contains no credential-shaped values or fixed API h
 });
 
 test('account deletion remains a deliberate authenticated operation', () => {
-  const settings = read('src/pages/Settings.tsx');
-  assert.match(settings, /api\.delete\(['"]\/users\/me['"]/);
-  assert.match(settings, /DELETE_PHRASE/);
-  assert.match(settings, /Permanently delete my account/);
+  // The card moved to its own file (Wave C1 data lifecycle); Settings mounts it once.
+  const deleteAccount = read('src/pages/settings/DeleteAccount.tsx');
+  assert.match(deleteAccount, /api\.delete\(['"]\/users\/me['"]/);
+  assert.match(deleteAccount, /DELETE_PHRASE/);
+  assert.match(deleteAccount, /Permanently delete my account/);
+  assert.match(read('src/pages/Settings.tsx'), /<DataLifecycleSection \/>/);
 });
 
 test('admin sessions are tab-scoped and legacy paths still resolve', () => {
@@ -296,8 +298,8 @@ test('settings: privacy switch, blocked accounts and inline username errors', ()
   // Username conflicts land under the field, with focus there.
   assert.match(settings, /document\.getElementById\('set-username'\)\?\.focus\(\)/);
   assert.match(settings, /<PrivacySection \/>/);
-  // Deletion stays deliberate (kept from the earlier contract).
-  assert.match(settings, /Permanently delete my account/);
+  // Deletion stays deliberate (kept from the earlier contract; the card now lives in settings/DeleteAccount.tsx).
+  assert.match(read('src/pages/settings/DeleteAccount.tsx'), /Permanently delete my account/);
 });
 test('search: every API bucket renders, the typeahead is keyboard-navigable and opens profiles', () => {
   const search = read('src/pages/Search.tsx');
