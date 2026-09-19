@@ -20,7 +20,6 @@ export type PublicUser = {
   isPrivate?: boolean;
   isTrainer?: boolean;
   isCoach?: boolean;
-  isPremium?: boolean;
   location?: string;
   fields?: string[];
   coverPicture?: string;
