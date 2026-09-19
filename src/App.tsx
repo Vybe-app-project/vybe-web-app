@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { RouteErrorBoundary } from './components/ErrorBoundary';
 import { ApiNotices } from './components/ApiNotices';
 import { UpdateRequiredScreen } from './components/UpdateRequiredScreen';
+import { LegalConsentGate } from './components/LegalConsentGate';
 import { postLoginTarget } from './lib/authRedirect';
 import WelcomeSheet from './pages/WelcomeSheet';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
@@ -237,6 +238,8 @@ export default function App() {
       <ScrollToTop />
       <PwaUpdates />
       <UpdateRequiredScreen />
+      {/* Terms / privacy re-consent for the signed-in account; root mount so SupportGate and PostGate are covered too. */}
+      <LegalConsentGate />
       <ApiNotices />
       <SessionRefresh />
       <AccountPreferencesSync />

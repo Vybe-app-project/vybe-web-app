@@ -1277,6 +1277,8 @@ export function Checkbox({
   description,
   disabled,
   indeterminate,
+  required,
+  error,
   name,
   value,
   className,
@@ -1288,6 +1290,10 @@ export function Checkbox({
   description?: ReactNode;
   disabled?: boolean;
   indeterminate?: boolean;
+  /** Must be ticked to submit (aria semantics only; forms here run noValidate). */
+  required?: boolean;
+  /** Validation message announced under the box; the input points at it and reads invalid. */
+  error?: string | null;
   name?: string;
   value?: string;
   className?: string;
@@ -1299,39 +1305,51 @@ export function Checkbox({
   useEffect(() => {
     if (ref.current) ref.current.indeterminate = !!indeterminate;
   }, [indeterminate]);
+  const errorId = `${inputId}-error`;
   return (
-    <label
-      htmlFor={inputId}
-      className={cx('flex min-h-11 cursor-pointer items-start gap-3 py-2.5', disabled && 'cursor-not-allowed opacity-60', className)}
-    >
-      <span className="relative mt-0.5 inline-flex h-5 w-5 shrink-0">
-        <input
-          ref={ref}
-          id={inputId}
-          type="checkbox"
-          name={name}
-          value={value}
-          checked={checked}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
-          className="peer absolute inset-0 h-5 w-5 cursor-pointer opacity-0 disabled:cursor-not-allowed"
-        />
-        <span
-          aria-hidden="true"
-          className={cx(
-            'pointer-events-none inline-flex h-5 w-5 items-center justify-center rounded-xs border transition-colors dur-1',
-            'peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus',
-            checked || indeterminate ? 'border-brand bg-brand text-on-brand' : 'border-control bg-surface-2 text-transparent',
-          )}
-        >
-          {indeterminate && !checked ? <Minus size={14} strokeWidth={2.6} /> : <CheckIcon size={14} strokeWidth={2.8} />}
+    <>
+      <label
+        htmlFor={inputId}
+        className={cx('flex min-h-11 cursor-pointer items-start gap-3 py-2.5', disabled && 'cursor-not-allowed opacity-60', className)}
+      >
+        <span className="relative mt-0.5 inline-flex h-5 w-5 shrink-0">
+          <input
+            ref={ref}
+            id={inputId}
+            type="checkbox"
+            name={name}
+            value={value}
+            checked={checked}
+            disabled={disabled}
+            required={required}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(e) => onChange(e.target.checked)}
+            className="peer absolute inset-0 h-5 w-5 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+          />
+          <span
+            aria-hidden="true"
+            className={cx(
+              'pointer-events-none inline-flex h-5 w-5 items-center justify-center rounded-xs border transition-colors dur-1',
+              'peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus',
+              checked || indeterminate ? 'border-brand bg-brand text-on-brand' : 'border-control bg-surface-2 text-transparent',
+            )}
+          >
+            {indeterminate && !checked ? <Minus size={14} strokeWidth={2.6} /> : <CheckIcon size={14} strokeWidth={2.8} />}
+          </span>
         </span>
-      </span>
-      <span className="min-w-0">
-        <span className="block text-sm font-medium text-text-1">{label}</span>
-        {description ? <span className="block text-xs text-text-2">{description}</span> : null}
-      </span>
-    </label>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-text-1">{label}</span>
+          {description ? <span className="block text-xs text-text-2">{description}</span> : null}
+        </span>
+      </label>
+      {error ? (
+        <p id={errorId} role="alert" className="flex items-start gap-1.5 text-xs text-danger">
+          <AlertIcon size={14} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </p>
+      ) : null}
+    </>
   );
 }
 

@@ -56,6 +56,7 @@ import { Award, ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Mo
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
 import { DataLifecycleSection } from './settings/DataLifecycleSection';
+import { LegalSection } from './settings/LegalSection';
 
 const NOTIFICATION_LABELS: Record<NotificationSettingKey, { title: string; hint: string }> = {
   pauseAll: {
@@ -1029,6 +1030,7 @@ export default function Settings() {
         <NotificationsSection />
         <EmailPreferencesSection />
         <AboutSection />
+        <LegalSection />
         <DataLifecycleSection />
       </div>
     </>
