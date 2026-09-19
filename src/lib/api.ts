@@ -213,8 +213,10 @@ installClientInterceptors(adminApi, 'admin');
 /**
  * Copy for a person from anything a request threw. Reads every API error
  * shape (src/lib/apiError.ts) and never returns axios's own text; a 429 is
- * always "Too many attempts, try again in N s", a 5xx without copy is
- * "Something went wrong on our side."
+ * one sentence naming the wait ("Too many attempts. Try again in about 12
+ * minutes." on the auth routes, "You’re doing that too often. Try again
+ * in about 12 minutes." elsewhere), a 5xx without copy is "Something went
+ * wrong on our side."
  */
 export function errMsg(e: unknown, fallback = 'Something went wrong'): string {
   return parseApiError(e, fallback).message;

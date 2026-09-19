@@ -22,7 +22,7 @@ const { MemoryRouter } = await import('react-router-dom');
 const { ToastProvider } = await import('../src/components/ui.tsx');
 const { UpdateRequiredScreen } = await import('../src/components/UpdateRequiredScreen.tsx');
 const { ApiNotices } = await import('../src/components/ApiNotices.tsx');
-const { useClientPolicy } = await import('../src/lib/clientPolicy.ts');
+const { RELOAD_GUARD_KEY, useClientPolicy } = await import('../src/lib/clientPolicy.ts');
 
 function mount(ui) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -56,7 +56,9 @@ test('a latched 426 renders the labelled dialog with the server message and one 
     assert.match(html, /aria-describedby="update-required-body"/);
     assert.match(html, /id="update-required-title"[^>]*>Reload Vybe</);
     assert.match(html, /Why: sets now sync live\./);
-    assert.match(html, /A newer version of Vybe is ready\. Reloading picks it up and keeps you signed in\./);
+    // No reload guard stamped and nobody typing: the reload is automatic, and says so.
+    assert.match(html, /A newer version of Vybe is ready\. Vybe will reload in a moment to pick it up\. You stay signed in\./);
+    assert.doesNotMatch(html, /If this keeps happening/);
     assert.match(html, /<button type="button"[^>]*>/);
     assert.equal((html.match(/<button/g) || []).length, 1, 'one action, no dismiss');
     assert.match(html, />Reload Vybe<\/span>/);
@@ -65,6 +67,24 @@ test('a latched 426 renders the labelled dialog with the server message and one 
     useClientPolicy.getState().clear();
   }
   assert.equal(mount(h(UpdateRequiredScreen)), EMPTY_SHELL, 'clearing the latch removes the screen');
+});
+
+test('a tab that already reloaded for a 426 within the minute is told to wait, not to close its tabs', () => {
+  // shouldAutoReload reads sessionStorage; give this test one with a fresh stamp.
+  const store = new Map([[RELOAD_GUARD_KEY, String(Date.now())]]);
+  globalThis.sessionStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => void store.set(k, String(v)) };
+  useClientPolicy.getState().noteUpdateRequired({ code: 'CLIENT_UPDATE_REQUIRED' });
+  try {
+    const html = mount(h(UpdateRequiredScreen));
+    assert.match(html, /A newer version of Vybe is ready\. Reloading picks it up and keeps you signed in\./);
+    assert.doesNotMatch(html, /Vybe will reload in a moment/);
+    assert.match(html, /If this keeps happening, Vybe is still being updated\. Try again in a few minutes\./);
+    assert.doesNotMatch(html, /close every Vybe tab/);
+    assert.equal((html.match(/<button/g) || []).length, 1, 'still one action');
+  } finally {
+    useClientPolicy.getState().clear();
+    delete globalThis.sessionStorage;
+  }
 });
 
 test('a 426 without a message falls back to the default copy', () => {

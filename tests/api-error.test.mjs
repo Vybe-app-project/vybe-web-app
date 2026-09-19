@@ -19,10 +19,11 @@ const {
   rateLimitedCopy,
 } = await import('../src/lib/apiError.ts');
 
-const http = (status, data, headers = {}) => ({
+const http = (status, data, headers = {}, url = '/posts') => ({
   isAxiosError: true,
   code: status >= 500 ? 'ERR_BAD_RESPONSE' : 'ERR_BAD_REQUEST',
   message: `Request failed with status code ${status}`,
+  config: { url },
   response: { status, data, headers },
 });
 
@@ -72,13 +73,17 @@ test('429: RATE_LIMITED is read or synthesised and the wait comes from the body,
   const writeLimit = parseApiError(http(429, { code: 'RATE_LIMITED', message: "You've hit the post limit for now. Try again in 3570 s.", retryAfterSec: 3570 }, { 'retry-after': '3570' }));
   assert.equal(writeLimit.code, 'RATE_LIMITED');
   assert.equal(writeLimit.retryAfterSec, 3570);
-  assert.equal(writeLimit.message, 'Too many attempts, try again in 3570 s', 'one sentence for every family label');
+  assert.equal(writeLimit.message, 'You\u2019re doing that too often. Try again in about 60 minutes.', 'one sentence for every family label, and a wait a person can read');
 
-  // The auth limiter sends { message } and only the header names the wait.
-  const login = parseApiError(http(429, { message: 'Too many attempts, please try again later.' }, { 'retry-after': '900' }));
+  // The auth limiter sends { message } and only the header names the wait;
+  // on the auth routes the person really was attempting something.
+  const login = parseApiError(http(429, { message: 'Too many attempts, please try again later.' }, { 'retry-after': '900' }, '/auth/login'));
   assert.equal(login.code, 'RATE_LIMITED');
   assert.equal(login.retryAfterSec, 900);
-  assert.equal(login.message, 'Too many attempts, try again in 900 s');
+  assert.equal(login.message, 'Too many attempts. Try again in about 15 minutes.');
+  assert.equal(parseApiError(http(429, {}, { 'retry-after': '60' }, 'https://api.vybeapp.fit/api/admins/login')).message, 'Too many attempts. Try again in 60 seconds.');
+  assert.equal(parseApiError(http(429, {}, { 'retry-after': '60' }, '/support/message')).message, 'You\u2019re doing that too often. Try again in 60 seconds.');
+  assert.equal(parseApiError({ response: { status: 429, data: {}, headers: {} } }).message, 'You\u2019re doing that too often. Try again in a moment.', 'no config.url at all');
 
   // Data export spells it retryAfter.
   assert.equal(parseApiError(http(429, { message: 'Slow down', retryAfter: 45 })).retryAfterSec, 45);
@@ -87,7 +92,7 @@ test('429: RATE_LIMITED is read or synthesised and the wait comes from the body,
   const global = parseApiError(http(429, 'Too many requests, please try again later.'));
   assert.equal(global.code, 'RATE_LIMITED');
   assert.equal(global.retryAfterSec, null);
-  assert.equal(global.message, 'Too many attempts, try again in a moment');
+  assert.equal(global.message, 'You\u2019re doing that too often. Try again in a moment.');
 
   for (const bad of ['0', 'abc', '-3', '', undefined]) {
     assert.equal(parseApiError(http(429, {}, { 'retry-after': bad })).retryAfterSec, null, `Retry-After ${JSON.stringify(bad)}`);
@@ -98,10 +103,13 @@ test('429: RATE_LIMITED is read or synthesised and the wait comes from the body,
 });
 
 test('rateLimitedCopy names the wait when it knows it', () => {
-  assert.equal(rateLimitedCopy(37), 'Too many attempts, try again in 37 s');
-  assert.equal(rateLimitedCopy(0.2), 'Too many attempts, try again in 1 s');
+  assert.equal(rateLimitedCopy(37), 'You\u2019re doing that too often. Try again in 37 seconds.');
+  assert.equal(rateLimitedCopy(37, 'attempts'), 'Too many attempts. Try again in 37 seconds.');
+  assert.equal(rateLimitedCopy(0.2), 'You\u2019re doing that too often. Try again in 1 second.');
+  assert.equal(rateLimitedCopy(3600), 'You\u2019re doing that too often. Try again in about 60 minutes.');
+  assert.equal(rateLimitedCopy(86400), 'You\u2019re doing that too often. Try again in about 24 hours.');
   for (const none of [null, undefined, 0, -1, NaN, Infinity]) {
-    assert.equal(rateLimitedCopy(none), 'Too many attempts, try again in a moment');
+    assert.equal(rateLimitedCopy(none), 'You\u2019re doing that too often. Try again in a moment.');
   }
 });
 
@@ -160,6 +168,7 @@ test('errMsg stays compatible: it is parseApiError().message', async () => {
   assert.equal(errMsg({ response: { data: { message: 'x' } } }), 'x');
   assert.equal(errMsg(undefined, 'fb'), 'fb');
   assert.equal(errMsg(http(500, {})), SERVER_COPY);
-  assert.equal(errMsg(http(429, {}, { 'retry-after': '3' })), 'Too many attempts, try again in 3 s');
+  assert.equal(errMsg(http(429, {}, { 'retry-after': '3' })), 'You\u2019re doing that too often. Try again in 3 seconds.');
+  assert.equal(errMsg(http(429, {}, { 'retry-after': '3' }, '/auth/register')), 'Too many attempts. Try again in 3 seconds.');
   assert.equal(errMsg({ isAxiosError: true, code: 'ERR_NETWORK', message: 'Network Error' }), OFFLINE_COPY);
 });

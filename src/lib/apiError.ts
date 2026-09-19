@@ -55,13 +55,80 @@ export const RATE_LIMITED_CODE = 'RATE_LIMITED';
 export const UPDATE_REQUIRED_CODE = 'CLIENT_UPDATE_REQUIRED';
 
 /**
- * The one sentence for every 429. Duplicated verbatim in authRedirect.ts
+ * How long until a 429 clears, for a person: "in 45 seconds", "in about
+ * 12 minutes", "in about 2 hours" (always rounded up, so the wait is never
+ * understated), or "in a moment" when the API named no wait. The per-account
+ * write limiters run hour- and day-long windows, so a bare count of seconds
+ * would routinely read "3542 s". Duplicated verbatim in authRedirect.ts
  * (which must stay import-free); tests/client-policy.test.mjs pins them equal.
  */
-export function rateLimitedCopy(sec: number | null | undefined): string {
-  return typeof sec === 'number' && Number.isFinite(sec) && sec > 0
-    ? `Too many attempts, try again in ${Math.ceil(sec)} s`
-    : 'Too many attempts, try again in a moment';
+export function retryWaitCopy(sec: number | null | undefined): string {
+  if (typeof sec !== 'number' || !Number.isFinite(sec) || sec <= 0) return 'in a moment';
+  const seconds = Math.ceil(sec);
+  if (seconds < 90) return `in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
+  if (seconds < 90 * 60) {
+    const minutes = Math.ceil(seconds / 60);
+    return `in about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  }
+  const hours = Math.ceil(seconds / 3600);
+  return `in about ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
+/**
+ * What a 429 limited: credential `attempts` (sign-in, sign-up, password
+ * reset, re-auth, the admin console's sign-in) or ordinary `actions` (posts,
+ * follows, searches, support messages).
+ */
+export type RateLimitedSubject = 'attempts' | 'actions';
+
+/**
+ * The one sentence for a 429. "Too many attempts" is accurate only where a
+ * person was trying to get in; a member who posted twenty times in an hour
+ * attempted nothing, so everywhere else the verb is neutral. authRedirect.ts
+ * repeats the `attempts` form for sign-in; tests/client-policy.test.mjs pins
+ * the two equal.
+ */
+export function rateLimitedCopy(sec: number | null | undefined, subject: RateLimitedSubject = 'actions'): string {
+  const lead = subject === 'attempts' ? 'Too many attempts.' : 'You’re doing that too often.';
+  return `${lead} Try again ${retryWaitCopy(sec)}.`;
+}
+
+const RATE_LIMITED_LEADS = ['Too many attempts. Try again ', 'You’re doing that too often. Try again '];
+
+/** The toast key every 429 shares, so a page's own toast and the app-wide one (components/ApiNotices.tsx) replace each other instead of stacking. */
+export const RATE_LIMITED_TOAST_KEY = 'rate-limited';
+
+/** True for any sentence rateLimitedCopy can produce, whichever module produced it. */
+export function isRateLimitedCopy(message: unknown): boolean {
+  return typeof message === 'string' && RATE_LIMITED_LEADS.some((lead) => message.startsWith(lead));
+}
+
+/**
+ * The API path of a request URL as axios saw it, without an origin, the /api
+ * prefix, a query or a hash: an absolute `<origin>/api/auth/login?x=1` and a
+ * bare `auth/login` both give `/auth/login`.
+ */
+export function apiPathOf(url: string): string {
+  let path = url.trim();
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      return path;
+    }
+  }
+  path = path.split(/[?#]/)[0];
+  if (!path.startsWith('/')) path = `/${path}`;
+  return path.replace(/^\/api(?=\/|$)/, '');
+}
+
+/** Routes where a 429 counts credential attempts, so "Too many attempts" is the honest lead. */
+const ATTEMPT_PATH_PREFIXES = ['/auth/', '/admins/login', '/admins/request-reset', '/admins/reset-password'];
+
+export function isAttemptPath(url: string | null | undefined): boolean {
+  if (typeof url !== 'string' || !url) return false;
+  const path = apiPathOf(url);
+  return ATTEMPT_PATH_PREFIXES.some((prefix) => (prefix.endsWith('/') ? path.startsWith(prefix) : path === prefix || path.startsWith(`${prefix}/`)));
 }
 
 type Dict = Record<string, unknown>;
@@ -138,6 +205,7 @@ function parse(e: unknown, fallback: string): ParsedApiError {
   const body = response ? response.data : undefined;
   const headers = response ? response.headers : undefined;
   const transportCode = typeof failure.code === 'string' ? failure.code : null;
+  const requestUrl = isDict(failure.config) && typeof failure.config.url === 'string' ? failure.config.url : null;
 
   if (!response) {
     if (transportCode === 'ERR_NETWORK') return { ...unknownError(OFFLINE_COPY), kind: 'network', code: transportCode };
@@ -186,8 +254,9 @@ function parse(e: unknown, fallback: string): ParsedApiError {
   // is still read for its body; only the status-keyed copy is skipped.
   let message: string;
   if (status === 429) {
-    // Every limiter answers with its own family label; members see one sentence.
-    message = rateLimitedCopy(retryAfterSec);
+    // Every limiter answers with its own family label; members see one
+    // sentence, worded for attempts on the auth routes and for actions elsewhere.
+    message = rateLimitedCopy(retryAfterSec, isAttemptPath(requestUrl) ? 'attempts' : 'actions');
   } else {
     message =
       text(envelope?.message) ??

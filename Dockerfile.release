@@ -12,6 +12,10 @@ COPY . .
 # Empty by default: the bundle then identifies itself by build time.
 ARG VITE_WEB_BUILD=
 ENV VITE_WEB_BUILD=$VITE_WEB_BUILD
+# The web version the header compares (MAJOR.YYYYMMDD.HHMM, vite.config.ts).
+# Empty by default: the bundle then derives it from its own build clock.
+ARG VITE_WEB_VERSION=
+ENV VITE_WEB_VERSION=$VITE_WEB_VERSION
 RUN npm run verify
 
 FROM scratch AS artifact

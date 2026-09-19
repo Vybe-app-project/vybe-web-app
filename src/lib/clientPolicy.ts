@@ -15,6 +15,7 @@
  * the mobile app's src/store/clientPolicyLatch.ts.
  */
 import { create } from 'zustand';
+import { apiPathOf } from './apiError';
 
 export const UPDATE_REQUIRED_STATUS = 426;
 export const UPDATE_REQUIRED_CODE = 'CLIENT_UPDATE_REQUIRED';
@@ -103,25 +104,13 @@ export function emitRateLimited(event: RateLimitedEvent): void {
 }
 
 /**
- * Surfaces whose forms show the error next to the button; a toast on top
- * would say the same thing twice. Matched on the API path, with or without
- * the /api prefix or an origin.
+ * Surfaces that show a 429 in their own words, next to the control (the auth
+ * forms, the support form, the food search's "Too many searches" row); a
+ * toast on top would say the same thing twice. Matched on the API path, with
+ * or without the /api prefix or an origin. A page that adds its own inline
+ * 429 state adds its route here.
  */
-const INLINE_ERROR_PREFIXES = ['/auth/', '/admins/login', '/admins/request-reset', '/admins/reset-password', '/support/message'];
-
-const apiPathOf = (url: string): string => {
-  let path = url.trim();
-  if (/^https?:\/\//i.test(path)) {
-    try {
-      path = new URL(path).pathname;
-    } catch {
-      return path;
-    }
-  }
-  path = path.split(/[?#]/)[0];
-  if (!path.startsWith('/')) path = `/${path}`;
-  return path.replace(/^\/api(?=\/|$)/, '');
-};
+const INLINE_ERROR_PREFIXES = ['/auth/', '/admins/login', '/admins/request-reset', '/admins/reset-password', '/support/message', '/food/search'];
 
 export function isInlineErrorSurface(url: string | null | undefined): boolean {
   if (typeof url !== 'string' || !url) return false;
@@ -166,14 +155,62 @@ export function stampReload(now: number = Date.now(), storage: StorageLike | nul
   }
 }
 
+const NON_TEXT_INPUT_TYPES = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
+
+/**
+ * Whether the person was typing when the 426 arrived. A reload then would
+ * throw their text away, so the screen leaves the reload to them. Text-like
+ * inputs, textareas and contenteditable regions count; buttons, checkboxes,
+ * sliders and pickers do not. False without a document (tests).
+ */
+export function isTextEntryActive(doc: { activeElement: Element | null } | null | undefined = typeof document !== 'undefined' ? document : undefined): boolean {
+  const element = doc?.activeElement as (Element & { isContentEditable?: boolean; type?: string }) | null | undefined;
+  if (!element || typeof element.tagName !== 'string') return false;
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'textarea') return true;
+  if (tag === 'input') {
+    const type = (typeof element.type === 'string' && element.type ? element.type : 'text').toLowerCase();
+    return !NON_TEXT_INPUT_TYPES.has(type);
+  }
+  return element.isContentEditable === true;
+}
+
+/** How long a fresh worker may take to precache the shell before the reload goes ahead without it. */
+const INSTALL_WAIT_MS = 8_000;
 const CONTROLLER_CHANGE_WAIT_MS = 2_000;
+
+/** Resolve when `worker` leaves 'installing' (installed, activated or redundant), or after `ms`. */
+function whenInstalled(worker: ServiceWorker, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (worker.state !== 'installing') {
+      resolve();
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const done = () => {
+      if (worker.state === 'installing') return;
+      worker.removeEventListener('statechange', done);
+      if (timer !== undefined) clearTimeout(timer);
+      resolve();
+    };
+    timer = setTimeout(() => {
+      worker.removeEventListener('statechange', done);
+      resolve();
+    }, ms);
+    worker.addEventListener('statechange', done);
+  });
+}
 
 /**
  * Reload onto the newest build. The service worker (vite.config.ts:
- * registerType 'prompt', skipWaiting false) may be holding the new shell as
- * a waiting worker, and a bare location.reload() would serve the precached
- * old one again, so the registrations are updated and any waiting worker is
- * told to take over first, with a bounded wait for the controller change.
+ * registerType 'prompt', skipWaiting false) holds the new shell as a waiting
+ * worker, and a bare location.reload() would serve the precached old one
+ * again. So: update the registrations; wait (bounded) for a worker that is
+ * still installing, because update() resolves when the new worker exists,
+ * not when it has finished precaching the shell, and in the common case
+ * (bundle and floor raised in the same release) it is still installing at
+ * this point; tell the waiting worker to take over; wait (bounded) for the
+ * controller change; reload.
  */
 export async function reloadForUpdate(): Promise<void> {
   stampReload();
@@ -182,6 +219,9 @@ export async function reloadForUpdate(): Promise<void> {
     if (container && typeof container.getRegistrations === 'function') {
       const registrations = await container.getRegistrations();
       await Promise.all(registrations.map((registration) => registration.update().catch(() => undefined)));
+      await Promise.all(
+        registrations.map((registration) => (registration.installing ? whenInstalled(registration.installing, INSTALL_WAIT_MS) : Promise.resolve())),
+      );
       const waiting = registrations.map((registration) => registration.waiting).filter((worker): worker is ServiceWorker => Boolean(worker));
       if (waiting.length) {
         const changed = new Promise<void>((resolve) => {

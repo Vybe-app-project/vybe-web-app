@@ -18,15 +18,40 @@ import pkg from './package.json';
  * are excluded from the precache.
  * The manifest is the hand-authored `public/manifest.webmanifest`.
  */
+/**
+ * The web version the X-Vybe-Client header carries (src/lib/clientHeader.ts):
+ * MAJOR from package.json, then the UTC build date and time as MINOR.PATCH,
+ * so 1.20260919.1432 is a build at 14:32 UTC on 19 September 2026 (the time
+ * has no leading zero: 09:32 is .932, as semver requires). Every build is a
+ * comparable semver above every earlier build, so the API's
+ * CLIENT_MIN_VERSION_WEB can name "every build before this deploy"; a static
+ * package version would have gated nothing or everything. The release passes
+ * the value in (VITE_WEB_VERSION build arg, computed by
+ * scripts/deploy-web-remote.sh with this same rule so its floor check
+ * compares the exact version being built); a local build derives it from its
+ * own clock. package.json's version is not bumped per release.
+ */
+const BUILD_NOW = new Date();
+const WEB_MAJOR = String(pkg.version).split('.')[0] || '1';
+const SEMVER_CORE = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
+const clockVersion = (now: Date, major: string): string => {
+  const iso = now.toISOString();
+  const date = iso.slice(0, 10).replace(/-/g, '');
+  const time = Number(iso.slice(11, 16).replace(':', ''));
+  return `${major}.${date}.${time}`;
+};
+const versionFromRelease = (process.env.VITE_WEB_VERSION ?? '').trim();
+const WEB_VERSION = SEMVER_CORE.test(versionFromRelease) ? versionFromRelease : clockVersion(BUILD_NOW, WEB_MAJOR);
+
 export default defineConfig({
   // Build identity for the X-Vybe-Client header and Settings > About
-  // (src/lib/clientHeader.ts): the package version and the build clock. The
+  // (src/lib/clientHeader.ts): the version above and the build clock. The
   // deployed commit arrives separately as VITE_WEB_BUILD (Dockerfile.release
   // build arg); the release tarball has no .git and a build config must not
   // run other programs (scripts/scan-injected-code.mjs).
   define: {
-    'import.meta.env.VITE_WEB_VERSION': JSON.stringify(pkg.version),
-    'import.meta.env.VITE_WEB_BUILT_AT': JSON.stringify(new Date().toISOString()),
+    'import.meta.env.VITE_WEB_VERSION': JSON.stringify(WEB_VERSION),
+    'import.meta.env.VITE_WEB_BUILT_AT': JSON.stringify(BUILD_NOW.toISOString()),
   },
   plugins: [
     react(),

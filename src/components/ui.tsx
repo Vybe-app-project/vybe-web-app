@@ -26,6 +26,7 @@ import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { create } from 'zustand';
 import { errMsg, mediaUrl } from '../lib/api';
+import { RATE_LIMITED_TOAST_KEY, isRateLimitedCopy, parseApiError } from '../lib/apiError';
 import { describedByIds } from '../lib/a11y';
 import { useAuth } from '../lib/auth';
 import { toastViewportClass, upsertToast } from '../lib/toastPlacement';
@@ -2271,8 +2272,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       dismiss,
       success: (m, o) => toast(m, { ...o, kind: 'success' }),
       info: (m, o) => toast(m, { ...o, kind: 'info' }),
-      error: (e, fallback = 'Something went wrong', options) =>
-        toast(typeof e === 'string' ? e : errMsg(e, fallback), { ...options, kind: 'error' }),
+      error: (e, fallback = 'Something went wrong', options) => {
+        const message = typeof e === 'string' ? e : errMsg(e, fallback);
+        // Every 429 shares one key, so a page's own toast and the app-wide
+        // one (components/ApiNotices.tsx) replace each other instead of
+        // stacking the same sentence twice.
+        const rateLimited = typeof e === 'string' ? isRateLimitedCopy(e) : parseApiError(e).status === 429;
+        const key = options?.key ?? (rateLimited ? RATE_LIMITED_TOAST_KEY : undefined);
+        return toast(message, { ...options, key, kind: 'error' });
+      },
     }),
     [toast, dismiss],
   );

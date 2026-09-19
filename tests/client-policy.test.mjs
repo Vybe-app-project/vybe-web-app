@@ -117,6 +117,7 @@ test('every 429 reaches every listener, and the inline surfaces are known', () =
   assert.equal(isInlineErrorSurface('/admins/request-reset'), true);
   assert.equal(isInlineErrorSurface('/admins/reset-password'), true);
   assert.equal(isInlineErrorSurface('/support/message'), true);
+  assert.equal(isInlineErrorSurface('/food/search?q=oats'), true, 'Meals renders its own "Too many searches" row');
   assert.equal(isInlineErrorSurface('/posts/create'), false);
   assert.equal(isInlineErrorSurface('/admins/users'), false);
   assert.equal(isInlineErrorSurface('/authors'), false);
@@ -147,15 +148,74 @@ test('a 426 reload runs once a minute per tab, and never fails on a missing stor
   assert.doesNotThrow(() => stampReload(now, throwing));
 });
 
+test('the reload waits for a person who is typing', () => {
+  const { isTextEntryActive } = policy;
+  const doc = (activeElement) => ({ activeElement });
+  assert.equal(isTextEntryActive(undefined), false, 'no document (tests, workers)');
+  assert.equal(isTextEntryActive(doc(null)), false);
+  assert.equal(isTextEntryActive(doc({ tagName: 'BODY' })), false);
+  assert.equal(isTextEntryActive(doc({ tagName: 'BUTTON' })), false);
+  assert.equal(isTextEntryActive(doc({ tagName: 'TEXTAREA' })), true);
+  assert.equal(isTextEntryActive(doc({ tagName: 'INPUT' })), true, 'an input without a type is text');
+  for (const type of ['text', 'search', 'email', 'password', 'number', 'url', 'tel']) {
+    assert.equal(isTextEntryActive(doc({ tagName: 'INPUT', type })), true, type);
+  }
+  for (const type of ['checkbox', 'radio', 'range', 'submit', 'button', 'file', 'color', 'hidden']) {
+    assert.equal(isTextEntryActive(doc({ tagName: 'INPUT', type })), false, type);
+  }
+  assert.equal(isTextEntryActive(doc({ tagName: 'DIV', isContentEditable: true })), true, 'a rich composer');
+  assert.equal(isTextEntryActive(doc({ tagName: 'DIV', isContentEditable: false })), false);
+});
+
 /* ------------------------------------------------------------------ copy */
 
-test('the 429 sentence is one sentence, in both the import-free modules', () => {
-  assert.equal(apiError.rateLimitedCopy(37), 'Too many attempts, try again in 37 s');
-  assert.equal(apiError.rateLimitedCopy(null), 'Too many attempts, try again in a moment');
-  for (const value of [37, 1, 900, 0, null, undefined, -1]) {
-    assert.equal(authRedirect.rateLimitedCopy(value), apiError.rateLimitedCopy(value), `rateLimitedCopy(${value})`);
+test('the 429 wait is written for a person, and the two import-free modules agree', () => {
+  const { retryWaitCopy, rateLimitedCopy } = apiError;
+  assert.equal(retryWaitCopy(1), 'in 1 second');
+  assert.equal(retryWaitCopy(45), 'in 45 seconds');
+  assert.equal(retryWaitCopy(89), 'in 89 seconds');
+  assert.equal(retryWaitCopy(90), 'in about 2 minutes');
+  assert.equal(retryWaitCopy(180), 'in about 3 minutes');
+  assert.equal(retryWaitCopy(3542), 'in about 60 minutes', 'the hour-long write windows');
+  assert.equal(retryWaitCopy(5399), 'in about 90 minutes');
+  assert.equal(retryWaitCopy(5400), 'in about 2 hours');
+  assert.equal(retryWaitCopy(86400), 'in about 24 hours', 'the reports window');
+  assert.equal(retryWaitCopy(0.2), 'in 1 second', 'rounded up, never understated');
+  for (const none of [null, undefined, 0, -1, NaN, Infinity]) {
+    assert.equal(retryWaitCopy(none), 'in a moment');
+  }
+  for (const text of [retryWaitCopy(45), retryWaitCopy(3542), retryWaitCopy(86400)]) {
+    assert.doesNotMatch(text, /\d s\b/, 'no bare seconds');
+  }
+
+  // Attempts on the auth routes, a neutral verb everywhere else.
+  assert.equal(rateLimitedCopy(37, 'attempts'), 'Too many attempts. Try again in 37 seconds.');
+  assert.equal(rateLimitedCopy(720), 'You\u2019re doing that too often. Try again in about 12 minutes.');
+  assert.equal(rateLimitedCopy(null), 'You\u2019re doing that too often. Try again in a moment.');
+  assert.equal(apiError.isRateLimitedCopy(rateLimitedCopy(720)), true);
+  assert.equal(apiError.isRateLimitedCopy(rateLimitedCopy(37, 'attempts')), true);
+  assert.equal(apiError.isRateLimitedCopy(authRedirect.rateLimitedCopy(37)), true);
+  assert.equal(apiError.isRateLimitedCopy('Too many searches. Try again in about 3 minutes.'), false, 'a page\u2019s own inline copy is not the shared toast');
+  assert.equal(apiError.isRateLimitedCopy(null), false);
+  assert.equal(apiError.RATE_LIMITED_TOAST_KEY, 'rate-limited');
+
+  for (const value of [37, 1, 900, 3542, 0, null, undefined, -1]) {
+    assert.equal(authRedirect.rateLimitedCopy(value), apiError.rateLimitedCopy(value, 'attempts'), `rateLimitedCopy(${value})`);
+    assert.equal(authRedirect.retryWaitCopy(value), apiError.retryWaitCopy(value), `retryWaitCopy(${value})`);
   }
   assert.equal(authRedirect.OFFLINE_COPY, apiError.OFFLINE_COPY);
+
+  // Which routes count as attempts.
+  const { isAttemptPath, apiPathOf } = apiError;
+  assert.equal(apiPathOf('https://api.vybeapp.fit/api/auth/login?x=1'), '/auth/login');
+  assert.equal(apiPathOf('auth/login'), '/auth/login');
+  assert.equal(apiPathOf('/api'), '');
+  for (const url of ['/auth/login', '/auth/register', '/auth/send-otp', '/auth/request-reset', '/auth/reset-password', '/auth/reauth', '/api/auth/login', '/admins/login', '/admins/request-reset', '/admins/reset-password']) {
+    assert.equal(isAttemptPath(url), true, url);
+  }
+  for (const url of ['/posts/create', '/support/message', '/food/search', '/admins/users', '/authors', '', null, undefined]) {
+    assert.equal(isAttemptPath(url), false, String(url));
+  }
   assert.equal(authRedirect.retryAfterSecondsOf({ response: { headers: { 'retry-after': '900' } } }), 900);
   assert.equal(authRedirect.retryAfterSecondsOf({ response: { data: { retryAfterSec: 12 }, headers: { 'retry-after': '900' } } }), 12);
   assert.equal(authRedirect.retryAfterSecondsOf({ response: { data: { retryAfter: '5' } } }), 5);
@@ -217,22 +277,40 @@ test('the 426 screen and the 429 toasts are mounted once, inside the toast provi
   assert.match(screen, /Reload Vybe/);
   assert.match(screen, /reloadForUpdate\(\)/);
   assert.match(screen, /shouldAutoReload\(/);
+  assert.match(screen, /isTextEntryActive\(\)/, 'no auto-reload over a half-written composer');
   assert.match(screen, /useLockBody\(true\)/);
   assert.match(screen, /useFocusTrap\(true, ref\)/);
   assert.match(screen, /z-\[300\]/);
-  assert.match(screen, /If this keeps happening, close every Vybe tab and open it again\./);
+  // The auto-reload is announced, and there is time to hear it.
+  assert.match(screen, /Vybe will reload in a moment to pick it up\. You stay signed in\./);
+  const delay = Number((screen.match(/AUTO_RELOAD_DELAY_MS = ([\d_]+)/) || [])[1]?.replace(/_/g, ''));
+  assert.ok(delay >= 5000, `auto-reload delay ${delay} ms is under the 5 s reading time`);
+  // The loop hint names the real cause (the floor is ahead of the newest build) and a real next step.
+  assert.match(screen, /If this keeps happening, Vybe is still being updated\. Try again in a few minutes\./);
+  assert.doesNotMatch(screen, /close every Vybe tab/, 'closing tabs clears the per-tab guard and loops again');
   assert.doesNotMatch(screen, /onClose|Dismiss|Not now/, 'no dismiss: nothing behind it works');
 
   const clientPolicy = read('src/lib/clientPolicy.ts');
   assert.match(clientPolicy, /RELOAD_GUARD_KEY = 'vybe\.reload426At'/);
   assert.match(clientPolicy, /getRegistrations/);
+  // update() resolves when the new worker exists, not when it has precached
+  // the shell; the reload waits for the installing worker before promoting it.
+  assert.match(clientPolicy, /registration\.installing \? whenInstalled\(registration\.installing, INSTALL_WAIT_MS\)/);
+  assert.match(clientPolicy, /addEventListener\('statechange'/);
   assert.match(clientPolicy, /SKIP_WAITING/);
   assert.match(clientPolicy, /controllerchange/);
+  const installWait = Number((clientPolicy.match(/INSTALL_WAIT_MS = ([\d_]+)/) || [])[1]?.replace(/_/g, ''));
+  assert.ok(installWait >= 2000 && installWait <= 15000, `install wait ${installWait} ms`);
 
+  // One toast per 429: the app-wide toast and a page's own share a key.
   const notices = read('src/components/ApiNotices.tsx');
   assert.match(notices, /onRateLimited\(/);
   assert.match(notices, /isInlineErrorSurface\(event\.url\)/);
-  assert.match(notices, /key: 'rate-limited'/);
+  assert.match(notices, /key: RATE_LIMITED_TOAST_KEY/);
+  assert.match(notices, /isAttemptPath\(event\.url\) \? 'attempts' : 'actions'/);
+  const ui = read('src/components/ui.tsx');
+  assert.match(ui, /const rateLimited = typeof e === 'string' \? isRateLimitedCopy\(e\) : parseApiError\(e\)\.status === 429;/);
+  assert.match(ui, /const key = options\?\.key \?\? \(rateLimited \? RATE_LIMITED_TOAST_KEY : undefined\);/);
 });
 
 test('Live is gated on features.live as well as the relay, everywhere it is promoted', () => {
@@ -295,7 +373,33 @@ test('the build identity comes from the config and the release, never from a chi
   assert.doesNotMatch(vite, /child_process|execSync|spawn/);
   assert.doesNotMatch(vite, /__VYBE_/);
   assert.match(read('Dockerfile.release'), /ARG VITE_WEB_BUILD=\nENV VITE_WEB_BUILD=\$VITE_WEB_BUILD\n/);
+  assert.match(read('Dockerfile.release'), /ARG VITE_WEB_VERSION=\nENV VITE_WEB_VERSION=\$VITE_WEB_VERSION\n/);
   assert.match(read('scripts/deploy-web-remote.sh'), /--build-arg "VITE_WEB_BUILD=\$\{commit_sha:0:12\}"/);
+});
+
+test('the web version is a comparable semver per build, and a deploy below the API floor is refused', () => {
+  // MAJOR from package.json, then the UTC build date and time; the static
+  // package version would have made CLIENT_MIN_VERSION_WEB gate nothing or
+  // every build at once.
+  const vite = read('vite.config.ts');
+  assert.match(vite, /const WEB_MAJOR = String\(pkg\.version\)\.split\('\.'\)\[0\] \|\| '1';/);
+  assert.match(vite, /const time = Number\(iso\.slice\(11, 16\)\.replace\(':', ''\)\);/, 'no leading zero on the time: semver');
+  assert.match(vite, /return `\$\{major\}\.\$\{date\}\.\$\{time\}`;/);
+  assert.match(vite, /process\.env\.VITE_WEB_VERSION/);
+  assert.match(vite, /'import\.meta\.env\.VITE_WEB_VERSION': JSON\.stringify\(WEB_VERSION\)/);
+  assert.doesNotMatch(vite, /JSON\.stringify\(pkg\.version\)/);
+
+  const remote = read('scripts/deploy-web-remote.sh');
+  assert.match(remote, /--build-arg "VITE_WEB_VERSION=\$web_version"/);
+  assert.match(remote, /printf '%s\.%s\.%s\\n' "\$major" "\$\(date -u \+%Y%m%d\)" "\$\(\(10#\$\(date -u \+%H%M\)\)\)"/, 'the same rule as vite.config.ts');
+  assert.match(remote, /check_web_floor "\$web_version"/);
+  assert.match(remote, /\/api\/capabilities/);
+  assert.match(remote, /"webVersion": "\$web_version"/);
+  assert.match(remote, /sort -V/);
+  assert.match(remote, /refusing to publish web \$version/);
+  assert.doesNotMatch(remote, /\/opt\/vybe\/|\.env\b/, 'the floor is read from the API, never from an env file');
+  assert.match(read('docs/HANDOFF.md'), /CLIENT_MIN_VERSION_WEB/);
+  assert.match(read('docs/HANDOFF.md'), /MAJOR\.YYYYMMDD\.HHMM/);
 });
 
 test('the premium flags the API no longer sends have no readers', () => {

@@ -78,14 +78,29 @@ type HttpFailure = { code?: string; response?: { status?: number; data?: unknown
 export type LoginFailure = { text: string; offerReset: boolean; retryAfterSec?: number | null };
 
 /**
- * The one sentence for every 429. The same function lives in apiError.ts;
- * it is repeated here because this module must stay import-free, and
- * tests/client-policy.test.mjs pins the two equal.
+ * How long until a 429 clears, for a person. The same function lives in
+ * apiError.ts; it is repeated here because this module must stay
+ * import-free, and tests/client-policy.test.mjs pins the two equal.
+ */
+export function retryWaitCopy(sec: number | null | undefined): string {
+  if (typeof sec !== 'number' || !Number.isFinite(sec) || sec <= 0) return 'in a moment';
+  const seconds = Math.ceil(sec);
+  if (seconds < 90) return `in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
+  if (seconds < 90 * 60) {
+    const minutes = Math.ceil(seconds / 60);
+    return `in about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  }
+  const hours = Math.ceil(seconds / 3600);
+  return `in about ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
+/**
+ * The 429 sentence for sign-in, where "attempts" is the honest word. Equal to
+ * apiError.ts's rateLimitedCopy(sec, 'attempts'); the pin is in
+ * tests/client-policy.test.mjs.
  */
 export function rateLimitedCopy(sec: number | null | undefined): string {
-  return typeof sec === 'number' && Number.isFinite(sec) && sec > 0
-    ? `Too many attempts, try again in ${Math.ceil(sec)} s`
-    : 'Too many attempts, try again in a moment';
+  return `Too many attempts. Try again ${retryWaitCopy(sec)}.`;
 }
 
 const positiveSeconds = (value: unknown): number | null => {
