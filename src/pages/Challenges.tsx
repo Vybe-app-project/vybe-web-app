@@ -1,9 +1,20 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, isValid, parseISO } from 'date-fns';
-import { api, errMsg, mediaUrl } from '../lib/api';
+import { addDays, format, isValid, parseISO } from 'date-fns';
+import { api, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import {
+  CHALLENGE_MAX_DAYS_DEFAULT,
+  CHALLENGE_TYPE_UNAVAILABLE,
+  checkChallengeType,
+  checkCreateWindow,
+  checkEndDate,
+  humanEndDateMessage,
+  isWeightScored,
+  mapChallengeError,
+  type ChallengeField,
+} from '../lib/challengeRules';
 import {
   formatChallengeWindow,
   pluralUnit,
@@ -100,14 +111,15 @@ type ChallengeUser = {
 type Participant = {
   user: ChallengeUser | string;
   joinedAt?: string;
-  progress: number;
+  /** Absent on a legacy weight-scored challenge: the API redacts every progress number there. */
+  progress?: number;
   lastUpdated?: string;
   completed?: boolean;
 };
 
 type LeaderboardEntry = {
   user: ChallengeUser | string;
-  progress: number;
+  progress?: number;
   rank?: number;
   lastUpdated?: string;
 };
@@ -135,11 +147,12 @@ export type Challenge = {
   tags?: string[];
   rewards?: string;
   leaderboard?: LeaderboardEntry[];
+  /** A legacy weight-scored challenge keeps only the head count here. */
   stats?: {
     totalParticipants: number;
-    totalProgress: number;
-    averageProgress: number;
-    completionRate: number;
+    totalProgress?: number;
+    averageProgress?: number;
+    completionRate?: number;
   };
 };
 
@@ -191,8 +204,17 @@ const TRACKED_GOAL_UNITS: Partial<Record<ChallengeType, GoalUnit[]>> = {
   steps: ['steps'],
 };
 
+/**
+ * What the create form offers. The API refuses anything scored on body
+ * weight (type weight_loss, unit pounds) with CHALLENGE_TYPE_UNAVAILABLE and
+ * answers an empty board for that type filter, so neither is offered. The
+ * unions above keep both so legacy documents still render as what they are.
+ */
+const CREATABLE_TYPES: ChallengeType[] = CHALLENGE_TYPES.filter((t) => !isWeightScored({ type: t }));
+const CREATABLE_UNITS: GoalUnit[] = GOAL_UNITS.filter((u) => !isWeightScored({ goalUnit: u }));
+
 const unitsForType = (type: ChallengeType): GoalUnit[] =>
-  TRACKED_GOAL_UNITS[type] ?? GOAL_UNITS;
+  TRACKED_GOAL_UNITS[type] ?? CREATABLE_UNITS;
 
 const isTracked = (c: Challenge) => Boolean(TRACKED_GOAL_UNITS[c.type]);
 
@@ -220,6 +242,44 @@ const pctOf = (value: number, goal: number) => (goal > 0 ? Math.min((value / goa
 
 const toDateInput = (d: Date) => format(d, 'yyyy-MM-dd');
 
+/**
+ * Latest end the picker offers for a start: the day before CHALLENGE_MAX_DAYS
+ * elapse. The forms send the end as local T23:59:59, so a full 365 calendar
+ * days would be 365 d + 23:59:59 and the API refuses it; this max is a
+ * convenience for the picker and `checkEndDate` on the exact instants is the
+ * rule.
+ */
+const maxEndInput = (startInput: string | undefined): string | undefined => {
+  if (!startInput) return undefined;
+  const start = new Date(`${startInput}T00:00:00`);
+  return Number.isNaN(start.getTime()) ? undefined : toDateInput(addDays(start, CHALLENGE_MAX_DAYS_DEFAULT - 1));
+};
+
+const responseData = (e: unknown): unknown => (e as { response?: { data?: unknown } } | undefined)?.response?.data;
+
+/** A toast sentence for a failed challenge call: the API body through the mapper, our own thrown Error as is, never a raw server string. */
+const challengeErrorMessage = (e: unknown, fallback: string): string => {
+  const response = (e as { response?: { data?: unknown } } | undefined)?.response;
+  if (response) return mapChallengeError(response.data, fallback).message;
+  return e instanceof Error && e.message ? e.message : fallback;
+};
+
+/** Stable ids on the create form so a refusal, ours or the API's, can land focus on the field it names. */
+const CREATE_FIELD_IDS: Record<ChallengeField, string> = {
+  title: 'ch-title',
+  description: 'ch-description',
+  type: 'ch-type',
+  category: 'ch-cadence',
+  goalUnit: 'ch-goal-unit',
+  goalUnitLabel: 'ch-goal-unit-label',
+  goal: 'ch-goal',
+  maxParticipants: 'ch-max',
+  startDate: 'ch-starts',
+  endDate: 'ch-ends',
+  tags: 'ch-tags',
+  rewards: 'ch-rewards',
+};
+
 function useDebounced<T>(value: T, delay = 350): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -231,7 +291,7 @@ function useDebounced<T>(value: T, delay = 350): T {
 
 const typeOptions = (withAll: boolean) => [
   ...(withAll ? [{ value: '', label: 'All types' }] : []),
-  ...CHALLENGE_TYPES.map((t) => ({ value: t, label: humanize(t) })),
+  ...CREATABLE_TYPES.map((t) => ({ value: t, label: humanize(t) })),
 ];
 const cadenceOptions = (withAll: boolean) => [
   ...(withAll ? [{ value: '', label: 'All cadences' }] : []),
@@ -342,10 +402,19 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
       if (!Number.isInteger(maxParticipants) || maxParticipants < 1 || maxParticipants > 10000) {
         errors.maxParticipants = 'Between 1 and 10,000.';
       }
+      // The exact instants the API will judge: local start of day and local end of day.
       const start = new Date(`${form.startDate}T00:00:00`);
       const end = new Date(`${form.endDate}T23:59:59`);
       if (Number.isNaN(start.getTime())) errors.startDate = 'Pick a start date.';
-      if (Number.isNaN(end.getTime()) || end <= start) errors.endDate = 'End date must be after the start.';
+      const endRule = checkEndDate({ startDate: start, endDate: form.endDate ? end : '' });
+      if (endRule) errors.endDate = humanEndDateMessage(endRule.message);
+      else if (!errors.startDate) {
+        const bounds = checkCreateWindow({ startDate: start, endDate: end });
+        if (bounds) errors[bounds.field] = bounds.message;
+      }
+      const typeRule = checkChallengeType({ type: form.type, goalUnit: form.goalUnit });
+      if (typeRule) errors[typeRule.field] = typeRule.message;
+      else if (!allowedUnits.includes(form.goalUnit)) errors.goalUnit = 'That unit is not tracked for this type. Pick another unit.';
       if (form.goalUnit === 'custom' && form.goalUnitLabel.trim().length > 30) errors.goalUnitLabel = 'Keep the unit under 30 characters.';
       setFieldError(errors);
       if (Object.keys(errors).length) throw Object.assign(new Error('Check the highlighted fields.'), { validation: true });
@@ -380,10 +449,20 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
     },
     // Validation toasts share a key so repeated taps replace the toast
     // rather than stacking three copies over the sheet footer.
-    onError: (e) =>
-      (e as { validation?: boolean })?.validation
-        ? toast.error(errMsg(e, 'Check the highlighted fields.'), undefined, { key: 'challenge-validation' })
-        : toast.error(errMsg(e, 'Could not create the challenge')),
+    onError: (e) => {
+      if ((e as { validation?: boolean })?.validation) {
+        toast.error(challengeErrorMessage(e, 'Check the highlighted fields.'), undefined, { key: 'challenge-validation' });
+        return;
+      }
+      // A refusal that names a field lands under it, with focus; anything else is a toast in plain words.
+      const m = mapChallengeError(responseData(e), 'Could not create the challenge');
+      if (m.kind === 'field') {
+        setFieldError((x) => ({ ...x, [m.field]: m.message }));
+        document.getElementById(CREATE_FIELD_IDS[m.field])?.focus();
+        return;
+      }
+      toast.error(m.message);
+    },
   });
 
   return (
@@ -414,6 +493,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
         }}
       >
         <Input
+          id={CREATE_FIELD_IDS.title}
           label="Title"
           placeholder="e.g. 5 workouts this week"
           maxLength={120}
@@ -422,6 +502,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
           onChange={(e) => setField('title', e.target.value)}
         />
         <Textarea
+          id={CREATE_FIELD_IDS.description}
           label="Description"
           rows={3}
           maxLength={2000}
@@ -433,9 +514,11 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Select
+            id={CREATE_FIELD_IDS.type}
             label="Type"
             value={form.type}
             options={typeOptions(false)}
+            error={fieldError.type}
             onChange={(v) => {
               const type = v as ChallengeType;
               const units = unitsForType(type);
@@ -444,24 +527,30 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
                 type,
                 goalUnit: units.includes(f.goalUnit) ? f.goalUnit : units[0],
               }));
+              setFieldError((errors) => (errors.type || errors.goalUnit ? { ...errors, type: undefined, goalUnit: undefined } : errors));
             }}
           />
           <Select
+            id={CREATE_FIELD_IDS.category}
             label="Cadence"
             value={form.category}
             options={cadenceOptions(false)}
+            error={fieldError.category}
             onChange={(v) => setField('category', v as ChallengeCategory)}
           />
           <Select
+            id={CREATE_FIELD_IDS.goalUnit}
             label="Goal unit"
             value={form.goalUnit}
             options={allowedUnits.map((u) => ({ value: u, label: humanize(u) }))}
             hint={isTracked({ type: form.type } as Challenge) ? 'Tracked from logged activity' : undefined}
+            error={fieldError.goalUnit}
             onChange={(v) => setField('goalUnit', v as GoalUnit)}
           />
         </div>
         {form.goalUnit === 'custom' ? (
           <Input
+            id={CREATE_FIELD_IDS.goalUnitLabel}
             label="Unit name"
             hint="What are people counting? Shown after every number, e.g. “40 / 100 pull-ups”."
             placeholder="pull-ups"
@@ -474,6 +563,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Input
+            id={CREATE_FIELD_IDS.goal}
             label="Goal"
             type="number"
             inputMode="numeric"
@@ -485,6 +575,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
             onChange={(e) => setField('goal', e.target.value)}
           />
           <Input
+            id={CREATE_FIELD_IDS.maxParticipants}
             label="Max participants"
             type="number"
             inputMode="numeric"
@@ -497,21 +588,27 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
             onChange={(e) => setField('maxParticipants', e.target.value)}
           />
           <DateField
+            id={CREATE_FIELD_IDS.startDate}
             label="Starts"
             value={form.startDate}
+            min={toDateInput(new Date())}
             error={fieldError.startDate}
             onChange={(e) => setField('startDate', e.target.value)}
           />
           <DateField
+            id={CREATE_FIELD_IDS.endDate}
             label="Ends"
+            hint="Up to a year long."
             value={form.endDate}
             min={form.startDate}
+            max={maxEndInput(form.startDate)}
             error={fieldError.endDate}
             onChange={(e) => setField('endDate', e.target.value)}
           />
         </div>
 
         <Input
+          id={CREATE_FIELD_IDS.tags}
           label="Tags"
           hint="Comma separated, up to 20"
           placeholder="strength, beginner"
@@ -519,6 +616,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
           onChange={(e) => setField('tags', e.target.value)}
         />
         <Input
+          id={CREATE_FIELD_IDS.rewards}
           label="Rewards"
           placeholder="Bragging rights, a badge, a rest day…"
           maxLength={500}
@@ -560,6 +658,7 @@ function EditChallengeModal({
   const [rewards, setRewards] = useState('');
   const [goalUnitLabel, setGoalUnitLabel] = useState('');
   const [isPublic, setIsPublic] = useState(true);
+  const [fieldError, setFieldError] = useState<{ endDate?: string }>({});
 
   useEffect(() => {
     if (!challenge) return;
@@ -570,7 +669,21 @@ function EditChallengeModal({
     setRewards(challenge.rewards ?? '');
     setGoalUnitLabel(challenge.goalUnitLabel ?? '');
     setIsPublic(challenge.isPublic !== false);
+    setFieldError({});
   }, [challenge]);
+
+  // The end date is judged from the stored start, on patch as on create.
+  const storedStart = challenge ? parseISO(challenge.startDate) : null;
+  const startInput = storedStart && isValid(storedStart) ? toDateInput(storedStart) : undefined;
+  // Once people have joined the end can only move later, so the picker's
+  // floor is the stored end (or the start, whichever is later), not the start.
+  const minEndInput = (() => {
+    if (!challenge) return startInput;
+    const original = parseISO(challenge.endDate);
+    if ((challenge.participants?.length ?? 0) === 0 || !isValid(original)) return startInput;
+    const floor = storedStart && isValid(storedStart) && storedStart > original ? storedStart : original;
+    return toDateInput(floor);
+  })();
 
   const update = useMutation({
     mutationFn: async () => {
@@ -582,7 +695,22 @@ function EditChallengeModal({
       }
       const original = parseISO(challenge.endDate);
       if (endDate && (!isValid(original) || toDateInput(original) !== endDate)) {
-        payload.endDate = new Date(`${endDate}T23:59:59`).toISOString();
+        // The API's end-date rule measured from the stored start, then its two patch-only rules.
+        const end = new Date(`${endDate}T23:59:59`);
+        const start = parseISO(challenge.startDate);
+        const rule = checkEndDate({ startDate: isValid(start) ? start : null, endDate: end });
+        const refusal = rule
+          ? humanEndDateMessage(rule.message)
+          : end <= new Date()
+            ? 'Pick an end date in the future.'
+            : (challenge.participants?.length ?? 0) > 0 && isValid(original) && end < original
+              ? humanEndDateMessage('An active challenge with participants can only be extended')
+              : null;
+        if (refusal) {
+          setFieldError({ endDate: refusal });
+          throw Object.assign(new Error('Check the highlighted fields.'), { validation: true });
+        }
+        payload.endDate = end.toISOString();
       }
       if ((rewards.trim() || '') !== (challenge.rewards ?? '')) payload.rewards = rewards.trim();
       if (challenge.goalUnit === 'custom' && goalUnitLabel.trim() !== (challenge.goalUnitLabel ?? '')) {
@@ -602,7 +730,20 @@ function EditChallengeModal({
       qc.invalidateQueries({ queryKey: ['challenges'] });
       onClose();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not update the challenge')),
+    onError: (e) => {
+      if ((e as { validation?: boolean })?.validation) {
+        toast.error(challengeErrorMessage(e, 'Check the highlighted fields.'), undefined, { key: 'challenge-validation' });
+        document.getElementById('ch-edit-ends')?.focus();
+        return;
+      }
+      const m = mapChallengeError(responseData(e), 'Could not update the challenge');
+      if (m.kind === 'field' && m.field === 'endDate') {
+        setFieldError({ endDate: m.message });
+        document.getElementById('ch-edit-ends')?.focus();
+        return;
+      }
+      toast.error(m.message);
+    },
   });
 
   return (
@@ -638,10 +779,17 @@ function EditChallengeModal({
           onChange={(e) => setDescription(e.target.value)}
         />
         <DateField
+          id="ch-edit-ends"
           label="Ends"
-          hint="An active challenge with participants can only be extended."
+          hint="Up to a year after the start. Once people have joined, the end can only move later."
           value={endDate}
-          onChange={(e) => setEndDate(e.target.value)}
+          min={minEndInput}
+          max={maxEndInput(startInput)}
+          error={fieldError.endDate}
+          onChange={(e) => {
+            setEndDate(e.target.value);
+            setFieldError({});
+          }}
         />
         <Input label="Rewards" maxLength={500} value={rewards} onChange={(e) => setRewards(e.target.value)} />
         {challenge?.goalUnit === 'custom' ? (
@@ -724,7 +872,7 @@ function LeaderboardList({ challenge, myId }: { challenge: Challenge; myId: stri
           const rank = entry.rank ?? index + 1;
           const isMe = u._id === myId;
           const medal = RANK_STYLE[rank];
-          const pct = pctOf(entry.progress, challenge.goal);
+          const pct = pctOf(entry.progress ?? 0, challenge.goal);
           return (
             <li
               key={`${u._id}-${rank}`}
@@ -750,7 +898,7 @@ function LeaderboardList({ challenge, myId }: { challenge: Challenge; myId: stri
                 <Progress value={pct} size="sm" tone={pct >= 100 ? 'success' : 'brand'} className="mt-1.5 max-w-48" label={`${displayName(u)} progress`} />
               </div>
               <span className="type-stat shrink-0 text-lg text-text-1">
-                {formatStat(entry.progress)}
+                {formatStat(entry.progress ?? 0)}
                 {unitOf(challenge) ? (
                   <span className="ml-1 text-2xs font-semibold tracking-normal text-text-3 [font-variation-settings:'wdth'_100]">
                     {unitOf(challenge)}
@@ -801,6 +949,13 @@ function ChallengeDetailModal({
     enabled: !!challengeId,
   });
 
+  const challenge = detail.data;
+  // A legacy weight-scored challenge: the API blanks its board (no progress
+  // numbers, an empty leaderboard, the head count only) and answers 404 on
+  // /leaderboard and /stats, so neither is asked for and nothing here treats
+  // that as a failure. It can still be left, and its creator can still close it.
+  const legacy = !!challenge && isWeightScored(challenge);
+
   const stats = useQuery({
     queryKey: ['challenges', 'stats', challengeId],
     queryFn: async (): Promise<ChallengeStats> => {
@@ -809,10 +964,8 @@ function ChallengeDetailModal({
       );
       return data.stats;
     },
-    enabled: !!challengeId,
+    enabled: !!challengeId && !legacy,
   });
-
-  const challenge = detail.data;
   const myId = me?._id ?? '';
   const myParticipation = challenge?.participants?.find((p) => idOf(p.user) === myId);
   const joined = !!myParticipation;
@@ -839,6 +992,18 @@ function ChallengeDetailModal({
     qc.invalidateQueries({ queryKey: ['challenges'] });
   };
 
+  /** Plain words in the toast; a CHALLENGE_TYPE_UNAVAILABLE answer also refreshes the view into its no-longer-scored state. */
+  const onChallengeError = (e: unknown, fallback: string) => {
+    const response = (e as { response?: { data?: unknown } } | undefined)?.response;
+    if (!response) {
+      toast.error(challengeErrorMessage(e, fallback));
+      return;
+    }
+    const m = mapChallengeError(response.data, fallback);
+    toast.error(m.message);
+    if (m.code === CHALLENGE_TYPE_UNAVAILABLE) invalidate();
+  };
+
   const join = useMutation({
     mutationFn: async () => {
       const { data } = await api.post(`/challenges/${challengeId}/join`);
@@ -854,7 +1019,7 @@ function ChallengeDetailModal({
       pulse();
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not join the challenge')),
+    onError: (e) => onChallengeError(e, 'Could not join the challenge'),
   });
 
   const leave = useMutation({
@@ -868,7 +1033,7 @@ function ChallengeDetailModal({
       });
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not leave the challenge')),
+    onError: (e) => onChallengeError(e, 'Could not leave the challenge'),
   });
 
   const saveProgress = useMutation({
@@ -885,7 +1050,7 @@ function ChallengeDetailModal({
       pulse();
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save progress')),
+    onError: (e) => onChallengeError(e, 'Could not save progress'),
   });
 
   const autoUpdate = useMutation({
@@ -900,7 +1065,7 @@ function ChallengeDetailModal({
       pulse();
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not sync your activity')),
+    onError: (e) => onChallengeError(e, 'Could not sync your activity'),
   });
 
   const time = challenge ? timeBadge(challenge) : null;
@@ -941,6 +1106,8 @@ function ChallengeDetailModal({
               <Button variant="ghost" loading={leave.isPending} onClick={() => leave.mutate()}>
                 Leave challenge
               </Button>
+            ) : legacy ? (
+              <p className="text-sm text-text-3">No longer open to join.</p>
             ) : (
               <Button
                 variant="primary"
@@ -1013,11 +1180,33 @@ function ChallengeDetailModal({
             ]}
           />
 
+          {legacy ? (
+            <Callout tone="info" title="This challenge is no longer scored">
+              {/* Only say what this viewer can do: Leave shows when joined, Close when the creator has not closed it yet. */}
+              {[
+                'Vybe does not run challenges scored on body weight.',
+                joined && isOwner && !archived
+                  ? 'You can still leave it or close it.'
+                  : joined
+                    ? 'You can still leave it.'
+                    : isOwner && !archived
+                      ? 'You can still close it.'
+                      : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            </Callout>
+          ) : null}
+
           {pane === 'leaderboard' ? (
-            <LeaderboardList challenge={challenge} myId={myId} />
+            legacy ? (
+              <EmptyState size="sm" icon={<Trophy size={24} />} title="No leaderboard" message="Progress is not shown for this challenge." />
+            ) : (
+              <LeaderboardList challenge={challenge} myId={myId} />
+            )
           ) : (
             <>
-              <StatGrid columns={4}>
+              <StatGrid columns={legacy ? 2 : 4}>
                 <StatTile
                   label="Goal"
                   value={formatStat(challenge.goal)}
@@ -1032,21 +1221,25 @@ function ChallengeDetailModal({
                   icon={<Users size={20} />}
                   loading={stats.isLoading && !challenge.stats}
                 />
-                <StatTile
-                  label="Average progress"
-                  value={formatStat(stats.data?.averageProgress ?? challenge.stats?.averageProgress ?? 0)}
-                  unit={unit || undefined}
-                  icon={<TrendingUp size={20} />}
-                  loading={stats.isLoading && !challenge.stats}
-                />
-                <StatTile
-                  label="Completion"
-                  value={Math.round(stats.data?.completionRate ?? challenge.stats?.completionRate ?? 0)}
-                  unit="%"
-                  icon={<CheckCircle size={20} />}
-                  tone={(stats.data?.completionRate ?? 0) > 0 ? 'accent' : 'neutral'}
-                  loading={stats.isLoading && !challenge.stats}
-                />
+                {legacy ? null : (
+                  <>
+                    <StatTile
+                      label="Average progress"
+                      value={formatStat(stats.data?.averageProgress ?? challenge.stats?.averageProgress ?? 0)}
+                      unit={unit || undefined}
+                      icon={<TrendingUp size={20} />}
+                      loading={stats.isLoading && !challenge.stats}
+                    />
+                    <StatTile
+                      label="Completion"
+                      value={Math.round(stats.data?.completionRate ?? challenge.stats?.completionRate ?? 0)}
+                      unit="%"
+                      icon={<CheckCircle size={20} />}
+                      tone={(stats.data?.completionRate ?? 0) > 0 ? 'accent' : 'neutral'}
+                      loading={stats.isLoading && !challenge.stats}
+                    />
+                  </>
+                )}
               </StatGrid>
 
               <ul className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-text-2">
@@ -1079,7 +1272,7 @@ function ChallengeDetailModal({
                 </Callout>
               ) : null}
 
-              {joined ? (
+              {joined && !legacy ? (
                 <div className="card space-y-4 p-4">
                   <div className="flex items-center gap-4">
                     <Ring
@@ -1149,7 +1342,7 @@ function ChallengeDetailModal({
                     </form>
                   )}
                 </div>
-              ) : closed ? (
+              ) : closed && !legacy ? (
                 <Callout tone="info" title="This challenge has ended">
                   Check the leaderboard for the final standings, or browse what is running now.
                 </Callout>
@@ -1372,7 +1565,7 @@ export default function Challenges() {
       setPendingDelete(null);
       if (detailId === id) setDetailId(null);
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not delete the challenge')),
+    onError: (e) => toast.error(challengeErrorMessage(e, 'Could not delete the challenge')),
   });
 
   const browseList = browse.data?.challenges ?? [];
