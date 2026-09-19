@@ -10,6 +10,7 @@ import { postLoginTarget } from './lib/authRedirect';
 import WelcomeSheet from './pages/WelcomeSheet';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth, useSessionRefresh } from './lib/auth';
+import { AccountPreferencesSync } from './lib/accountPreferences';
 import { lazyPage } from './lib/navigation';
 
 /**
@@ -234,6 +235,7 @@ export default function App() {
       <ScrollToTop />
       <PwaUpdates />
       <SessionRefresh />
+      <AccountPreferencesSync />
       <Suspense fallback={<FullPageSpinner />}>
         <RouteErrorBoundary>
           <Routes>
