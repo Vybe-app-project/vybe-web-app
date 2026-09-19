@@ -83,7 +83,12 @@ test('checkCreateWindow mirrors the normaliser bounds as field errors', () => {
   const now = new Date('2026-09-19T12:00:00Z');
   const ok = { startDate: new Date(now.getTime() - HOUR), endDate: new Date(now.getTime() + 30 * DAY), now };
   assert.equal(rules.checkCreateWindow(ok), null);
-  assert.deepEqual(rules.checkCreateWindow({ ...ok, startDate: new Date(now.getTime() - 25 * HOUR) }), { field: 'startDate', message: 'Pick a start date no earlier than yesterday.' });
+  assert.deepEqual(rules.checkCreateWindow({ ...ok, startDate: new Date(now.getTime() - 25 * HOUR) }), { field: 'startDate', message: 'Pick today or a later date.' });
+  // A date-only picker sends local midnight; yesterday's midnight is past the 24 h line, so the copy must not offer it.
+  const yesterdayMidnight = new Date(2026, 8, 18, 0, 0, 0);
+  const noonToday = new Date(2026, 8, 19, 12, 0, 0);
+  assert.equal(rules.checkCreateWindow({ ...ok, startDate: yesterdayMidnight, now: noonToday })?.field, 'startDate');
+  assert.equal(rules.checkCreateWindow({ ...ok, startDate: new Date(2026, 8, 19, 0, 0, 0), now: noonToday }), null);
   assert.equal(rules.checkCreateWindow({ ...ok, startDate: new Date(now.getTime() - 23 * HOUR) }), null);
   assert.deepEqual(rules.checkCreateWindow({ ...ok, endDate: new Date(now.getTime() - HOUR) }), { field: 'endDate', message: 'Pick an end date in the future.' });
   assert.deepEqual(rules.checkCreateWindow({ ...ok, endDate: now }), { field: 'endDate', message: 'Pick an end date in the future.' });
@@ -137,7 +142,11 @@ test('mapChallengeError: route bodies, the envelope, 426/429, and never a raw pr
   assert.equal(rules.mapChallengeError({ success: false, message: 'type is not supported' }, fallback).field, 'type');
   assert.equal(rules.mapChallengeError({ success: false, message: 'category is not supported' }, fallback).field, 'category');
   assert.equal(rules.mapChallengeError({ success: false, message: 'goalUnit is not supported' }, fallback).field, 'goalUnit');
-  assert.equal(rules.mapChallengeError({ success: false, message: 'Challenge dates must run from today through at most one year' }, fallback).field, 'endDate');
+  assert.deepEqual(rules.mapChallengeError({ success: false, message: 'Challenge dates must run from today through at most one year' }, fallback), {
+    kind: 'field',
+    field: 'endDate',
+    message: 'Start today or later and end within a year from today.',
+  });
   assert.equal(rules.mapChallengeError({ success: false, message: 'maxParticipants must be an integer from 1 to 10000' }, fallback).field, 'maxParticipants');
   assert.equal(rules.mapChallengeError({ success: false, message: 'maxParticipants must be an integer between the current participant count and 10000' }, fallback).field, 'maxParticipants');
   assert.equal(rules.mapChallengeError({ success: false, message: 'goalUnitLabel must be 30 characters or fewer' }, fallback).field, 'goalUnitLabel');

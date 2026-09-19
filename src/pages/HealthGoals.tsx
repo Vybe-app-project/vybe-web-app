@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import {
+  capInLb,
   checkHealthGoalsPayload,
   guardrailFormNote,
   guardrailMessageFor,
@@ -475,8 +476,9 @@ export default function HealthGoals() {
   const recalcDisabled = !hasTargets || recalculate.isPending;
 
   // The pace cap at the typed weight, in the units on screen (1 % of body weight a week by default).
+  // In lb it is the largest tenth the form accepts, so the hint never names a value Save refuses.
   const capKg = inRange(form.currentWeight, ranges.weight.min, ranges.weight.max) ? weeklyRateCap(parseWeight(Number(form.currentWeight), system)) : null;
-  const capShown = capKg == null ? null : system === 'imperial' ? kgToLb(capKg) : capKg;
+  const capShown = capKg == null ? null : system === 'imperial' ? capInLb(capKg) : capKg;
   const paceHint = [
     form.goal === 'maintain_weight'
       ? 'Kept for when you change your goal.'

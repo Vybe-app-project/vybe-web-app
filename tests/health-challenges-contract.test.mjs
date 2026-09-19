@@ -137,7 +137,8 @@ test('no raw server string is shown on either page, and the copy avoids the regi
 
 test('the rules modules keep the seams the brief names', () => {
   assert.match(healthRules, /export const HEALTH_GUARDRAIL_DEFAULTS: HealthGuardrailThresholds = \{\s*minCalories: 1200,\s*maxWeeklyRatePct: 1,\s*minTargetBmi: 0,\s*\}/);
-  assert.match(healthRules, /^import \{ kgToLb \} from '\.\/unitConversions';$/m);
+  // One import, from the conversions module only: the lb cap is derived with lbToKg so the shown value round-trips under the kg cap.
+  assert.match(healthRules, /^import \{ KG_PER_LB, lbToKg \} from '\.\/unitConversions';$/m);
   assert.equal((healthRules.match(/^import /gm) ?? []).length, 1);
   assert.match(challengeRules, /export const CHALLENGE_MAX_DAYS_DEFAULT = 365;/);
   assert.doesNotMatch(challengeRules, /^import /m);

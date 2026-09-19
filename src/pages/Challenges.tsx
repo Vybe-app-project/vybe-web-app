@@ -591,6 +591,7 @@ function CreateChallengeModal({ open, onClose }: { open: boolean; onClose: () =>
             id={CREATE_FIELD_IDS.startDate}
             label="Starts"
             value={form.startDate}
+            min={toDateInput(new Date())}
             error={fieldError.startDate}
             onChange={(e) => setField('startDate', e.target.value)}
           />
@@ -674,6 +675,15 @@ function EditChallengeModal({
   // The end date is judged from the stored start, on patch as on create.
   const storedStart = challenge ? parseISO(challenge.startDate) : null;
   const startInput = storedStart && isValid(storedStart) ? toDateInput(storedStart) : undefined;
+  // Once people have joined the end can only move later, so the picker's
+  // floor is the stored end (or the start, whichever is later), not the start.
+  const minEndInput = (() => {
+    if (!challenge) return startInput;
+    const original = parseISO(challenge.endDate);
+    if ((challenge.participants?.length ?? 0) === 0 || !isValid(original)) return startInput;
+    const floor = storedStart && isValid(storedStart) && storedStart > original ? storedStart : original;
+    return toDateInput(floor);
+  })();
 
   const update = useMutation({
     mutationFn: async () => {
@@ -773,7 +783,7 @@ function EditChallengeModal({
           label="Ends"
           hint="Up to a year after the start. Once people have joined, the end can only move later."
           value={endDate}
-          min={startInput}
+          min={minEndInput}
           max={maxEndInput(startInput)}
           error={fieldError.endDate}
           onChange={(e) => {
@@ -1172,7 +1182,19 @@ function ChallengeDetailModal({
 
           {legacy ? (
             <Callout tone="info" title="This challenge is no longer scored">
-              Vybe does not run challenges scored on body weight. You can still leave it, and the creator can close it.
+              {/* Only say what this viewer can do: Leave shows when joined, Close when the creator has not closed it yet. */}
+              {[
+                'Vybe does not run challenges scored on body weight.',
+                joined && isOwner && !archived
+                  ? 'You can still leave it or close it.'
+                  : joined
+                    ? 'You can still leave it.'
+                    : isOwner && !archived
+                      ? 'You can still close it.'
+                      : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
             </Callout>
           ) : null}
 

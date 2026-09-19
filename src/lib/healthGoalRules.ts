@@ -18,7 +18,7 @@
  * comes back. Swap these constants for a capabilities read if the API lane
  * exposes them later.
  */
-import { kgToLb } from './unitConversions';
+import { KG_PER_LB, lbToKg } from './unitConversions';
 
 export const HEALTH_GOAL_GUARDRAIL = 'HEALTH_GOAL_GUARDRAIL';
 export const CLIENT_UPDATE_REQUIRED = 'CLIENT_UPDATE_REQUIRED';
@@ -200,12 +200,26 @@ export function checkHealthGoalsPayload(payload: HealthGoalsPayload, t: HealthGu
 }
 
 /**
+ * A kg pace cap as the largest one-decimal lb value the form will accept:
+ * typing the returned number sends lbToKg(value) ≤ capKg. kgToLb rounds
+ * half-up, so its result lands over the cap for about 40 % of body weights
+ * (0.8 kg → 1.8 lb → 0.82 kg); this walks down from just above the exact
+ * quotient until the round trip fits. Never negative; 0 for a 0 cap.
+ */
+export function capInLb(capKg: number): number {
+  let tenths = Math.max(0, Math.ceil((capKg / KG_PER_LB) * 10) + 1);
+  while (tenths > 0 && lbToKg(tenths / 10) > capKg) tenths -= 1;
+  return tenths / 10;
+}
+
+/**
  * The server's copy, re-rendered in the person's units where the limit is a
  * weight. kcal copy is unit-free and the target-floor copy carries no number.
+ * The lb cap is the largest value the form accepts, not the nearest tenth.
  */
 export function guardrailMessageFor(r: GuardrailRefusal, system: 'metric' | 'imperial'): string {
   if (system === 'imperial' && r.rule === 'weekly_rate') {
-    return `That pace is faster than Vybe plans for. Pick a pace up to ${kgToLb(r.limit)} lb a week.`;
+    return `That pace is faster than Vybe plans for. Pick a pace up to ${capInLb(r.limit)} lb a week.`;
   }
   return r.message;
 }

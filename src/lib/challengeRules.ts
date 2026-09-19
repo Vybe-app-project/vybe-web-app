@@ -97,10 +97,14 @@ export type CreateWindowRefusal = { field: 'startDate' | 'endDate'; message: str
  * The normaliser's extra bounds on create, as field errors in plain copy.
  * The server answers all three with one sentence ('Challenge dates must run
  * from today through at most one year'); here each lands on its own field.
+ * The start rule is now − 24 h, but the form sends a date as local midnight,
+ * so yesterday's midnight is already past the line at any time after 00:00
+ * today; the copy therefore says "today or later", which is what a date
+ * picker can actually satisfy.
  */
 export function checkCreateWindow({ startDate, endDate, now = new Date() }: { startDate: Date; endDate: Date; now?: Date }): CreateWindowRefusal | null {
   if (startDate.getTime() < now.getTime() - CHALLENGE_CREATE_WINDOW.pastGraceHours * HOUR_MS) {
-    return { field: 'startDate', message: 'Pick a start date no earlier than yesterday.' };
+    return { field: 'startDate', message: 'Pick today or a later date.' };
   }
   if (endDate.getTime() <= now.getTime()) return { field: 'endDate', message: 'Pick an end date in the future.' };
   if (endDate.getTime() > now.getTime() + CHALLENGE_CREATE_WINDOW.futureMaxDays * DAY_MS) {
@@ -153,7 +157,7 @@ const FIELD_MESSAGES: Array<[RegExp, ChallengeField, string]> = [
   [/^goalUnit is not supported/, 'goalUnit', 'Choose an option.'],
   [/^type is not supported/, 'type', 'Choose an option.'],
   [/^category is not supported/, 'category', 'Choose an option.'],
-  [/^Challenge dates must run/, 'endDate', 'Start no earlier than yesterday and end within a year from today.'],
+  [/^Challenge dates must run/, 'endDate', 'Start today or later and end within a year from today.'],
   [/^maxParticipants must/, 'maxParticipants', 'Between 1 and 10,000, and not below the people already in.'],
   [/^endDate must be after the start date/, 'endDate', humanEndDateMessage('endDate must be after the start date and in the future')],
   [/can only be extended$/, 'endDate', humanEndDateMessage('An active challenge with participants can only be extended')],

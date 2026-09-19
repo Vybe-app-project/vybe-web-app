@@ -141,7 +141,8 @@ test('checkHealthGoalsPayload derives the computed target the way the server doe
 test('copy is the server copy verbatim in metric and re-rendered in lb for the pace cap', () => {
   const pace = rules.checkHealthGoalsPayload({ ...base, goal: 'lose_weight', weeklyGoal: 1 });
   assert.equal(rules.guardrailMessageFor(pace, 'metric'), pace.message);
-  assert.match(rules.guardrailMessageFor(pace, 'imperial'), /1\.8 lb a week/);
+  // 0.8 kg is 1.76 lb; 1.8 lb would send 0.82 kg and be refused, so the copy says 1.7.
+  assert.match(rules.guardrailMessageFor(pace, 'imperial'), /1\.7 lb a week/);
   assert.doesNotMatch(rules.guardrailMessageFor(pace, 'imperial'), /kg/);
   const floor = rules.checkHealthGoalsPayload({ currentWeight: 55, heightCm: 160, age: 30, gender: 'female', activityLevel: 'sedentary', goal: 'lose_weight', weeklyGoal: 0.5 });
   assert.equal(rules.guardrailMessageFor(floor, 'imperial'), floor.message);
@@ -152,6 +153,23 @@ test('copy is the server copy verbatim in metric and re-rendered in lb for the p
     assert.doesNotMatch(rules.guardrailMessageFor(r, 'imperial'), FORBIDDEN);
   }
   assert.equal(rules.formatKcal(1239), '1,239 kcal');
+});
+
+test('capInLb names the largest lb tenth whose round trip stays under the kg cap', async () => {
+  const { lbToKg, kgToLb } = await import('../src/lib/unitConversions.ts');
+  assert.equal(rules.capInLb(0.8), 1.7);
+  assert.equal(kgToLb(0.8), 1.8); // the half-up rounding the hint used to show
+  assert.equal(lbToKg(1.8), 0.82); // and why it was refused
+  assert.equal(rules.capInLb(1.6), 3.5);
+  assert.equal(rules.capInLb(0), 0);
+  // Every whole-kg weight the imperial form accepts: the shown lb value is accepted, and the next tenth is not.
+  for (let kg = 20; kg <= 500; kg++) {
+    const cap = rules.weeklyRateCap(kg, T);
+    const shown = rules.capInLb(cap);
+    assert.ok(lbToKg(shown) <= cap, `${kg} kg: ${shown} lb sends ${lbToKg(shown)} kg over ${cap}`);
+    assert.ok(lbToKg(Math.round((shown + 0.1) * 10) / 10) > cap, `${kg} kg: ${shown} lb is not the largest`);
+    assert.equal(rules.guardrailMessageFor(rules.checkHealthGoalsPayload({ ...base, currentWeight: kg, goal: 'lose_weight', weeklyGoal: 10 }), 'imperial'), `That pace is faster than Vybe plans for. Pick a pace up to ${shown} lb a week.`);
+  }
 });
 
 test('guardrailFormNote only speaks when the maintenance estimate itself is under the floor', () => {
