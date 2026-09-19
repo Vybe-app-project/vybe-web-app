@@ -205,6 +205,15 @@ test('slaState thresholds: 24 h / 72 h for reports, 3 d / 7 d for appeals', () =
   assert.equal(reports.slaState(hoursAgo(3), NOW, 'report').ageMs, 3 * 3_600_000);
 });
 
+test('slaLabel puts due and overdue in the badge text, not only in its tone', () => {
+  assert.equal(reports.slaLabel(reports.slaState(hoursAgo(3), NOW, 'report')), 'Waiting 3 h');
+  assert.equal(reports.slaLabel(reports.slaState(hoursAgo(30), NOW, 'report')), 'Waiting 30 h · due');
+  assert.equal(reports.slaLabel(reports.slaState(daysAgo(4), NOW, 'report')), 'Waiting 4 d · overdue');
+  assert.equal(reports.slaLabel(reports.slaState(daysAgo(3), NOW, 'appeal')), 'Waiting 3 d · due');
+  assert.equal(reports.slaLabel(reports.slaState(daysAgo(8), NOW, 'appeal')), 'Waiting 8 d · overdue');
+  assert.equal(reports.slaLabel({ state: 'unknown', ageMs: null }), 'Age unknown');
+});
+
 test('ageLabel reads in minutes, hours, then days', () => {
   assert.equal(reports.ageLabel(null), 'Age unknown');
   assert.equal(reports.ageLabel(30_000), 'Waiting under a minute');
@@ -229,6 +238,51 @@ test('canDecideAppeal refuses the original actor unless SUPER_ADMIN and needs an
   assert.deepEqual(reports.canDecideAppeal({ appeal: { status: 'upheld' } }, bob), { ok: false, reason: 'No open appeal' });
   assert.deepEqual(reports.canDecideAppeal({}, bob), { ok: false, reason: 'No open appeal' });
   assert.deepEqual(reports.canDecideAppeal(open, undefined), { ok: true, reason: null }, 'an unknown identity leaves the server to decide');
+});
+
+test('reversalOutcome follows statement.action as reverseEnforcement does, then the target for remove_content', () => {
+  // A suspension lifts and the strike goes whatever was reported.
+  for (const targetType of reports.TARGET_TYPES) {
+    assert.equal(reports.reversalOutcome({ targetType, statement: { action: 'suspend_user' } }), 'account', targetType);
+    assert.equal(reports.reversalOutcome({ targetType, statement: { action: 'mark_sensitive' } }), 'screen', targetType);
+  }
+  // remove_content comes back only where the API has a reverse handler.
+  assert.deepEqual([...reports.RESTORABLE_TARGETS], ['post', 'livestream', 'gym_community']);
+  for (const targetType of reports.RESTORABLE_TARGETS) {
+    assert.equal(reports.reversalOutcome({ targetType, statement: { action: 'remove_content' } }), 'content', targetType);
+  }
+  for (const targetType of ['meal', 'workout', 'workout_plan', 'comment', 'livestream_message', 'gym_review']) {
+    assert.equal(reports.reversalOutcome({ targetType, statement: { action: 'remove_content' } }), 'none', targetType);
+  }
+  // No statement, or an action that removed nothing: nothing comes back.
+  assert.equal(reports.reversalOutcome({ targetType: 'post' }), 'none');
+  assert.equal(reports.reversalOutcome({ targetType: 'post', statement: { action: 'no_action' } }), 'none');
+  assert.equal(reports.reversalOutcome(undefined), 'none');
+  // The copy the moderator reads names the consequence.
+  assert.match(reports.reversalDescription({ targetType: 'meal', statement: { action: 'suspend_user' } }), /account is restored and the strike is removed/);
+  assert.match(reports.reversalDescription({ targetType: 'post', statement: { action: 'mark_sensitive' } }), /sensitivity screen is cleared/);
+  assert.match(reports.reversalDescription({ targetType: 'livestream', statement: { action: 'remove_content' } }), /comes back/);
+  assert.match(reports.reversalDescription({ targetType: 'comment', statement: { action: 'remove_content' } }), /cannot|deleted outright/);
+  assert.doesNotMatch(reports.reversalDescription({ targetType: 'comment', statement: { action: 'remove_content' } }), /strike/, 'only a suspension carries a strike');
+  assert.deepEqual(Object.keys(reports.REVERSAL_COPY).sort(), ['account', 'content', 'none', 'screen']);
+});
+
+test('moderationBody sends only the keys the action takes', () => {
+  assert.deepEqual(reports.moderationBody({ action: 'mark_reviewed', note: '', rule: 'CG-09', durationDays: '30' }), { action: 'mark_reviewed' }, 'no rule, no duration, no empty note');
+  assert.deepEqual(reports.moderationBody({ action: 'dismiss', note: '  fine  ', rule: 'CG-09' }), { action: 'dismiss', note: 'fine', rule: 'CG-09' }, 'dismiss cites a rule');
+  assert.deepEqual(reports.moderationBody({ action: 'remove_content', note: 'Spam links', rule: 'CG-09', durationDays: '7' }), { action: 'remove_content', note: 'Spam links', rule: 'CG-09' }, 'durationDays is suspend_user only');
+  assert.deepEqual(reports.moderationBody({ action: 'mark_sensitive', note: 'Graphic', rule: 'CG-04', durationDays: 7 }), { action: 'mark_sensitive', note: 'Graphic', rule: 'CG-04' });
+  assert.deepEqual(reports.moderationBody({ action: 'suspend_user', note: 'Repeated harassment', rule: 'CG-01', durationDays: ' 14 ' }), { action: 'suspend_user', note: 'Repeated harassment', rule: 'CG-01', durationDays: 14 });
+  assert.deepEqual(reports.moderationBody({ action: 'suspend_user', note: 'Repeated harassment', rule: 'CG-01', durationDays: '' }), { action: 'suspend_user', note: 'Repeated harassment', rule: 'CG-01' }, 'empty means indefinite');
+  assert.deepEqual(reports.moderationBody({ action: 'restore_user', note: 'Appeal by email', rule: 'CG-01', durationDays: '3' }), { action: 'restore_user', note: 'Appeal by email' });
+  assert.deepEqual(reports.moderationBody({ action: 'suspend_user', note: 'ok', rule: '', durationDays: null }), { action: 'suspend_user', note: 'ok' }, 'a blank rule is omitted, not sent as ""');
+  assert.equal(reports.moderationBody({ action: 'remove_content', note: 'x'.repeat(1200) }).note.length, 1000);
+  for (const action of reports.MODERATION_ACTIONS) {
+    const keys = Object.keys(reports.moderationBody({ action, note: 'Long enough', rule: 'CG-12', durationDays: '5' }));
+    for (const key of keys) assert.ok(['action', 'note', 'rule', 'durationDays'].includes(key), `${action} sent ${key}`);
+    assert.equal(keys.includes('durationDays'), action === 'suspend_user', action);
+    assert.equal(keys.includes('rule'), reports.RULE_CITING_ACTIONS.includes(action), action);
+  }
 });
 
 test('noteError and durationError mirror the API limits', () => {

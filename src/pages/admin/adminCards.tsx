@@ -418,11 +418,14 @@ export function AppealBlock({
   appeal,
   appealUntil,
   targetType,
+  action,
   now = Date.now(),
 }: {
   appeal?: ReportAppeal | null;
   appealUntil?: string | null;
   targetType?: string;
+  /** statement.action; decides whether a reversal restored an account, a screen or content. */
+  action?: string;
   now?: number;
 }) {
   const state = appealState({ appeal: appeal ?? null, appealUntil: appealUntil ?? null }, now);
@@ -449,7 +452,13 @@ export function AppealBlock({
         </p>
         <Badge tone={APPEAL_TONE[status] ?? 'neutral'} size="sm">{humanize(status)}</Badge>
         {status === 'reversed' && appeal.restored === true ? (
-          <Badge tone="success" size="sm">{targetType === 'user' ? 'Account restored' : 'Content restored'}</Badge>
+          <Badge tone="success" size="sm">
+            {action === 'suspend_user' || (!action && targetType === 'user')
+              ? 'Account restored'
+              : action === 'mark_sensitive'
+                ? 'Screen cleared'
+                : 'Content restored'}
+          </Badge>
         ) : status === 'reversed' && appeal.restored === false ? (
           <Badge tone="neutral" size="sm">Could not be restored</Badge>
         ) : null}

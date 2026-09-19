@@ -146,6 +146,21 @@ test('StatementBlock cites the rule and the action; AppealBlock shows the status
     renderToString(h(cards.AppealBlock, { appeal: { status: 'reversed', restored: true }, targetType: 'user', now: NOW })),
     /Account restored/,
   );
+  // The badge follows the statement action, not the target type: a
+  // suspension on a post report restores the account, a sensitivity screen
+  // is cleared, and a removed post comes back.
+  assert.match(
+    renderToString(h(cards.AppealBlock, { appeal: { status: 'reversed', restored: true }, targetType: 'post', action: 'suspend_user', now: NOW })),
+    /Account restored/,
+  );
+  assert.match(
+    renderToString(h(cards.AppealBlock, { appeal: { status: 'reversed', restored: true }, targetType: 'post', action: 'mark_sensitive', now: NOW })),
+    /Screen cleared/,
+  );
+  assert.match(
+    renderToString(h(cards.AppealBlock, { appeal: { status: 'reversed', restored: true }, targetType: 'post', action: 'remove_content', now: NOW })),
+    /Content restored/,
+  );
   assert.match(
     renderToString(h(cards.AppealBlock, { appeal: { status: 'reversed', restored: false }, now: NOW })),
     /Could not be restored/,

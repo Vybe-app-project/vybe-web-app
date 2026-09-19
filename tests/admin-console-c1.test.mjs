@@ -78,14 +78,24 @@ test('Reports carries the v2 contract: appeals tab and filter, statement, rule, 
   has(source, "{ key: 'appeals', label: 'Appeals' }");
   has(source, 'canDecideAppeal(');
   has(source, 'slaState(');
-  has(source, 'ageLabel(');
+  has(source, 'slaLabel(');
   has(source, 'StatementBlock');
   has(source, 'AppealBlock');
   has(source, 'describeAdminError(');
   has(source, "queryKey: ['admin', 'reports'");
   has(source, "queryKey: ['admin', 'queue']");
-  // Body keys the API accepts, and only those.
-  has(source, 'const body: { action: ModerationAction; note?: string; rule?: string; durationDays?: number } = { action };');
+  // The PATCH body is built by the pure helper pinned in admin-ops-formatters.
+  has(source, 'moderationBody({ action, note, rule, durationDays: duration })');
+  lacks(source, 'body.durationDays =', 'durationDays is decided by moderationBody, not the page');
+  // Field problems sit on the field (aria-invalid + described by), not only in the foot callout.
+  has(source, 'error={noteErr ?? undefined}');
+  has(source, 'error={durationErr ?? undefined}');
+  // The SLA state is in the badge text; no hover-only title carries it.
+  has(source, 'slaLabel(sla)');
+  lacks(source, "title={sla.state === 'overdue'", 'the SLA state must be readable without hovering');
+  // Reversal consequence follows the statement action, not the target type.
+  has(source, 'reversalDescription(report)');
+  lacks(source, 'RESTORABLE_TARGETS', 'the page does not key the consequence on targetType any more');
   // Pins from admin-console.test.mjs that this area must keep.
   has(source, "if (report.status === 'actioned' && action !== 'restore_user') return 'Report already actioned';");
   has(source, '${total.toLocaleString()} pending');

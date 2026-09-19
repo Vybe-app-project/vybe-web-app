@@ -10,15 +10,16 @@ import { apiErrorDetails, describeAdminError } from '../../lib/apiError';
 import {
   APPEAL_FILTERS,
   GUIDELINES,
-  RESTORABLE_TARGETS,
   RULE_CITING_ACTIONS,
   SUSPENSION_DAYS,
-  ageLabel,
   canDecideAppeal,
   durationError,
+  moderationBody,
   noteError,
+  reversalDescription,
   ruleForReason,
   ruleLabel,
+  slaLabel,
   slaState,
   type AppealFilter,
   type ReportAppeal,
@@ -417,7 +418,12 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
   const [rule, setRule] = useState<string>(() => ruleForReason(report.reason).code);
   const [duration, setDuration] = useState('');
   const [conflict, setConflict] = useState<string | null>(null);
+  // Server and "no action chosen" errors read at the foot of the form; a
+  // note or duration problem sits on its own field so the field is marked
+  // invalid and described by the message.
   const [formError, setFormError] = useState<string | null>(null);
+  const [noteErr, setNoteErr] = useState<string | null>(null);
+  const [durationErr, setDurationErr] = useState<string | null>(null);
 
   const chosen = ACTIONS.find((a) => a.value === action) ?? null;
   const noteRequired = chosen?.requiresNote ?? false;
@@ -434,12 +440,9 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
       if (!action) throw new Error('Choose a moderation action');
       // routes/admin.js accepts exactly action | status | note | rule |
       // durationDays; any other key is a 400. A bare {status} is rejected,
-      // so the body always carries a concrete `action`.
-      const body: { action: ModerationAction; note?: string; rule?: string; durationDays?: number } = { action };
-      const trimmed = note.trim();
-      if (trimmed) body.note = trimmed.slice(0, 1000);
-      if (citesRule && rule) body.rule = rule;
-      if (timed && duration.trim() !== '') body.durationDays = Number(duration.trim());
+      // so the body always carries a concrete `action`. moderationBody()
+      // keeps rule and durationDays to the actions that take them.
+      const body = moderationBody({ action, note, rule, durationDays: duration });
       const { data } = await adminApi.patch(`/admin/reports/${report._id}`, body);
       return data;
     },
@@ -469,17 +472,10 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
       return;
     }
     const noteProblem = noteError(note, noteRequired);
-    if (noteProblem) {
-      setFormError(noteProblem);
-      return;
-    }
-    if (timed) {
-      const durationProblem = durationError(duration);
-      if (durationProblem) {
-        setFormError(durationProblem);
-        return;
-      }
-    }
+    const durationProblem = timed ? durationError(duration) : null;
+    setNoteErr(noteProblem);
+    setDurationErr(durationProblem);
+    if (noteProblem || durationProblem) return;
     mutation.mutate();
   }
 
@@ -523,7 +519,7 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
                   disabled={Boolean(unavailable)}
                   data-tone={a.destructive ? 'danger' : 'brand'}
                   title={unavailable ?? undefined}
-                  onClick={() => { setAction(a.value); setFormError(null); }}
+                  onClick={() => { setAction(a.value); setFormError(null); setNoteErr(null); setDurationErr(null); }}
                   className={cx('admin-option', unavailable && 'cursor-not-allowed opacity-60')}
                 >
                   <span
@@ -564,8 +560,9 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
             max={SUSPENSION_DAYS.max}
             step={1}
             value={duration}
-            onChange={(e) => { setDuration(e.target.value); setFormError(null); }}
+            onChange={(e) => { setDuration(e.target.value); setDurationErr(null); setFormError(null); }}
             placeholder="Indefinite"
+            error={durationErr ?? undefined}
             hint={`Leave empty for indefinite; otherwise a whole number from ${SUSPENSION_DAYS.min} to ${SUSPENSION_DAYS.max}.`}
           />
         ) : null}
@@ -573,7 +570,7 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
         <Textarea
           label={noteRequired ? 'Moderation note (required)' : 'Moderation note (optional)'}
           value={note}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={(e) => { setNote(e.target.value); setNoteErr(null); }}
           maxLength={1000}
           rows={3}
           placeholder={
@@ -581,6 +578,7 @@ function ActionModal({ report, onClose }: { report: Report; onClose: () => void 
               ? 'Explain why this enforcement is being applied'
               : 'Optional context for the audit log'
           }
+          error={noteErr ?? undefined}
           hint={`${note.length}/1000`}
         />
 
@@ -604,9 +602,9 @@ function AppealModal({ report, me, onClose }: { report: Report; me: AdminIdentit
   const [conflict, setConflict] = useState<string | null>(null);
   const [reviewerConflict, setReviewerConflict] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [noteErr, setNoteErr] = useState<string | null>(null);
 
   const gate = canDecideAppeal(report, me);
-  const restorable = (RESTORABLE_TARGETS as readonly string[]).includes(report.targetType ?? '');
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['admin', 'reports'] });
@@ -647,10 +645,8 @@ function AppealModal({ report, me, onClose }: { report: Report; me: AdminIdentit
       return;
     }
     const problem = noteError(note, true);
-    if (problem) {
-      setFormError(problem);
-      return;
-    }
+    setNoteErr(problem);
+    if (problem) return;
     mutation.mutate();
   }
 
@@ -681,7 +677,7 @@ function AppealModal({ report, me, onClose }: { report: Report; me: AdminIdentit
       <div className="space-y-5">
         <ReportSummary report={report} />
         <StatementBlock statement={report.statement} />
-        <AppealBlock appeal={report.appeal} appealUntil={report.appealUntil} targetType={report.targetType} />
+        <AppealBlock appeal={report.appeal} appealUntil={report.appealUntil} targetType={report.targetType} action={report.statement?.action} />
 
         {!gate.ok ? (
           <Callout tone="info" title={gate.reason ?? 'This appeal cannot be decided here'}>
@@ -704,9 +700,8 @@ function AppealModal({ report, me, onClose }: { report: Report; me: AdminIdentit
             {
               value: 'reversed',
               label: 'Reverse the decision',
-              description: restorable
-                ? 'The post, live stream, community or account comes back, a sensitivity screen is cleared, and any strike is removed.'
-                : 'Meals, workouts, plans, comments, chat lines and reviews were deleted outright and cannot come back. The record is corrected and the member is told.',
+              // Keyed on the statement's action, as the API's reversal is.
+              description: reversalDescription(report),
             },
           ]}
         />
@@ -714,10 +709,11 @@ function AppealModal({ report, me, onClose }: { report: Report; me: AdminIdentit
         <Textarea
           label="Decision note (required)"
           value={note}
-          onChange={(e) => { setNote(e.target.value); setFormError(null); }}
+          onChange={(e) => { setNote(e.target.value); setNoteErr(null); setFormError(null); }}
           maxLength={1000}
           rows={3}
           placeholder="Why the decision stands, or why it was wrong"
+          error={noteErr ?? undefined}
           hint={`${note.length}/1000. At least 5 characters.`}
         />
 
@@ -892,9 +888,7 @@ export default function AdminReports() {
                       <Badge tone={APPEAL_TONE[appealStatus] ?? 'neutral'}>Appeal {humanize(appealStatus).toLowerCase()}</Badge>
                     ) : null}
                     {sla && sla.state !== 'unknown' ? (
-                      <Badge tone={SLA_TONE[sla.state]} title={sla.state === 'overdue' ? 'Past the response target' : sla.state === 'due' ? 'Response target reached' : undefined}>
-                        {ageLabel(sla.ageMs)}
-                      </Badge>
+                      <Badge tone={SLA_TONE[sla.state]}>{slaLabel(sla)}</Badge>
                     ) : null}
                     {suspended ? (
                       <Badge
@@ -946,7 +940,7 @@ export default function AdminReports() {
 
                 {r.appeal || r.appealUntil ? (
                   <div className="mt-3">
-                    <AppealBlock appeal={r.appeal} appealUntil={r.appealUntil} targetType={r.targetType} now={now} />
+                    <AppealBlock appeal={r.appeal} appealUntil={r.appealUntil} targetType={r.targetType} action={r.statement?.action} now={now} />
                   </div>
                 ) : null}
 

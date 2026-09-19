@@ -84,12 +84,14 @@ export const SUSPENSION_DAYS = { min: 1, max: 365 } as const;
 export const NOTE_LIMITS = { min: 5, max: 1000 } as const;
 
 /**
- * Target types a reversal brings back (reportController.reverseEnforcement):
- * posts, live streams and communities are soft-removed; a suspension is
- * lifted; a sensitivity screen is cleared. Meals, workouts, plans, comments,
- * chat lines and reviews were deleted outright and cannot return.
+ * Content types with a `reverse` handler in reportController.TARGETS: posts,
+ * live streams and communities are soft-removed, so reversing a
+ * remove_content brings them back. Meals, workouts, plans, comments, chat
+ * lines and reviews were deleted outright and cannot return. Suspensions
+ * and sensitivity screens reverse whatever the target type; see
+ * reversalOutcome().
  */
-export const RESTORABLE_TARGETS = ['post', 'livestream', 'gym_community', 'user'] as const;
+export const RESTORABLE_TARGETS = ['post', 'livestream', 'gym_community'] as const;
 
 export const guidelineByCode = (code: string | null | undefined): GuidelineRule | null =>
   GUIDELINES.find((rule) => rule.code === String(code ?? '').trim().toUpperCase()) ?? null;
@@ -183,6 +185,18 @@ export function ageLabel(ageMs: number | null): string {
   return `Waiting ${Math.floor(ageMs / DAY)} d`;
 }
 
+/**
+ * The queue badge text. The SLA state rides in the words, not only in the
+ * badge tone, so keyboard, touch and screen-reader users read "overdue"
+ * where sighted mouse users used to hover for it.
+ */
+export function slaLabel(sla: { state: SlaState; ageMs: number | null }): string {
+  const age = ageLabel(sla.ageMs);
+  if (sla.state === 'overdue') return `${age} · overdue`;
+  if (sla.state === 'due') return `${age} · due`;
+  return age;
+}
+
 /* -------------------------------------------------------- permissions */
 
 const idOf = (v: unknown): string => {
@@ -209,6 +223,66 @@ export function canDecideAppeal(
     return { ok: false, reason: 'You took the original action' };
   }
   return { ok: true, reason: null };
+}
+
+/* ------------------------------------------------------------ reversal */
+
+export type ReversalOutcome = 'account' | 'screen' | 'content' | 'none';
+
+/**
+ * What reversing this report's enforcement brings back, keyed on the
+ * statement's action exactly as reportController.reverseEnforcement is:
+ * suspend_user lifts the suspension and removes the strike whatever the
+ * target type; mark_sensitive clears the screen; remove_content restores
+ * only the targets with a reverse handler (RESTORABLE_TARGETS). A report
+ * without a statement never removed anything the API can put back.
+ */
+export function reversalOutcome(report: { targetType?: string | null; statement?: ReportStatement | null } | null | undefined): ReversalOutcome {
+  const action = report?.statement?.action;
+  if (action === 'suspend_user') return 'account';
+  if (action === 'mark_sensitive') return 'screen';
+  if (action === 'remove_content') {
+    return (RESTORABLE_TARGETS as readonly string[]).includes(String(report?.targetType ?? '')) ? 'content' : 'none';
+  }
+  return 'none';
+}
+
+/** The consequence a moderator reads under "Reverse the decision". */
+export const REVERSAL_COPY: Record<ReversalOutcome, string> = {
+  account: 'The account is restored and the strike is removed. The member is told.',
+  screen: 'The sensitivity screen is cleared. The member is told.',
+  content: 'The post, live stream or community comes back. The member is told.',
+  none: 'Nothing comes back: meals, workouts, plans, comments, chat lines and reviews were deleted outright. The record is corrected and the member is told.',
+};
+
+export const reversalDescription = (report: Parameters<typeof reversalOutcome>[0]): string => REVERSAL_COPY[reversalOutcome(report)];
+
+/* ---------------------------------------------------------- form bodies */
+
+/** PATCH /admin/reports/:id body; routes/admin.js rejects any other key with a 400. */
+export type ModerationBody = { action: ModerationAction; note?: string; rule?: string; durationDays?: number };
+
+/**
+ * Build the moderation request. Only what the API accepts for the chosen
+ * action goes on the wire: an empty note is omitted, `rule` only for
+ * RULE_CITING_ACTIONS, `durationDays` only for suspend_user (the API
+ * answers 400 'A duration applies to suspend_user only' otherwise) and only
+ * when a length was typed, since empty means indefinite.
+ */
+export function moderationBody(input: {
+  action: ModerationAction;
+  note?: string | null;
+  rule?: string | null;
+  durationDays?: string | number | null;
+}): ModerationBody {
+  const body: ModerationBody = { action: input.action };
+  const note = String(input.note ?? '').trim();
+  if (note) body.note = note.slice(0, NOTE_LIMITS.max);
+  const rule = String(input.rule ?? '').trim();
+  if (rule && (RULE_CITING_ACTIONS as readonly string[]).includes(input.action)) body.rule = rule;
+  const duration = String(input.durationDays ?? '').trim();
+  if (input.action === 'suspend_user' && duration !== '') body.durationDays = Number(duration);
+  return body;
 }
 
 /** Form-level message for a moderation or appeal note, or null when it passes. */
