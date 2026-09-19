@@ -1,5 +1,5 @@
 import { API_BASE, tokenStore } from './api';
-import type { CancelDeletionResult, DeletionStatus, ReauthResult } from './accountLifecycle';
+import { lifecycleStatusCopy, type CancelDeletionResult, type DeletionStatus, type ReauthResult } from './accountLifecycle';
 
 /**
  * The three lifecycle routes that contracts/backend-routes.json cannot see
@@ -16,7 +16,10 @@ import type { CancelDeletionResult, DeletionStatus, ReauthResult } from './accou
  *     is you", and an account in its deletion grace period is refused by
  *     every ordinary route but allowed on these;
  *   - errors carry `response: { status, data }` so isReauthRequired,
- *     reauthErrorCopy and errMsg read them exactly like an AxiosError.
+ *     reauthErrorCopy and errMsg read them exactly like an AxiosError;
+ *   - a body that is not the API's JSON (a gateway's HTML page, the global
+ *     limiter's plain text) is dropped, never shown: `data` is null and the
+ *     message is a sentence for the status.
  */
 export class LifecycleHttpError extends Error {
   code?: string;
@@ -24,14 +27,13 @@ export class LifecycleHttpError extends Error {
 
   constructor(status: number, data: unknown, code?: string) {
     const message = (data as { message?: unknown } | null)?.message;
-    super(typeof message === 'string' && message ? message : `Request failed with status ${status}`);
+    super(typeof message === 'string' && message.trim() ? message : lifecycleStatusCopy(status));
     this.name = 'LifecycleHttpError';
     this.response = { status, data };
     if (code) this.code = code;
   }
 }
 
-const OFFLINE_MESSAGE = 'Could not reach Vybe. Check your connection and try again.';
 const REQUEST_TIMEOUT_MS = 30_000;
 
 async function lifecycleRequest<T>(
@@ -58,18 +60,22 @@ async function lifecycleRequest<T>(
     });
   } catch (error) {
     const aborted = (error as { name?: string } | null)?.name === 'TimeoutError';
-    throw new LifecycleHttpError(0, { message: OFFLINE_MESSAGE }, aborted ? 'ECONNABORTED' : 'ERR_NETWORK');
+    throw new LifecycleHttpError(0, null, aborted ? 'ECONNABORTED' : 'ERR_NETWORK');
   }
   const text = await response.text();
   let data: unknown = null;
+  let parsed = !text;
   if (text) {
     try {
       data = JSON.parse(text);
+      parsed = true;
     } catch {
-      data = { message: text.slice(0, 200) };
+      // Not the API's JSON: nothing in it is for the person, so the status speaks.
+      data = null;
     }
   }
   if (!response.ok) throw new LifecycleHttpError(response.status, data);
+  if (!parsed) throw new LifecycleHttpError(response.status, null, 'ERR_BAD_RESPONSE');
   return data as T;
 }
 

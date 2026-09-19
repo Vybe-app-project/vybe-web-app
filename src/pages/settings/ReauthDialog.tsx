@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import {
   reauthErrorCopy,
@@ -19,6 +18,20 @@ const PURPOSE_COPY: Record<ReauthPurpose, string> = {
 
 const RESEND_COOLDOWN_SECONDS = 60;
 const FORM_ID = 'reauth-form';
+const noop = () => undefined;
+
+/**
+ * Copy for an account that can offer no proof: no password, and the server
+ * cannot send email right now (email codes and the set-a-password email use
+ * the same delivery, so there is no form to point at). Says what still works.
+ */
+function noMethodCopy(purpose: ReauthPurpose, methods: ReauthMethods): string {
+  const base = 'This account has no password, and email is not available right now, so we cannot confirm it is you.';
+  if (purpose === 'delete' && methods.scheduledWithoutReauth) {
+    return `${base} You can still choose Schedule deletion, which does not need confirmation.`;
+  }
+  return `${base} Try again later.`;
+}
 
 /**
  * "Confirm it is you": mints a short-lived re-auth token (POST /auth/reauth)
@@ -26,7 +39,8 @@ const FORM_ID = 'reauth-form';
  * `onToken` may run the guarded action and throw to keep the dialog open with
  * the error under the field (a stale token answers 401 REAUTH_REQUIRED).
  * Every control is a native button or input, so the dialog is fully keyboard
- * reachable; the Modal traps focus and Escape cancels.
+ * reachable; the Modal traps focus and Escape cancels, except while the
+ * guarded action is running, when the dialog cannot be dismissed.
  */
 export function ReauthDialog({
   open,
@@ -45,6 +59,14 @@ export function ReauthDialog({
 }) {
   const mode: 'password' | 'code' | 'none' = methods.password ? 'password' : methods.emailCode ? 'code' : 'none';
   const inputRef = useRef<HTMLInputElement>(null);
+  // One stable ref object for the Modal's focus trap, pointed at the input
+  // only while the input can take focus. In code mode the input is disabled
+  // until a code has been sent; a disabled target makes focus() a no-op and
+  // leaves focus on the trigger behind the dialog, so until then the ref is
+  // empty and the trap falls back to the first control, the Send code button.
+  // Keeping the object stable means the trap is not re-armed (and focus not
+  // bounced through the trigger) when the code arrives.
+  const initialFocusRef = useRef<HTMLElement | null>(null);
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +74,14 @@ export function ReauthDialog({
   const [sending, setSending] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  // What the polite live region says. It changes twice per code: when the
+  // code is sent and when another may be requested. The countdown itself is
+  // not live, so a screen reader is not read sixty numbers.
+  const [announcement, setAnnouncement] = useState('');
+
+  useLayoutEffect(() => {
+    initialFocusRef.current = mode === 'code' && !codeSent ? null : inputRef.current;
+  });
 
   // A closed dialog forgets everything typed into it.
   useEffect(() => {
@@ -63,6 +93,7 @@ export function ReauthDialog({
     setSending(false);
     setCodeSent(false);
     setCooldown(0);
+    setAnnouncement('');
   }, [open]);
 
   useEffect(() => {
@@ -70,6 +101,11 @@ export function ReauthDialog({
     const t = window.setTimeout(() => setCooldown((s) => Math.max(0, s - 1)), 1000);
     return () => window.clearTimeout(t);
   }, [cooldown]);
+
+  useEffect(() => {
+    if (!open || !codeSent || cooldown > 0) return;
+    setAnnouncement('You can ask for another code now.');
+  }, [open, codeSent, cooldown]);
 
   async function sendCode() {
     if (!email) {
@@ -82,6 +118,7 @@ export function ReauthDialog({
       await api.post('/auth/sendEmailOtp', { email });
       setCodeSent(true);
       setCooldown(RESEND_COOLDOWN_SECONDS);
+      setAnnouncement('Code sent. Check your email.');
       window.setTimeout(() => inputRef.current?.focus(), 0);
     } catch (e) {
       setError(reauthErrorCopy(e, 'Could not send the code. Try again in a moment.'));
@@ -129,15 +166,18 @@ export function ReauthDialog({
   return (
     <Modal
       open={open}
-      onClose={onCancel}
+      // While the guarded action runs, Escape, the backdrop, the sheet drag and
+      // the close control do nothing: the request is already on its way.
+      onClose={submitting ? noop : onCancel}
+      closeOnBackdrop={!submitting}
       title="Confirm it is you"
       description={description}
       size="sm"
-      initialFocusRef={inputRef}
+      initialFocusRef={initialFocusRef}
       footer={
         <>
           <Button variant="ghost" onClick={onCancel} disabled={submitting}>
-            Cancel
+            {mode === 'none' ? 'Close' : 'Cancel'}
           </Button>
           {mode !== 'none' ? (
             <Button variant="primary" type="submit" form={FORM_ID} loading={submitting} disabled={mode === 'code' && !codeSent}>
@@ -149,16 +189,7 @@ export function ReauthDialog({
     >
       <p className="mb-4 text-sm text-text-2">{PURPOSE_COPY[purpose]}</p>
       {mode === 'none' ? (
-        <Callout
-          tone="warning"
-          action={
-            <Link to="/settings#password" onClick={onCancel} className="inline-flex min-h-11 items-center rounded-sm px-2 text-sm font-semibold text-text-1 underline-offset-2 hover:underline">
-              Set a password
-            </Link>
-          }
-        >
-          This account has no password and email codes are not available. Set a password first.
-        </Callout>
+        <Callout tone="warning">{noMethodCopy(purpose, methods)}</Callout>
       ) : (
         <form id={FORM_ID} onSubmit={submit} className="space-y-3" noValidate>
           {mode === 'password' ? (
@@ -183,12 +214,11 @@ export function ReauthDialog({
                 <Button variant="secondary" size="sm" loading={sending} disabled={cooldown > 0 || submitting} onClick={() => void sendCode()}>
                   {codeSent ? 'Send a new code' : 'Send code'}
                 </Button>
-                {cooldown > 0 ? (
-                  <span className="text-xs text-text-3" aria-live="polite">
-                    You can ask for another code in {cooldown} s.
-                  </span>
-                ) : null}
+                {cooldown > 0 ? <span className="text-xs text-text-3">You can ask for another code in {cooldown} s.</span> : null}
               </div>
+              <p className="sr-only" aria-live="polite">
+                {announcement}
+              </p>
               <Input
                 ref={inputRef}
                 id="reauth-code"

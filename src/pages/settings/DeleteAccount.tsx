@@ -138,7 +138,7 @@ export function DeleteAccount() {
       title="Delete account"
       titleClassName="text-danger"
       className="border-danger/40"
-      description="This permanently deletes your profile, posts, comments, workouts and meals. It cannot be undone."
+      description={`Deleting removes your profile, posts, comments, workouts and meals. Delete now is immediate. Schedule deletion gives you ${graceDays} days to change your mind.`}
     >
       <div className="space-y-6">
         <section aria-labelledby="delete-now-title" className="space-y-3">

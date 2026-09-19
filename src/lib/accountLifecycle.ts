@@ -281,6 +281,65 @@ export function reauthErrorCopy(error: unknown, fallback = 'Could not confirm it
 
 const ensureFullStop = (text: string): string => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
+export const GENERIC_FAILURE_COPY = 'Vybe could not complete that. Try again.';
+
+/**
+ * One sentence for an HTTP status whose body carried nothing for the person:
+ * a gateway's HTML error page, the global limiter's plain text, or no answer
+ * at all. Never the body itself.
+ */
+export function lifecycleStatusCopy(status: number): string {
+  if (!status) return OFFLINE_REAUTH_COPY;
+  if (status === 429) return RATE_LIMITED_REAUTH_COPY;
+  return GENERIC_FAILURE_COPY;
+}
+
+/* ------------------------------------------------------------------ reauth gate */
+
+export type ReauthGateInput =
+  /** A guarded action is about to start. */
+  | { phase: 'start'; cachedToken: string | null; waive: boolean }
+  /** The action (with a cached token, a waiver, or a fresh token) failed. */
+  | { phase: 'failed'; error: unknown }
+  /** The person dismissed the dialog. */
+  | { phase: 'cancel'; inFlight: boolean };
+
+export type ReauthGateDecision =
+  /** Call the action now, with this X-Reauth token (null = none, the waived path). */
+  | { kind: 'run'; token: string | null }
+  /** Open the dialog, or keep it open; `methods` are the proofs the API named on its 401. */
+  | { kind: 'prompt'; methods: ReauthMethods | null; clearCache: boolean }
+  /** Surface the error to the caller. */
+  | { kind: 'reject' }
+  /** Resolve the caller with null. */
+  | { kind: 'cancelled' }
+  /** The action is already on its way; the dismissal is refused. */
+  | { kind: 'ignore' };
+
+/**
+ * What useReauthGate does next. Pure, so the security-relevant flow (cached
+ * token first, 401 REAUTH_REQUIRED reopens instead of signing out, a refused
+ * fresh token keeps the dialog open, no cancel while the request is in
+ * flight) is tested under node without React.
+ */
+export function reauthGateDecision(input: { phase: 'start'; cachedToken: string | null; waive: boolean }): { kind: 'run'; token: string | null } | { kind: 'prompt'; methods: null; clearCache: false };
+export function reauthGateDecision(input: { phase: 'failed'; error: unknown }): { kind: 'prompt'; methods: ReauthMethods | null; clearCache: true } | { kind: 'reject' };
+export function reauthGateDecision(input: { phase: 'cancel'; inFlight: boolean }): { kind: 'cancelled' } | { kind: 'ignore' };
+export function reauthGateDecision(input: ReauthGateInput): ReauthGateDecision;
+export function reauthGateDecision(input: ReauthGateInput): ReauthGateDecision {
+  switch (input.phase) {
+    case 'start':
+      if (input.cachedToken) return { kind: 'run', token: input.cachedToken };
+      if (input.waive) return { kind: 'run', token: null };
+      return { kind: 'prompt', methods: null, clearCache: false };
+    case 'failed':
+      if (isReauthRequired(input.error)) return { kind: 'prompt', methods: reauthMethodsFromError(input.error), clearCache: true };
+      return { kind: 'reject' };
+    case 'cancel':
+      return input.inFlight ? { kind: 'ignore' } : { kind: 'cancelled' };
+  }
+}
+
 /* ------------------------------------------------------------------ notices */
 
 const NOTICE_KEY = 'vybe.lifecycleNotice';

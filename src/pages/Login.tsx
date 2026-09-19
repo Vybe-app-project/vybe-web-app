@@ -192,6 +192,14 @@ export default function Login() {
   useEffect(() => {
     writeDraftEmail(sessionStorage, email.trim());
   }, [email]);
+  // The interstitial replaces the form for a pending-deletion account. Forget
+  // the typed password then, so "Sign out" from it does not hand the next
+  // person at a shared computer a form with the password still in it.
+  useEffect(() => {
+    if (!pendingDeletion) return;
+    setPassword('');
+    setFieldError({});
+  }, [pendingDeletion]);
   const sessionNotice =
     reason === 'session-ended'
       ? 'You were signed out. This happens after a password change, after “Sign out of all devices” on another device, or when a session expires. Sign in again to continue.'

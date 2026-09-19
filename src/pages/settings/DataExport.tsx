@@ -115,7 +115,9 @@ export function ExportJobRow({
  * newest first), polls while one is queued or building, and puts "Confirm it
  * is you" (X-Reauth) in front of requesting a copy and minting a download
  * link. The API is the only truth for state; the window rule is explained
- * from its policy.
+ * from its policy. Nothing is offered until GET /users/me/deletion has
+ * answered too: it carries the re-auth methods, and without them the dialog
+ * could only guess which proof to ask for.
  */
 export function DataExport() {
   const toast = useToast();
@@ -140,6 +142,13 @@ export function DataExport() {
   const blockedReason =
     windowCopy?.next ?? (blocking ? `Your current copy is ${exportStateLabel(blocking).label.toLowerCase()}. Request another once it has expired or been deleted.` : null);
   const anyBusy = requesting || rowBusy !== null;
+  const loading = (list.isLoading && !list.data) || (status.isLoading && !status.data);
+  const failed =
+    list.isError && !list.data
+      ? { title: 'Could not load your exports', error: list.error, retry: () => void list.refetch() }
+      : status.isError && !status.data
+        ? { title: 'Could not load your account status', error: status.error, retry: () => void status.refetch() }
+        : null;
 
   async function request() {
     setRequesting(true);
@@ -207,13 +216,13 @@ export function DataExport() {
 
   return (
     <SettingsCard id="data" title="Download your data" description={ARCHIVE_CONTENTS}>
-      {list.isLoading && !list.data ? (
+      {loading ? (
         <div className="space-y-3">
           <Skeleton className="h-11 w-full rounded-sm" />
           <Skeleton className="h-11 w-full rounded-sm" />
         </div>
-      ) : list.isError && !list.data ? (
-        <ErrorState title="Could not load your exports" error={list.error} retry={() => void list.refetch()} />
+      ) : failed ? (
+        <ErrorState title={failed.title} error={failed.error} retry={failed.retry} />
       ) : (
         <div className="space-y-4">
           {windowCopy ? <p className="text-xs text-text-2">{windowCopy.rule}</p> : null}
