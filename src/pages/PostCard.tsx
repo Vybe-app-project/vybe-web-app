@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { tokenizeContent } from '../lib/feedLogic';
+import { commentTotal, likeTotal, tokenizeContent } from '../lib/feedLogic';
 import {
   compactNumber,
   displayName,
@@ -605,8 +605,6 @@ function authorHandle(author?: PublicUser | null): string {
   return author?.username ? `@${author.username}` : displayName(author);
 }
 
-const likeTotal = (post: Post) => post.likes?.length ?? post.likeCount ?? 0;
-const commentTotal = (post: Post) => post.comments?.length ?? post.commentCount ?? 0;
 
 export default function PostCard({
   post,

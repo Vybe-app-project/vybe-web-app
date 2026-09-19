@@ -80,6 +80,8 @@ export type Post = {
   /** Counts only — what the signed-out public shape carries instead of the arrays. */
   likeCount?: number;
   commentCount?: number;
+  /** Server total (Wave A); `comments` is only a preview capped by the API. */
+  totalComments?: number;
   author?: PublicUser | null;
   isBookmarked?: boolean;
   createdAt: string;

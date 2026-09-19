@@ -94,3 +94,21 @@ export function tokenizeContent(text: string): ContentToken[] {
   }
   return tokens;
 }
+
+/**
+ * Counts on a card come from the server's totals when it sends them
+ * (Wave A: `totalComments`, `likeCount`; older payloads: `commentCount`) and
+ * only then from the arrays, which the API caps (comments preview
+ * POST_COMMENT_PREVIEW_LIMIT, 20 today and 2 once the web is ready), so a
+ * busy post never reads "20 comments" or "2 comments".
+ */
+export function commentTotal(post: { comments?: unknown[] | null; totalComments?: number | null; commentCount?: number | null }): number {
+  if (typeof post.totalComments === 'number') return post.totalComments;
+  if (typeof post.commentCount === 'number') return post.commentCount;
+  return post.comments?.length ?? 0;
+}
+
+export function likeTotal(post: { likes?: unknown[] | null; likeCount?: number | null }): number {
+  if (typeof post.likeCount === 'number') return post.likeCount;
+  return post.likes?.length ?? 0;
+}

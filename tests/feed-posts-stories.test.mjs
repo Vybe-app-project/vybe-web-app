@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { register } from 'node:module';
+
+register('./ts-loader.mjs', import.meta.url);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -201,4 +204,16 @@ test('the responses sheet never reads a disabled query, and render errors get a 
   assert.match(boundary, /export function RouteErrorBoundary/);
   assert.match(read('src/App.tsx'), /<RouteErrorBoundary>\n\s+<Routes>/, 'every routed screen renders inside a boundary');
   assert.match(read('src/components/Layout.tsx'), /<RouteErrorBoundary>\{waiting \? <PageSkeleton \/> : \(children \?\? <Outlet \/>\)\}<\/RouteErrorBoundary>/, 'the shell survives a broken page');
+});
+
+test('card counts prefer the server totals over the capped preview arrays', async () => {
+  const { commentTotal, likeTotal } = await import('../src/lib/feedLogic.ts');
+  assert.equal(commentTotal({ comments: new Array(2).fill({}), totalComments: 57 }), 57);
+  assert.equal(commentTotal({ comments: new Array(20).fill({}), commentCount: 31 }), 31);
+  assert.equal(commentTotal({ comments: new Array(3).fill({}) }), 3);
+  assert.equal(commentTotal({}), 0);
+  assert.equal(likeTotal({ likes: ['a', 'b'], likeCount: 9 }), 9);
+  assert.equal(likeTotal({ likes: ['a', 'b'] }), 2);
+  assert.match(read('src/pages/PostCard.tsx'), /import \{ commentTotal, likeTotal, tokenizeContent \} from '\.\.\/lib\/feedLogic';/);
+  assert.doesNotMatch(read('src/pages/PostCard.tsx'), /post\.comments\?\.length \?\? post\.commentCount/);
 });
