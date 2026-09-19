@@ -169,7 +169,8 @@ function onUnauthorized(kind: 'user' | 'admin') {
 api.interceptors.response.use(
   (r) => r,
   (err: AxiosError) => {
-    if (err.response?.status === 401) onUnauthorized('user');
+    // 401 REAUTH_REQUIRED asks for a fresh X-Reauth token (account lifecycle routes), not a new session.
+    if (err.response?.status === 401 && (err.response.data as { code?: string } | undefined)?.code !== 'REAUTH_REQUIRED') onUnauthorized('user');
     return Promise.reject(err);
   },
 );

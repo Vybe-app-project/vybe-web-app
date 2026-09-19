@@ -15,6 +15,7 @@ import { clearDraftEmail, readDraftEmail, writeDraftEmail } from '../lib/authDra
 import { isEmail } from '../lib/hooks';
 import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, cx, useDocumentTitle } from './ui';
 import { Eye, EyeOff } from './icons';
+import { PendingDeletionInterstitial, SignInLifecycleNotice } from './settings/SignInLifecycleNotice';
 
 /* ------------------------------------------------------------------ *
  * Shared auth chrome.
@@ -159,6 +160,8 @@ type LoginState = { from?: FromLocation; email?: string } | null;
 
 export default function Login() {
   const login = useAuth((s) => s.login);
+  // An account in its deletion grace period signs in to the interstitial, not the app.
+  const pendingDeletion = useAuth((s) => s.pendingDeletion);
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -215,7 +218,7 @@ export default function Login() {
     try {
       await login(trimmed, password, { remember });
       clearDraftEmail(sessionStorage);
-      navigate(target, { replace: true });
+      if (!useAuth.getState().pendingDeletion) navigate(target, { replace: true });
     } catch (e2) {
       const failure = loginFailure(e2, {
         online: navigator.onLine,
@@ -238,6 +241,7 @@ export default function Login() {
       subtitle="Sign in to pick up where you left off."
       footer={<LegalLine />}
     >
+      <SignInLifecycleNotice />
       {notice ? (
         <Callout tone={notice.tone} className="mb-5">
           {notice.text}
@@ -249,7 +253,8 @@ export default function Login() {
         </Callout>
       ) : null}
 
-      <form onSubmit={onSubmit} className="space-y-4" noValidate>
+      {pendingDeletion ? <PendingDeletionInterstitial target={target} /> : null}
+      <form onSubmit={onSubmit} className="space-y-4" noValidate hidden={!!pendingDeletion}>
         <Input
           id="login-email"
           label="Email"
@@ -326,7 +331,7 @@ export default function Login() {
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-text-2">
+      <p className="mt-6 text-center text-sm text-text-2" hidden={!!pendingDeletion}>
         New to Vybe?{' '}
         <Link
           to="/register"

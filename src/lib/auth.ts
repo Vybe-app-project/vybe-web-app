@@ -44,6 +44,14 @@ type AuthState = {
   sessionStale: boolean;
   admin: any | null;
   adminLoading: boolean;
+  /**
+   * Set by login() for an account inside its deletion grace period: the token
+   * is kept for the lifecycle routes (cancel, status) but `user` stays null,
+   * because every other route refuses the account. Login shows the
+   * pending-deletion interstitial while this is set.
+   */
+  pendingDeletion: { scheduledFor: string | null } | null;
+  clearPendingDeletion: () => void;
   bootstrap: () => Promise<void>;
   bootstrapAdmin: () => Promise<void>;
   setUser: (u: User | null) => void;
@@ -86,6 +94,8 @@ export const useAuth = create<AuthState>((set, get) => ({
   sessionStale: false,
   admin: null,
   adminLoading: true,
+  pendingDeletion: null,
+  clearPendingDeletion: () => set({ pendingDeletion: null }),
 
   bootstrap: async () => {
     if (!tokenStore.get()) return set({ user: null, loading: false, sessionStale: false });
@@ -162,8 +172,19 @@ export const useAuth = create<AuthState>((set, get) => ({
     // sessionStorage, so closing the tab on a shared computer ends the session.
     const { data } = await api.post('/auth/login', { email, password, remember });
     tokenStore.set(data.token, remember ? 'local' : 'session');
+    if (data.user?.pendingDeletion === true) {
+      // Grace period: keep the token for the lifecycle routes, but do not sign
+      // in -- GuestOnly would redirect into the app and the first request 401s.
+      set({
+        user: null,
+        loading: false,
+        sessionStale: false,
+        pendingDeletion: { scheduledFor: data.user.deletion?.scheduledFor ?? null },
+      });
+      return;
+    }
     rememberSnapshot(data.user);
-    set({ user: data.user, loading: false, sessionStale: false });
+    set({ user: data.user, loading: false, sessionStale: false, pendingDeletion: null });
   },
 
   adminLogin: async (email, password) => {
@@ -199,7 +220,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
     tokenStore.clear();
-    set({ user: null, sessionStale: false });
+    set({ user: null, sessionStale: false, pendingDeletion: null });
     location.href = '/login';
   },
 

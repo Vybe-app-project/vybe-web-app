@@ -54,6 +54,7 @@ import {
 import { Award, ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Monitor, Shield } from './icons';
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
+import { DataLifecycleSection } from './settings/DataLifecycleSection';
 
 const NOTIFICATION_LABELS: Record<NotificationSettingKey, { title: string; hint: string }> = {
   pauseAll: {
@@ -74,8 +75,6 @@ const NOTIFICATION_LABELS: Record<NotificationSettingKey, { title: string; hint:
   comments: { title: 'Comments', hint: 'When someone comments on your post.' },
   friendRequests: { title: 'Friend requests', hint: 'Incoming and accepted friend requests.' },
 };
-
-const DELETE_PHRASE = 'DELETE MY ACCOUNT';
 
 /* ------------------------------------------------------------------ pieces */
 
@@ -1033,72 +1032,6 @@ function AboutSection() {
   );
 }
 
-/* ------------------------------------------------------------------ danger zone */
-
-function DangerZone() {
-  const toast = useToast();
-  const logout = useAuth((s) => s.logout);
-  const [phrase, setPhrase] = useState('');
-  const [confirming, setConfirming] = useState(false);
-
-  const remove = useMutation({
-    mutationFn: async () => {
-      await api.delete('/users/me');
-    },
-    onSuccess: () => {
-      setConfirming(false);
-      toast.success('Your account has been permanently deleted.');
-      setTimeout(() => logout(), 800);
-    },
-    onError: (e) => {
-      setConfirming(false);
-      toast.error(errMsg(e, 'Could not delete your account.'));
-    },
-  });
-
-  const ready = phrase === DELETE_PHRASE;
-
-  return (
-    <SettingsCard
-      id="delete"
-      title="Delete account"
-      titleClassName="text-danger"
-      className="border-danger/40"
-      description="This permanently deletes your profile, posts, comments, workouts and meals. It cannot be undone."
-    >
-      <div className="space-y-3">
-        <Input
-          id="del-phrase"
-          label={`Type ${DELETE_PHRASE} to confirm`}
-          hint="Case-sensitive. The button unlocks once the phrase matches."
-          value={phrase}
-          placeholder={DELETE_PHRASE}
-          autoComplete="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-          onChange={(e) => setPhrase(e.target.value)}
-        />
-        <div className="flex justify-end">
-          <Button variant="danger" disabled={!ready} loading={remove.isPending} onClick={() => setConfirming(true)}>
-            Permanently delete my account
-          </Button>
-        </div>
-      </div>
-      <ConfirmDialog
-        open={confirming}
-        title="Delete your account?"
-        message="Everything you have posted, logged and saved on Vybe will be removed for good. There is no recovery."
-        confirmLabel="Delete account"
-        cancelLabel="Keep my account"
-        destructive
-        loading={remove.isPending}
-        onConfirm={() => remove.mutate()}
-        onCancel={() => setConfirming(false)}
-      />
-    </SettingsCard>
-  );
-}
-
 /* ------------------------------------------------------------------ page */
 
 export default function Settings() {
@@ -1147,7 +1080,7 @@ export default function Settings() {
         <NotificationsSection />
         <EmailPreferencesSection />
         <AboutSection />
-        <DangerZone />
+        <DataLifecycleSection />
       </div>
     </>
   );
