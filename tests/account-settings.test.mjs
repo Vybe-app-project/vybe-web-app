@@ -269,7 +269,8 @@ test('Settings mounts the preference cards once and the new controls send only t
   assert.match(prefs, /qc\.setQueryData\(\['me'\], ctx\.previous\)/, 'rollback on error');
   // Pinned accessible names elsewhere are untouched.
   assert.match(settings, /title="Private account"/);
-  assert.match(settings, /id="del-phrase"/);
+  // The delete card moved to its own file in the Wave C1 data lifecycle merge; the id survives there.
+  assert.match(read('src/pages/settings/DeleteAccount.tsx'), /id="del-phrase"/);
   assert.match(read('src/components/UnitsControl.tsx'), /label = 'Units'/);
 });
 

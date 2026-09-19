@@ -278,7 +278,9 @@ test('lifecycleRequest: headers, error shapes, dropped non-JSON bodies, and a 40
     assert.equal(limited.response.data, null);
     assert.equal(limited.message, lib.RATE_LIMITED_REAUTH_COPY);
     assert.equal(lib.reauthErrorCopy(limited), lib.RATE_LIMITED_REAUTH_COPY);
-    assert.equal(errMsg(limited, 'Fallback.'), lib.RATE_LIMITED_REAUTH_COPY);
+    // errMsg is the shared reader (lib/apiError): a 429 on an /auth/ route is one
+    // sentence worded for attempts, with the wait taken from Retry-After.
+    assert.equal(errMsg(limited, 'Fallback.'), 'Too many attempts. Try again in 60 seconds.');
 
     // A gateway's HTML page (502/503/524) is never shown.
     for (const status of [502, 503, 524]) {

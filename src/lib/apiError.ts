@@ -200,7 +200,10 @@ const unknownError = (fallback: string, body: unknown = undefined): ParsedApiErr
 function parse(e: unknown, fallback: string): ParsedApiError {
   if (!e || typeof e !== 'object') return unknownError(fallback);
   const failure = e as Dict;
-  const response = isDict(failure.response) ? failure.response : null;
+  // A response whose status is 0 is the fetch/XHR convention for "the API was
+  // never reached" (src/lib/lifecycleApi.ts builds one for a network failure
+  // or a timeout); it is read as a transport error, not as an HTTP answer.
+  const response = isDict(failure.response) && failure.response.status !== 0 ? failure.response : null;
   const status = response && typeof response.status === 'number' ? response.status : null;
   const body = response ? response.data : undefined;
   const headers = response ? response.headers : undefined;
