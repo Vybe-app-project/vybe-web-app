@@ -22,7 +22,7 @@ import {
   useDebounced,
   type PasswordRule,
 } from '../lib/hooks';
-import { Button, Callout, Input, Spinner, cx, useToast } from './ui';
+import { Button, Callout, Checkbox, Input, Spinner, cx, useToast } from './ui';
 import { Check, X } from './icons';
 import { AuthShell, LegalLine, PasswordField, focusField } from './Login';
 
@@ -49,6 +49,7 @@ const FIELD_IDS = {
   username: 'reg-username',
   password: 'reg-password',
   confirm: 'reg-confirm',
+  agree: 'reg-agree',
 } as const;
 
 type FieldKey = keyof typeof FIELD_IDS;
@@ -56,6 +57,15 @@ type FieldErrors = Partial<Record<FieldKey, string>>;
 
 const USERNAME_HINT = '3–30 characters. Letters, numbers, periods and underscores.';
 const USERNAME_TAKEN = 'That username is taken. Try another one.';
+/**
+ * The explicit agreement at sign-up. Nothing is pre-ticked. The API writes
+ * the terms and privacy acceptance rows itself when the account is created
+ * (POST /auth/register-password, surface 'signup'), so the web sends nothing
+ * extra; if that best-effort write ever fails, the signed-in gate asks once.
+ */
+const AGREE_REQUIRED = 'Tick the box to agree to the Terms and Conditions and the Privacy Policy.';
+const AGREE_HINT = 'We record your agreement when your account is created.';
+const AGREE_LINK = 'rounded-sm font-semibold text-brand-text underline underline-offset-2 hover:text-text-1';
 
 /** Three labelled dots; the current one is announced with `aria-current`. */
 function Steps({ step }: { step: Step }) {
@@ -167,6 +177,8 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  // Never restored from the draft: the agreement is given afresh on each attempt.
+  const [agreed, setAgreed] = useState(false);
 
   const [fieldError, setFieldError] = useState<FieldErrors>({});
   const [serverSuggestions, setServerSuggestions] = useState<string[]>([]);
@@ -299,7 +311,13 @@ export default function Register() {
     else if (availability.state === 'taken' && availability.username === trimmedUsername) next.username = USERNAME_TAKEN;
     if (!isPasswordValid(password)) next.password = 'Your password does not meet all requirements yet.';
     if (password !== confirm) next.confirm = 'Passwords do not match.';
+    if (!agreed) next.agree = AGREE_REQUIRED;
     if (setErrors(next, ['fullName', 'username', 'password', 'confirm'])) return;
+    // Every field error shows at once; the box is focused only when it is the one thing left.
+    if (next.agree) {
+      focusField(FIELD_IDS.agree);
+      return;
+    }
 
     setBusy(true);
     try {
@@ -572,6 +590,33 @@ export default function Register() {
               }}
               disabled={busy}
             />
+
+            <div>
+              <Checkbox
+                id={FIELD_IDS.agree}
+                checked={agreed}
+                required
+                error={fieldError.agree}
+                disabled={busy}
+                onChange={(next) => {
+                  setAgreed(next);
+                  clearFieldError('agree');
+                }}
+                label={
+                  <>
+                    I agree to the{' '}
+                    <a href="/terms-and-conditions.html" target="_blank" rel="noopener noreferrer" className={AGREE_LINK}>
+                      Terms and Conditions<span className="sr-only"> (opens in a new tab)</span>
+                    </a>{' '}
+                    and the{' '}
+                    <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className={AGREE_LINK}>
+                      Privacy Policy<span className="sr-only"> (opens in a new tab)</span>
+                    </a>
+                  </>
+                }
+                description={AGREE_HINT}
+              />
+            </div>
 
             <Button type="submit" variant="primary" size="lg" block loading={busy}>
               Create account
