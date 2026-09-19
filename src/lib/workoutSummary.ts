@@ -55,11 +55,11 @@ export function formatSummaryVolume(kg: number, unit: WorkoutSummaryUnit): strin
   return unit === 'lb' ? `${whole(kgToLb(kg))} lb` : `${whole(kg)} kg`;
 }
 
-/** "8 × 225 lb" for a loaded set, "12 reps" when the set carried no load or the author hid weights. */
+/** "225 lb × 8" for a loaded set (weight first, the Hevy/Strong convention mobile uses), "12 reps" when the set carried no load or the author hid weights. */
 export function formatBestSet(best: WorkoutSummaryBestSet | null | undefined, unit: WorkoutSummaryUnit): string {
   if (!best || !Number.isFinite(best.reps)) return '';
   const reps = Math.max(0, Math.round(best.reps));
-  if (typeof best.weightKg === 'number' && best.weightKg > 0) return `${reps} × ${formatSummaryWeight(best.weightKg, unit)}`;
+  if (typeof best.weightKg === 'number' && best.weightKg > 0) return `${formatSummaryWeight(best.weightKg, unit)} × ${reps}`;
   return `${reps} ${reps === 1 ? 'rep' : 'reps'}`;
 }
 

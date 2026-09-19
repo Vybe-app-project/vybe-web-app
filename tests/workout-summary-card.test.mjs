@@ -45,7 +45,7 @@ test('numbers print in the unit the member trained in; kg is the default for old
   assert.equal(lib.formatSummaryWeight(102.5, 'kg'), '102.5 kg');
   assert.equal(lib.formatSummaryVolume(12400 * LB, 'lb'), '12,400 lb');
   assert.equal(lib.formatSummaryVolume(5624.6, 'kg'), '5,625 kg');
-  assert.equal(lib.formatBestSet({ reps: 5, weightKg: 225 * LB }, 'lb'), '5 × 225 lb');
+  assert.equal(lib.formatBestSet({ reps: 5, weightKg: 225 * LB }, 'lb'), '225 lb × 5');
   assert.equal(lib.formatBestSet({ reps: 20, weightKg: 0 }, 'lb'), '20 reps');
   assert.equal(lib.formatBestSet({ reps: 1 }, 'kg'), '1 rep');
   assert.equal(lib.formatBestSet(null, 'kg'), '');
@@ -74,14 +74,14 @@ test('the card renders the unit, the best sets, the muscle groups and the overfl
   const html = renderToString(h(MemoryRouter, null, h(WorkoutSummaryCard, { summary: card })));
   assert.match(html, /aria-label="Workout summary: Push day"/);
   assert.match(html, /data-unit="lb"/);
-  for (const text of ['12,400 lb', '5 × 225 lb', '20 reps', '1 h 2 min', 'chest', 'shoulders', 'triceps', '+1 more exercise']) {
+  for (const text of ['12,400 lb', '225 lb × 5', '20 reps', '1 h 2 min', 'chest', 'shoulders', 'triceps', '+1 more exercise']) {
     assert.ok(html.includes(text), `card shows ${text}`);
   }
   assert.ok(!html.includes('NaN'));
   // A kg card with nothing hidden and no name falls back to "Workout".
   const kg = renderToString(h(MemoryRouter, null, h(WorkoutSummaryCard, { summary: { workoutId: 'x', setCount: 3, volumeKg: 1200, exercises: [{ name: 'Squat', setCount: 3, bestSet: { reps: 5, weightKg: 100 } }] } })));
   assert.match(kg, /Workout summary: Workout"/);
-  assert.ok(kg.includes('1,200 kg') && kg.includes('5 × 100 kg'));
+  assert.ok(kg.includes('1,200 kg') && kg.includes('100 kg × 5'));
 });
 
 test('feed cards and the public post page show the card between media and text', () => {
