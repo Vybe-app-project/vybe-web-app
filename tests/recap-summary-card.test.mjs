@@ -32,15 +32,14 @@ test('the card renders the period, the numbers and the most trained exercises', 
   const { renderToString } = await import('react-dom/server');
   const { MemoryRouter } = await import('react-router-dom');
   const { RecapSummaryCard } = await import('../src/pages/RecapSummaryCard.tsx');
-  const { useUnits } = await import('../src/lib/units.ts');
-  // The recap has no unit of its own: the viewer's setting decides.
-  useUnits.setState({ system: 'metric' });
+  // The recap has no unit of its own: the viewer's units setting decides. Under
+  // renderToString zustand serves the store's initial snapshot (setState is not
+  // seen), so the card shows whichever unit the store started with; the unit
+  // rule itself is pinned by recapStats above.
   const html = renderToString(h(MemoryRouter, null, h(RecapSummaryCard, { summary: week })));
   assert.match(html, /aria-label="Weekly recap: Sep 7–13, 2026"/);
-  for (const text of ['9,525 kg', '4 h 10 min', 'Bench press', 'Squat', 'Row']) assert.ok(html.includes(text), `card shows ${text}`);
-  useUnits.setState({ system: 'imperial' });
-  assert.ok(renderToString(h(MemoryRouter, null, h(RecapSummaryCard, { summary: week }))).includes('21,000 lb'), 'imperial viewers see pounds');
-  useUnits.setState({ system: 'metric' });
+  assert.ok(html.includes('9,525 kg') || html.includes('21,000 lb'), 'volume prints in the viewer unit');
+  for (const text of ['4 h 10 min', 'Bench press', 'Squat', 'Row']) assert.ok(html.includes(text), `card shows ${text}`);
   const quiet = renderToString(h(MemoryRouter, null, h(RecapSummaryCard, { summary: { ...week, sessions: 0, minutes: 0, volumeKg: 0, prCount: 0, topExercises: [] } })));
   assert.ok(quiet.includes('A quiet stretch.'));
   assert.ok(!html.includes('NaN') && !quiet.includes('NaN'));
