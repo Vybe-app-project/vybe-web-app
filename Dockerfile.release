@@ -8,6 +8,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+# The deployed commit, for the X-Vybe-Client header and Settings > About.
+# Empty by default: the bundle then identifies itself by build time.
+ARG VITE_WEB_BUILD=
+ENV VITE_WEB_BUILD=$VITE_WEB_BUILD
 RUN npm run verify
 
 FROM scratch AS artifact

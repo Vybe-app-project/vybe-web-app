@@ -63,6 +63,7 @@ else
 
   docker buildx build \
     --pull \
+    --build-arg "VITE_WEB_BUILD=${commit_sha:0:12}" \
     --target artifact \
     --output "type=local,dest=$job/artifact" \
     --file "$job/source/Dockerfile.release" \

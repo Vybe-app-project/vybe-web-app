@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import pkg from './package.json';
 
 /**
  * Service worker strategy (Workbox generateSW):
@@ -18,6 +19,15 @@ import { VitePWA } from 'vite-plugin-pwa';
  * The manifest is the hand-authored `public/manifest.webmanifest`.
  */
 export default defineConfig({
+  // Build identity for the X-Vybe-Client header and Settings > About
+  // (src/lib/clientHeader.ts): the package version and the build clock. The
+  // deployed commit arrives separately as VITE_WEB_BUILD (Dockerfile.release
+  // build arg); the release tarball has no .git and a build config must not
+  // run other programs (scripts/scan-injected-code.mjs).
+  define: {
+    'import.meta.env.VITE_WEB_VERSION': JSON.stringify(pkg.version),
+    'import.meta.env.VITE_WEB_BUILT_AT': JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     tailwindcss(),
