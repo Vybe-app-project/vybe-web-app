@@ -90,9 +90,15 @@ test('the sign-in page shows one arrival notice and turns credential failures in
   assert.deepEqual(loginFailure({ response: { status: 403, data: { message: 'Verify your email before signing in' } } }, { fallback }), {
     text: 'Verify your email before signing in', offerReset: false,
   });
-  assert.deepEqual(loginFailure({ response: { status: 429, data: { message: 'Too many attempts' } } }, { fallback }), {
-    text: 'Too many attempts', offerReset: false,
+  // A 429 names the wait from Retry-After (the auth limiter's body has no
+  // retryAfterSec) and never clears the typed password.
+  assert.deepEqual(loginFailure({ response: { status: 429, data: { message: 'Too many attempts, please try again later.' }, headers: { 'retry-after': '37' } } }, { fallback }), {
+    text: 'Too many attempts, try again in 37 s', offerReset: false, retryAfterSec: 37,
   });
+  assert.deepEqual(loginFailure({ response: { status: 429, data: { message: 'Too many attempts' } } }, { fallback }), {
+    text: 'Too many attempts, try again in a moment', offerReset: false, retryAfterSec: null,
+  });
+  assert.equal(loginFailure({ response: { status: 429, data: { code: 'RATE_LIMITED', retryAfterSec: 5 } } }, { fallback }).text, 'Too many attempts, try again in 5 s');
   assert.deepEqual(loginFailure({ code: 'ERR_NETWORK' }, { fallback }), { text: OFFLINE_COPY, offerReset: false });
   assert.deepEqual(loginFailure(rejected, { online: false, fallback }), { text: OFFLINE_COPY, offerReset: false });
   assert.deepEqual(loginFailure({ response: { status: 500, data: {} } }, { fallback }), { text: fallback, offerReset: false });
