@@ -136,12 +136,17 @@ test('every switch has a title and a one-sentence hint, the legacy titles are ve
   }
   for (const key of lib.EMAIL_SETTING_KEYS) {
     const label = lib.EMAIL_LABELS[key];
-    assert.ok(label && label.title && label.hint, `${key} e-mail row needs copy`);
+    assert.ok(label && label.title && label.hint, `${key} email row needs copy`);
     assert.doesNotMatch(`${label.title} ${label.hint}`, banned);
   }
   assert.equal(lib.EMAIL_LABELS.productUpdates.title, 'Marketing and product updates');
-  assert.equal(lib.EMAIL_PAUSE_LABEL.title, 'Pause all e-mail');
+  assert.equal(lib.EMAIL_PAUSE_LABEL.title, 'Pause all email');
   assert.doesNotMatch(`${lib.EMAIL_PAUSE_LABEL.title} ${lib.EMAIL_PAUSE_LABEL.hint}`, banned);
+  // The product vocabulary is "email" (claude-main and the mobile app); the API's "e-mail" is never shown.
+  for (const key of lib.EMAIL_SETTING_KEYS) assert.doesNotMatch(`${lib.EMAIL_LABELS[key].title} ${lib.EMAIL_LABELS[key].hint}`, /e-mail/i);
+  assert.doesNotMatch(`${lib.EMAIL_PAUSE_LABEL.title} ${lib.EMAIL_PAUSE_LABEL.hint}`, /e-mail/i);
+  for (const key of lib.NOTIFICATION_SETTING_KEYS) assert.doesNotMatch(`${lib.NOTIFICATION_LABELS[key].title} ${lib.NOTIFICATION_LABELS[key].hint}`, /e-mail/i);
+  for (const sentence of Object.values(lib.HYDRATION_TIMES_ERRORS)) assert.doesNotMatch(sentence, /e-mail/i);
   // The old inline table is gone from the page; the page reads the shared one.
   const settings = read('src/pages/Settings.tsx');
   assert.doesNotMatch(settings, /const NOTIFICATION_LABELS/);
@@ -175,14 +180,78 @@ test('hydration times: sorted, one to three, HH:MM, distinct; seconds from a tim
   assert.equal(empty.error, lib.HYDRATION_TIMES_ERRORS.empty);
   assert.equal(many.error, lib.HYDRATION_TIMES_ERRORS.tooMany);
   assert.equal(shape.error, lib.HYDRATION_TIMES_ERRORS.format);
-  assert.equal(blank.error, lib.HYDRATION_TIMES_ERRORS.format);
+  assert.equal(shape.index, 0, 'a malformed row is named');
+  // A row that was added and never filled is its own sentence, anchored to that row; a time input
+  // can only emit '' or a valid HH:MM, so on the web this is the shape error a member can reach.
+  assert.equal(blank.error, lib.HYDRATION_TIMES_ERRORS.blank);
+  assert.equal(blank.index, 1);
+  assert.equal(lib.HYDRATION_TIMES_ERRORS.blank, 'Pick a time for each reminder, or remove the empty row.');
+  assert.doesNotMatch(lib.HYDRATION_TIMES_ERRORS.blank, /24-hour/, 'a 12-hour locale sees 9:00 AM in the picker');
+  assert.deepEqual(lib.validateHydrationTimes(['', '09:00']), { error: lib.HYDRATION_TIMES_ERRORS.blank, index: 0 });
+  assert.deepEqual(lib.validateHydrationTimes(['']), { error: lib.HYDRATION_TIMES_ERRORS.blank, index: 0 });
+  assert.equal(lib.validateHydrationTimes(['09:00', '', '8:0']).index, 1, 'blank is reported before format');
   assert.equal(dupes.error, lib.HYDRATION_TIMES_ERRORS.duplicate);
+  assert.equal(dupes.index, undefined, 'duplicates belong to the set, not one row');
+  assert.equal(many.index, undefined);
   assert.equal(late.error, lib.HYDRATION_TIMES_ERRORS.format);
 
   assert.deepEqual(lib.pickHydrationReminders({ times: ['17:00', '09:00', '09:00'] }), { times: ['09:00', '17:00'] });
   assert.equal(lib.pickHydrationReminders(null), null);
   assert.equal(lib.pickHydrationReminders({ times: [] }), null);
   assert.equal(lib.pickHydrationReminders({ times: ['nope'] }), null);
+});
+
+test('the save toast names the times when the save also turned the switch on', () => {
+  assert.equal(lib.listClockTimes(['09:00']), '09:00');
+  assert.equal(lib.listClockTimes(['09:00', '13:00']), '09:00 and 13:00');
+  assert.equal(lib.listClockTimes(['06:00', '12:00', '18:00']), '06:00, 12:00 and 18:00');
+  assert.equal(lib.listClockTimes([]), '');
+  assert.equal(lib.hydrationSavedToast(['09:00', '13:00'], true), 'Water check-ins on at 09:00 and 13:00');
+  assert.equal(lib.hydrationSavedToast(['09:00'], true), 'Water check-ins on at 09:00');
+  assert.equal(lib.hydrationSavedToast(['09:00', '13:00'], false), 'Water check-in times saved');
+  assert.equal(lib.hydrationSavedToast([], true), 'Water check-in times saved');
+  for (const sentence of [lib.hydrationSavedToast(['09:00'], true), lib.hydrationSavedToast(['09:00'], false)]) assert.doesNotMatch(sentence, /!/);
+  // The editor says what Save does while the switch is off, and sends the switch in the same request.
+  const editor = read('src/pages/settings/HydrationTimesEditor.tsx');
+  assert.match(editor, /Saving times turns Water check-ins on\./);
+  assert.doesNotMatch(editor, /Turn on Water check-ins to receive these/);
+  assert.match(editor, /if \(!hydrationOn\) body\.hydration = true;/);
+  assert.match(editor, /hydrationSavedToast\(patch\.hydrationReminders\.times, patch\.hydration === true\)/);
+});
+
+test('the two hydration 400s the API can still send are worded for the web, with the quiet-hours window named', () => {
+  const quietHours = { start: '22:00', end: '07:00' };
+  const conflict = {
+    code: 'HYDRATION_TIME_IN_QUIET_HOURS',
+    message: '23:00 is inside your quiet hours. Pick a time outside them',
+    body: { message: '23:00 is inside your quiet hours. Pick a time outside them', field: 'hydrationReminders', code: 'HYDRATION_TIME_IN_QUIET_HOURS', time: '23:00' },
+  };
+  assert.equal(lib.hydrationSaveErrorMessage(conflict, quietHours), '23:00 is inside your quiet hours (22:00 to 07:00). Pick a time outside them.');
+  assert.equal(lib.hydrationSaveErrorMessage(conflict, null), '23:00 is inside your quiet hours. Pick a time outside them.', 'no window known: still a sentence');
+  assert.equal(
+    lib.hydrationSaveErrorMessage({ ...conflict, body: { code: conflict.code } }, quietHours),
+    'One of these times is inside your quiet hours (22:00 to 07:00). Pick a time outside them.',
+    'a body without `time` still reads',
+  );
+  assert.equal(lib.hydrationSaveErrorMessage({ ...conflict, body: { time: '<b>x</b>' } }, quietHours).startsWith('One of these times'), true, 'only a clock time is echoed');
+  const timezone = {
+    code: 'TIMEZONE_REQUIRED',
+    message: 'Water check-ins need your timezone. Update the app, then try again.',
+    body: { code: 'TIMEZONE_REQUIRED', field: 'hydrationReminders' },
+  };
+  assert.equal(lib.hydrationSaveErrorMessage(timezone, null), lib.HYDRATION_TIMEZONE_MESSAGE);
+  assert.equal(lib.HYDRATION_TIMEZONE_MESSAGE, 'Water check-ins need your timezone. Reload this page so Vybe can save it, then try again.');
+  assert.doesNotMatch(lib.HYDRATION_TIMEZONE_MESSAGE, /Update the app/, 'the API sentence is written for the phone');
+  // Anything else keeps the API's sentence.
+  assert.equal(lib.hydrationSaveErrorMessage({ code: null, message: 'hydrationReminders.times must be distinct' }, quietHours), 'hydrationReminders.times must be distinct');
+  assert.equal(lib.hydrationSaveErrorMessage({ message: 'x' }, null), 'x');
+  // The window is shown on the page, so the member can read what to avoid.
+  assert.equal(lib.quietHoursHint(quietHours), 'Quiet hours are 22:00 to 07:00. Pick times outside them.');
+  assert.equal(lib.quietHoursHint(null), null);
+  const editor = read('src/pages/settings/HydrationTimesEditor.tsx');
+  assert.match(editor, /hydrationSaveErrorMessage\(parsed, quietHours\)/);
+  assert.match(editor, /quietHoursHint\(quietHours\)/);
+  assert.match(read('src/pages/Settings.tsx'), /quietHours=\{response\.quietHours\}/);
 });
 
 test('the settings body is read whole: defaults filled, quiet hours and times beside the switches', () => {
@@ -213,10 +282,10 @@ test('the settings body is read whole: defaults filled, quiet hours and times be
   assert.equal(lib.pickNotificationSettingsResponse({ hydrationReminders: 'soon' }).hydrationReminders, null);
 });
 
-test('e-mail preferences: nine kinds in the API order, marketing off by default', () => {
+test('email preferences: nine kinds in the API order, marketing off by default', () => {
   const live = backendEmailDefaults();
   const kinds = live ? live.kinds.filter((k) => k !== 'all') : ['newFollowers', 'workoutPosts', 'likes', 'comments', 'friendRequests', 'weeklyRecap', 'checkins', 'achievements', 'productUpdates'];
-  assert.deepEqual([...lib.EMAIL_SETTING_KEYS], kinds, live ? `e-mail kinds drifted from ${live.source}` : 'e-mail kinds drifted');
+  assert.deepEqual([...lib.EMAIL_SETTING_KEYS], kinds, live ? `email kinds drifted from ${live.source}` : 'email kinds drifted');
   assert.equal(lib.DEFAULT_EMAIL_SETTINGS.productUpdates, false, 'marketing is never pre-checked');
   for (const key of lib.EMAIL_SETTING_KEYS) if (key !== 'productUpdates') assert.equal(lib.DEFAULT_EMAIL_SETTINGS[key], true);
   assert.deepEqual(lib.pickEmailSettings({ likes: false, pauseAll: true }), { ...lib.DEFAULT_EMAIL_SETTINGS, likes: false });

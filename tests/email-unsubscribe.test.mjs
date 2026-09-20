@@ -11,6 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 const lib = await import('../src/lib/emailUnsubscribe.ts');
+const { isInlineErrorSurface } = await import('../src/lib/clientPolicy.ts');
 
 // 32 random bytes as base64url: 43 characters, the shape services/emailUnsubscribe.js mints.
 const TOKEN = 'Qm9vc3Rlci1nb2xkLXRva2VuLXZhbHVlLTEyMzQ1Njc';
@@ -55,6 +56,7 @@ test('failures map to the states the page renders and keep the server sentence w
   assert.deepEqual(
     lib.classifyUnsubscribeFailure(http(500, { message: "Couldn't update your e-mail preferences. Try the link again in a moment." })),
     { kind: 'failed', message: "Couldn't update your e-mail preferences. Try the link again in a moment." },
+    'a server sentence is kept verbatim, spelling and all',
   );
   assert.equal(lib.classifyUnsubscribeFailure(http(502, '<html>')).kind, 'failed');
   assert.ok(lib.classifyUnsubscribeFailure(http(502, '<html>')).message.length > 0, 'a text body still yields a sentence');
@@ -76,21 +78,42 @@ test('failures map to the states the page renders and keep the server sentence w
   assert.equal(lib.unsubscribeFailureMessage({ kind: 'invalid-link' }), 'This link is not valid.');
   assert.equal(lib.unsubscribeFailureMessage({ kind: 'used-or-expired' }), 'This link has already been used or has expired.');
   assert.equal(lib.unsubscribeFailureMessage({ kind: 'network' }), 'Could not reach Vybe. Check your connection and try again.');
+  assert.equal(lib.classifyUnsubscribeFailure(http(502, '<html>')).message, 'Could not update your email preferences. Try the link again in a moment.');
+});
+
+test('a rate-limited unsubscribe is told once: the page renders the 429 inline, so the global toast stands down', () => {
+  assert.equal(isInlineErrorSurface('/api/email/unsubscribe'), true);
+  assert.equal(isInlineErrorSurface('/email/unsubscribe'), true);
+  assert.equal(isInlineErrorSurface('https://api.vybeapp.fit/api/email/unsubscribe'), true);
+  assert.equal(isInlineErrorSurface('/email/unsubscribe/sometoken'), true);
+  assert.equal(isInlineErrorSurface('/email/preferences'), false);
+  assert.equal(isInlineErrorSurface('/users/email-preferences'), false, 'the Settings card uses the shared toast');
+});
+
+test('a stale stored session leaves the public landing in place instead of copying the token into /login?next=', () => {
+  const api = read('src/lib/api.ts');
+  assert.match(api, /const NO_SESSION_PATHS = \['\/email\/unsubscribe'\];/);
+  const fn = api.slice(api.indexOf('function onUnauthorized('), api.indexOf('export function installClientInterceptors'));
+  assert.match(fn, /tokenStore\.clear\(\);/, 'the stale token is still dropped');
+  assert.match(fn, /if \(pathIsUnder\(location\.pathname, NO_SESSION_PATHS\)\) return;/);
+  assert.ok(fn.indexOf('NO_SESSION_PATHS)) return;') < fn.indexOf('location.href = sessionExpiredLoginUrl('), 'the exemption runs before the hard navigation');
+  assert.match(fn, /if \(pathIsUnder\(location\.pathname, AUTH_PATHS\)\) return;/, 'the sign-in pages keep their exemption');
 });
 
 test('the success sentence names the kind the way the Settings card does; unknown kinds keep the server sentence', () => {
-  assert.equal(lib.unsubscribeSuccessMessage('weeklyRecap'), 'You are unsubscribed from weekly recap e-mail. Your other choices are unchanged.');
-  assert.equal(lib.unsubscribeSuccessMessage('likes'), 'You are unsubscribed from likes e-mail. Your other choices are unchanged.', 'the web says likes, not kudos');
-  assert.equal(lib.unsubscribeSuccessMessage('productUpdates'), 'You are unsubscribed from marketing and product updates e-mail. Your other choices are unchanged.');
-  assert.match(lib.unsubscribeSuccessMessage('all'), /^You are unsubscribed from all Vybe e-mail\. Sign-in codes/);
+  assert.equal(lib.unsubscribeSuccessMessage('weeklyRecap'), 'You are unsubscribed from weekly recap email. Your other choices are unchanged.');
+  assert.equal(lib.unsubscribeSuccessMessage('likes'), 'You are unsubscribed from likes email. Your other choices are unchanged.', 'the web says likes, not kudos');
+  assert.equal(lib.unsubscribeSuccessMessage('productUpdates'), 'You are unsubscribed from marketing and product updates email. Your other choices are unchanged.');
+  assert.match(lib.unsubscribeSuccessMessage('all'), /^You are unsubscribed from all Vybe email\. Sign-in codes/);
   assert.equal(lib.unsubscribeSuccessMessage('somethingNew', "You're unsubscribed from somethingNew e-mail. Your other choices are unchanged."), "You're unsubscribed from somethingNew e-mail. Your other choices are unchanged.");
   assert.equal(lib.unsubscribeSuccessMessage('somethingNew'), 'You are unsubscribed.');
   assert.equal(lib.unsubscribeSuccessMessage(null, 42), 'You are unsubscribed.');
   for (const kind of lib.UNSUBSCRIBE_KINDS) assert.doesNotMatch(lib.unsubscribeSuccessMessage(kind), /!/);
+  for (const kind of lib.UNSUBSCRIBE_KINDS) assert.doesNotMatch(lib.unsubscribeSuccessMessage(kind), /e-mail/i, 'the product says email');
   assert.deepEqual([...lib.UNSUBSCRIBE_KINDS], ['newFollowers', 'workoutPosts', 'likes', 'comments', 'friendRequests', 'weeklyRecap', 'checkins', 'achievements', 'productUpdates', 'all']);
   assert.equal(lib.unsubscribeKindLabel('all'), null);
   assert.equal(lib.unsubscribeKindLabel('checkins'), 'check-ins');
-  // The manage link lands on the e-mail card, via sign-in when there is no session (safeNextPath keeps the hash).
+  // The manage link lands on the email card, via sign-in when there is no session (safeNextPath keeps the hash).
   assert.equal(lib.manageEmailPreferencesPath(true), '/settings#email');
   assert.equal(lib.manageEmailPreferencesPath(false), '/login?next=%2Fsettings%23email');
 });
@@ -114,7 +137,8 @@ test('the landing is a public route that POSTs the pinned static endpoint once, 
   assert.doesNotMatch(page, /\/email\/unsubscribe\/\$\{/, 'never the token in the path (that route is RFC 8058 one-click)');
   assert.match(page, /attempted\.current === token/, 'a single-use token is posted once per mount');
   assert.match(page, /isUnsubscribeToken\(token\)/, 'a malformed token never reaches the API');
-  assert.match(page, /<PublicShell title="E-mail preferences"/);
+  assert.match(page, /<PublicShell title="Email preferences"/);
+  assert.doesNotMatch(page, /e-mail/i, 'the product says email; the API\'s hyphenated sentences are never shown');
   assert.match(page, /export function UnsubscribeOutcome/);
   assert.doesNotMatch(page, /style=\{\{|dangerouslySetInnerHTML|https?:\/\//, 'CSP-safe: no inline styles, no injected HTML, no third-party origins');
 

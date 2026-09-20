@@ -1,5 +1,5 @@
 /**
- * One-click e-mail unsubscribe: the token rule, the reader for the landing
+ * One-click email unsubscribe: the token rule, the reader for the landing
  * URL, and the sentences the page shows for each answer from
  * `POST /api/email/unsubscribe` (vybe-backend/controllers/emailUnsubscribeController.js).
  *
@@ -35,7 +35,7 @@ export function readUnsubscribeToken({ param, search }: { param?: string | null;
   }
 }
 
-/** The nine e-mail kinds plus `all` (models/EmailUnsubscribeToken.js EMAIL_UNSUBSCRIBE_KINDS). */
+/** The nine email kinds plus `all` (models/EmailUnsubscribeToken.js EMAIL_UNSUBSCRIBE_KINDS). */
 export const UNSUBSCRIBE_KINDS = [
   'newFollowers',
   'workoutPosts',
@@ -55,7 +55,7 @@ export const isUnsubscribeKind = (value: unknown): value is UnsubscribeKind =>
 
 /**
  * The noun for each kind in the success sentence. These match the row titles
- * on the Settings e-mail card the page links to, so "likes" here where the
+ * on the Settings email card the page links to, so "likes" here where the
  * API's own label says "kudos".
  */
 const KIND_LABELS: Record<Exclude<UnsubscribeKind, 'all'>, string> = {
@@ -75,18 +75,18 @@ export function unsubscribeKindLabel(kind: string | null | undefined): string | 
   return KIND_LABELS[kind];
 }
 
-const ALL_MESSAGE = 'You are unsubscribed from all Vybe e-mail. Sign-in codes and account notices still arrive.';
+const ALL_MESSAGE = 'You are unsubscribed from all Vybe email. Sign-in codes and account notices still arrive.';
 const GENERIC_DONE = 'You are unsubscribed.';
 
 /**
  * The sentence under "You are unsubscribed". A known kind gets the web's own
- * wording; an unknown kind (a future e-mail kind this build does not know)
+ * wording; an unknown kind (a future email kind this build does not know)
  * falls back to the server's sentence so nothing is invented.
  */
 export function unsubscribeSuccessMessage(kind: string | null | undefined, serverMessage?: unknown): string {
   if (kind === 'all') return ALL_MESSAGE;
   const label = unsubscribeKindLabel(kind);
-  if (label) return `You are unsubscribed from ${label} e-mail. Your other choices are unchanged.`;
+  if (label) return `You are unsubscribed from ${label} email. Your other choices are unchanged.`;
   const fallback = typeof serverMessage === 'string' ? serverMessage.trim() : '';
   return fallback || GENERIC_DONE;
 }
@@ -105,7 +105,7 @@ type HttpFailure = {
 };
 
 const RATE_LIMIT_FALLBACK = 'Too many unsubscribe requests from this connection. Try again in about 15 minutes.';
-const FAILED_FALLBACK = 'Could not update your e-mail preferences. Try the link again in a moment.';
+const FAILED_FALLBACK = 'Could not update your email preferences. Try the link again in a moment.';
 
 /**
  * Sorts a failed POST into the states the page renders.
@@ -149,7 +149,7 @@ export function unsubscribeFailureMessage(failure: UnsubscribeFailure): string {
 /** Only a connectivity problem or a server-side failure is worth a second POST. */
 export const canRetryUnsubscribe = (failure: UnsubscribeFailure): boolean => failure.kind === 'network' || failure.kind === 'failed';
 
-/** Where "Manage e-mail preferences" goes: the card on Settings, via sign-in when there is no session. */
+/** Where "Manage email preferences" goes: the card on Settings, via sign-in when there is no session. */
 export const EMAIL_PREFERENCES_PATH = '/settings#email';
 export const manageEmailPreferencesPath = (signedIn: boolean): string =>
   signedIn ? EMAIL_PREFERENCES_PATH : `/login?next=${encodeURIComponent(EMAIL_PREFERENCES_PATH)}`;

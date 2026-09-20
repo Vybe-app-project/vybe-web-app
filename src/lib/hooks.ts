@@ -120,7 +120,7 @@ export type AppNotification = {
 
 /**
  * Push switches (18 keys), their groups and copy, the hydration-time helpers
- * and the e-mail preference keys live in the import-free module
+ * and the email preference keys live in the import-free module
  * lib/notificationSettings so node:test can load them and compare them with
  * the backend; re-exported here so every existing import path still works.
  */
@@ -134,8 +134,14 @@ export {
   pickHydrationReminders,
   validateHydrationTimes,
   normalizeClock,
+  listClockTimes,
+  hydrationSavedToast,
+  hydrationSaveErrorMessage,
+  quietHoursHint,
   CLOCK_RE,
   HYDRATION_TIMES_MAX,
+  HYDRATION_TIMES_ERRORS,
+  HYDRATION_TIMEZONE_MESSAGE,
   EMPTY_NOTIFICATION_SETTINGS_RESPONSE,
   EMAIL_SETTING_KEYS,
   DEFAULT_EMAIL_SETTINGS,
@@ -147,6 +153,8 @@ export {
   type NotificationSettingGroup,
   type NotificationSettingsResponse,
   type HydrationReminders,
+  type HydrationTimesResult,
+  type HydrationSaveFailure,
   type QuietHours,
   type SettingLabel,
   type EmailSettingKey,

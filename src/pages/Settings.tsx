@@ -697,6 +697,7 @@ function NotificationsSection() {
                     <HydrationTimesEditor
                       times={hydrationTimes}
                       hydrationOn={value.hydration}
+                      quietHours={response.quietHours}
                       disabled={paused || save.isPending}
                       onSaved={(next) => qc.setQueryData(NOTIFICATION_SETTINGS_KEY, next)}
                     />

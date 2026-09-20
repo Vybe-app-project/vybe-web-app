@@ -1,5 +1,5 @@
 /**
- * Push-switch and e-mail-preference vocabulary for the Settings page, mirrored
+ * Push-switch and email-preference vocabulary for the Settings page, mirrored
  * from the API (vybe-backend/services/notificationDelivery.js
  * DEFAULT_NOTIFICATION_SETTINGS and NOTIFICATION_TYPE_SETTINGS;
  * services/emailPreferences.js EMAIL_PREFERENCE_DEFAULTS;
@@ -161,25 +161,54 @@ export function normalizeClock(value: string | null | undefined): string {
 export const HYDRATION_TIMES_ERRORS = {
   empty: 'Add at least one time, or remove them all to turn water check-ins off.',
   tooMany: `Up to ${HYDRATION_TIMES_MAX} times a day.`,
+  /** A row that was added and never filled; `<input type="time">` emits '' or a valid HH:MM, nothing else. */
+  blank: 'Pick a time for each reminder, or remove the empty row.',
   format: 'Enter each time as a 24-hour clock time, like 09:00.',
   duplicate: 'Each time can only be used once.',
 } as const;
 
-export type HydrationTimesResult = { value: string[]; error?: never } | { error: string; value?: never };
+/**
+ * A failed check names the sentence and, when one row is at fault (blank or
+ * malformed), that row's index so the editor can mark the field itself.
+ * Duplicate and too-many belong to the set, so they carry no index.
+ */
+export type HydrationTimesResult = { value: string[]; error?: never; index?: never } | { error: string; index?: number; value?: never };
 
 /**
  * The API's four shape rules for `hydrationReminders.times`, checked before
  * the request: one to three entries, `HH:MM`, distinct. The value comes back
  * sorted, as the API stores it. Quiet-hours and timezone checks stay on the
- * server (the web has no quiet-hours control in this area).
+ * server; their 400s are worded for the web by hydrationSaveErrorMessage.
  */
 export function validateHydrationTimes(input: readonly string[]): HydrationTimesResult {
   const times = input.map((time) => normalizeClock(time));
   if (times.length === 0) return { error: HYDRATION_TIMES_ERRORS.empty };
   if (times.length > HYDRATION_TIMES_MAX) return { error: HYDRATION_TIMES_ERRORS.tooMany };
-  if (times.some((time) => !CLOCK_RE.test(time))) return { error: HYDRATION_TIMES_ERRORS.format };
+  const blank = times.findIndex((time) => time === '');
+  if (blank !== -1) return { error: HYDRATION_TIMES_ERRORS.blank, index: blank };
+  const malformed = times.findIndex((time) => !CLOCK_RE.test(time));
+  if (malformed !== -1) return { error: HYDRATION_TIMES_ERRORS.format, index: malformed };
   if (new Set(times).size !== times.length) return { error: HYDRATION_TIMES_ERRORS.duplicate };
   return { value: [...times].sort() };
+}
+
+/**
+ * "09:00", "09:00 and 13:00", "06:00, 12:00 and 18:00": the saved times as a
+ * person would list them.
+ */
+export function listClockTimes(times: readonly string[]): string {
+  if (times.length <= 1) return times[0] ?? '';
+  return `${times.slice(0, -1).join(', ')} and ${times[times.length - 1]}`;
+}
+
+/**
+ * The toast after a save. A save while the switch was off turns Water
+ * check-ins on in the same request, and the toast says so rather than
+ * letting the switch flip silently.
+ */
+export function hydrationSavedToast(times: readonly string[], turnedOn: boolean): string {
+  if (turnedOn && times.length > 0) return `Water check-ins on at ${listClockTimes(times)}`;
+  return 'Water check-in times saved';
 }
 
 /** `{ times }` from the API body, or null when absent, empty or unusable. */
@@ -195,6 +224,46 @@ export function pickHydrationReminders(raw: unknown): HydrationReminders {
 /* ------------------------------------------------------------------ the settings body */
 
 export type QuietHours = { start: string; end: string } | null;
+
+/**
+ * The sentence under the times editor when the phone has set quiet hours:
+ * the API refuses a water check-in inside the window (HYDRATION_TIME_IN_QUIET_HOURS),
+ * so the member has to be able to read the window on this page.
+ */
+export function quietHoursHint(quietHours: QuietHours): string | null {
+  if (!quietHours) return null;
+  return `Quiet hours are ${quietHours.start} to ${quietHours.end}. Pick times outside them.`;
+}
+
+/** The subset of a parsed API error this module reads; typed structurally to stay import-free. */
+export type HydrationSaveFailure = { code?: string | null; message: string; body?: unknown };
+
+export const HYDRATION_TIMEZONE_MESSAGE = 'Water check-ins need your timezone. Reload this page so Vybe can save it, then try again.';
+
+/**
+ * The web's own sentence for the two hydration 400s the API can still send
+ * after the shape checks above (controllers/notificationController.js):
+ *
+ * - HYDRATION_TIME_IN_QUIET_HOURS carries `time`; the window comes from the
+ *   same settings query, so the sentence names it (the API's sentence does
+ *   not, and has no terminal period).
+ * - TIMEZONE_REQUIRED: the API says "Update the app", written for the phone.
+ *   On the web lib/accountPreferences sends the zone at sign-in and on every
+ *   return to the tab, so a reload is what actually fixes it.
+ *
+ * Anything else keeps the API's sentence.
+ */
+export function hydrationSaveErrorMessage(failure: HydrationSaveFailure, quietHours: QuietHours): string {
+  if (failure.code === 'HYDRATION_TIME_IN_QUIET_HOURS') {
+    const body = (failure.body && typeof failure.body === 'object' ? failure.body : {}) as { time?: unknown };
+    const time = typeof body.time === 'string' && CLOCK_RE.test(body.time) ? body.time : null;
+    const window = quietHours ? ` (${quietHours.start} to ${quietHours.end})` : '';
+    const subject = time ?? 'One of these times';
+    return `${subject} is inside your quiet hours${window}. Pick a time outside them.`;
+  }
+  if (failure.code === 'TIMEZONE_REQUIRED') return HYDRATION_TIMEZONE_MESSAGE;
+  return failure.message;
+}
 
 /** The whole `GET /notifications/settings` body; quiet hours are read, never written, by this page. */
 export type NotificationSettingsResponse = {
@@ -230,7 +299,7 @@ export function pickNotificationSettingsResponse(data: unknown): NotificationSet
   };
 }
 
-/* ------------------------------------------------------------------ e-mail preferences */
+/* ------------------------------------------------------------------ email preferences */
 
 /**
  * Email preferences are a separate store on the API
@@ -273,10 +342,10 @@ export function pickEmailSettings(raw: unknown): EmailSettings {
   }, {} as EmailSettings);
 }
 
-/** The "Pause all e-mail" row; `emailPaused` on the API body. */
+/** The "Pause all email" row; `emailPaused` on the API body. */
 export const EMAIL_PAUSE_LABEL: SettingLabel = {
-  title: 'Pause all e-mail',
-  hint: 'Stops every e-mail below. Sign-in codes, password resets and account notices still arrive.',
+  title: 'Pause all email',
+  hint: 'Stops every email below. Sign-in codes, password resets and account notices still arrive.',
 };
 
 /** Row copy for the nine kinds. `productUpdates` is marketing and says so. */

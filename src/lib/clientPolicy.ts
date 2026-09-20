@@ -105,12 +105,21 @@ export function emitRateLimited(event: RateLimitedEvent): void {
 
 /**
  * Surfaces that show a 429 in their own words, next to the control (the auth
- * forms, the support form, the food search's "Too many searches" row); a
- * toast on top would say the same thing twice. Matched on the API path, with
- * or without the /api prefix or an origin. A page that adds its own inline
- * 429 state adds its route here.
+ * forms, the support form, the food search's "Too many searches" row, the
+ * one-click unsubscribe landing's "Too many requests" block); a toast on top
+ * would say the same thing twice. Matched on the API path, with or without
+ * the /api prefix or an origin. A page that adds its own inline 429 state
+ * adds its route here.
  */
-const INLINE_ERROR_PREFIXES = ['/auth/', '/admins/login', '/admins/request-reset', '/admins/reset-password', '/support/message', '/food/search'];
+const INLINE_ERROR_PREFIXES = [
+  '/auth/',
+  '/admins/login',
+  '/admins/request-reset',
+  '/admins/reset-password',
+  '/support/message',
+  '/food/search',
+  '/email/unsubscribe',
+];
 
 export function isInlineErrorSurface(url: string | null | undefined): boolean {
   if (typeof url !== 'string' || !url) return false;

@@ -35,7 +35,7 @@ export type EmailPreferences = {
 };
 
 const CARD_TITLE = 'Email preferences';
-const CARD_DESCRIPTION = 'Which of these updates you also receive by e-mail. Separate from push notifications.';
+const CARD_DESCRIPTION = 'Which of these updates you also receive by email. Separate from push notifications.';
 
 /** Read the GET or PUT body. A body without `capabilities` (an older API) is read as delivering. */
 export function pickEmailPreferences(data: unknown): EmailPreferences {
@@ -83,7 +83,7 @@ export function EmailPreferencesCard({
     <SettingsCard id="email" title={CARD_TITLE} description={CARD_DESCRIPTION}>
       {!emailDelivery ? (
         <Callout tone="info" className="mb-3">
-          Vybe isn’t sending activity e-mail yet. Your choices are kept for when it does.
+          Vybe isn’t sending activity email yet. Your choices are kept for when it does.
         </Callout>
       ) : null}
       <ToggleRow
@@ -95,7 +95,7 @@ export function EmailPreferencesCard({
       />
       {emailPaused ? (
         <Callout tone="warning" className="my-2">
-          All e-mail is paused. Turn “Pause all e-mail” off to adjust the individual kinds.
+          All email is paused. Turn “Pause all email” off to adjust the individual kinds.
         </Callout>
       ) : null}
       <div className="mt-1 divide-y divide-line border-t border-line">

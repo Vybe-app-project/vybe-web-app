@@ -17,14 +17,14 @@ import { Button, ButtonLink, Spinner } from './ui';
 import { ArrowLeft, CheckCircle, Mail } from './icons';
 
 /**
- * One-click e-mail unsubscribe landing: /email/unsubscribe/<token> (the path a
+ * One-click email unsubscribe landing: /email/unsubscribe/<token> (the path a
  * mailer builds with resolveFrontendUrl) or /email/unsubscribe?token=<token>.
  * No account is needed; the token is the credential. The page POSTs it once
  * to /api/email/unsubscribe on mount (the API's GET form would also consume
  * it, so a link scanner that follows the mail link spends nothing here; only
  * a client that runs this page does). Rendered in the public shell so it is
  * CSP-safe and works signed out; a signed-in member is offered the Settings
- * e-mail card.
+ * email card.
  */
 
 export type UnsubscribeState =
@@ -45,6 +45,12 @@ const FAILED_TITLE: Record<UnsubscribeFailure['kind'], string> = {
  * The outcome block, presentational so it renders under react-dom/server.
  * `signedIn` is null while the session is still being restored: the manage
  * link waits rather than flipping from "Sign in" to "Manage" mid-read.
+ *
+ * The working and done states share one `role="status"` wrapper at the same
+ * position in the tree, so the DOM node persists across the swap and the
+ * completion sentence is announced, not just the spinner before it. The
+ * failure states drop the status role and announce through `role="alert"`
+ * instead, so nothing is read twice.
  */
 export function UnsubscribeOutcome({
   state,
@@ -58,7 +64,7 @@ export function UnsubscribeOutcome({
   const manage =
     signedIn === null ? null : (
       <ButtonLink to={manageEmailPreferencesPath(signedIn)} variant={state.status === 'done' ? 'primary' : 'secondary'}>
-        {signedIn ? 'Manage e-mail preferences' : 'Sign in to manage e-mail preferences'}
+        {signedIn ? 'Manage email preferences' : 'Sign in to manage email preferences'}
       </ButtonLink>
     );
   const home = (
@@ -71,10 +77,12 @@ export function UnsubscribeOutcome({
   if (state.status === 'working') {
     return (
       <div className="rounded-md border border-line bg-surface-1 p-5">
-        <p role="status" aria-live="polite" className="inline-flex items-center gap-2 text-sm text-text-2">
-          <Spinner size={18} />
-          Updating your e-mail preferences…
-        </p>
+        <div role="status" aria-live="polite" className="flex items-start gap-3">
+          <p className="inline-flex items-center gap-2 text-sm text-text-2">
+            <Spinner size={18} />
+            Updating your email preferences…
+          </p>
+        </div>
       </div>
     );
   }
@@ -82,7 +90,7 @@ export function UnsubscribeOutcome({
   if (state.status === 'done') {
     return (
       <div className="rounded-md border border-line bg-surface-1 p-5">
-        <div className="flex items-start gap-3">
+        <div role="status" aria-live="polite" className="flex items-start gap-3">
           <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-success-soft text-success">
             <CheckCircle size={22} />
           </span>
@@ -102,7 +110,7 @@ export function UnsubscribeOutcome({
   const title = state.status === 'invalid' ? 'This link is not valid' : FAILED_TITLE[state.failure.kind];
   const sentence =
     state.status === 'invalid'
-      ? 'Unsubscribe links come from a Vybe e-mail. Open the link from your inbox, or change your e-mail choices in Settings.'
+      ? 'Unsubscribe links come from a Vybe email. Open the link from your inbox, or change your email choices in Settings.'
       : unsubscribeFailureMessage(state.failure);
   const retry = state.status === 'failed' && canRetryUnsubscribe(state.failure) && onRetry;
 
@@ -163,7 +171,7 @@ export default function EmailUnsubscribe() {
   }, [token]);
 
   return (
-    <PublicShell title="E-mail preferences" subtitle="One-click unsubscribe from a Vybe e-mail.">
+    <PublicShell title="Email preferences" subtitle="One-click unsubscribe from a Vybe email.">
       <UnsubscribeOutcome state={state} signedIn={loading ? null : !!user} onRetry={() => void submit(token)} />
     </PublicShell>
   );

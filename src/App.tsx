@@ -257,7 +257,7 @@ export default function App() {
             <Route path="/support" element={<SupportGate />} />
             {/* The API's transactional emails link to support.html (the old static page). */}
             <Route path="/support.html" element={<Navigate to="/support" replace />} />
-            {/* One-click e-mail unsubscribe. No account: the token in the path (or ?token=) is the credential; the page POSTs it to /api/email/unsubscribe. */}
+            {/* One-click email unsubscribe. No account: the token in the path (or ?token=) is the credential; the page POSTs it to /api/email/unsubscribe. */}
             <Route path="/email/unsubscribe/:token" element={<EmailUnsubscribe />} />
             <Route path="/email/unsubscribe" element={<EmailUnsubscribe />} />
 
