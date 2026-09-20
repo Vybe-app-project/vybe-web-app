@@ -662,7 +662,7 @@ function SidebarGym({ home }: { home: HomeGymState }) {
           {gym ? (
             <PlaceImage src={gym.photoUrl} name={gym.name} className="h-10 w-10 rounded-md" textClassName="text-xs" />
           ) : (
-            <span className="flex h-10 w-10 items-center justify-center rounded-md bg-surface-1 text-brand">
+            <span className="flex h-10 w-10 items-center justify-center rounded-md bg-surface-1 text-text-1">
               <MapPin size={20} />
             </span>
           )}
@@ -714,7 +714,7 @@ function Sidebar({ meta, inbox, home, showLog }: { meta: RouteMeta; inbox: strin
     <aside className="vt-sidebar sticky top-0 hidden h-dvh w-[4.5rem] shrink-0 flex-col border-r border-line bg-surface-1 lg:flex xl:w-60">
       <div className="flex h-16 shrink-0 items-center justify-center px-3 xl:justify-start xl:px-5">
         <Link to="/" viewTransition aria-label="Vybe home" className="inline-flex h-11 items-center rounded-sm px-1">
-          <BrandMark size={28} className="text-brand xl:hidden" />
+          <BrandMark size={28} className="text-mark xl:hidden" />
           <Brand size="md" className="max-xl:hidden" />
         </Link>
       </div>
@@ -1202,9 +1202,10 @@ function ShellBand({
   const variant: 'full' | 'hub' = band.variant === 'full' || wide ? 'full' : 'hub';
   const context = bandContext(band.context, gym?.name);
   const hub = variant === 'hub';
-  // Desktop, no gym: the page header below owns the primary action, so the
-  // band's find-your-gym call is tonal there; on phones it is the one CTA.
-  const noGymAction = !hub && !gym && !loading ? band.action ?? (wide ? <ButtonLink to={NO_GYM_COPY.href} variant="secondary">{NO_GYM_COPY.action}</ButtonLink> : undefined) : undefined;
+  // Desktop, no gym: the page header below owns the page's primary action, so
+  // the band's find-your-gym call is tonal there; on phones the band is the
+  // page's header and its one CTA is the page's action, else find-your-gym.
+  const noGymAction = !hub && !gym && !loading ? (wide ? <ButtonLink to={NO_GYM_COPY.href} variant="secondary">{NO_GYM_COPY.action}</ButtonLink> : band.action) : undefined;
   const bandHasPrimary = hub ? !!band.action : !gym && !loading && !wide;
   const mintLog = !bandHasPrimary && !wide && !!gym;
   return (
@@ -1235,17 +1236,16 @@ function ShellBand({
  */
 function RouteAnnouncer({ pathname, title, sheet }: { pathname: string; title: string; sheet: boolean }) {
   const [message, setMessage] = useState('');
-  const first = useRef(true);
+  // Keyed on the path, not a first-run flag, so StrictMode's double effect on mount does not count as a navigation.
+  const lastPath = useRef(pathname);
   const titleRef = useRef(title);
   titleRef.current = title;
   const wasSheet = useRef(sheet);
   useEffect(() => {
     const skip = sheet || wasSheet.current;
     wasSheet.current = sheet;
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    if (lastPath.current === pathname) return;
+    lastPath.current = pathname;
     if (skip) return;
     // The page sets its title in an effect of its own; read it a beat later.
     const t = window.setTimeout(() => setMessage(titleRef.current), 80);
@@ -1368,7 +1368,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
             so 320 px keeps a gutter and 1920 px fills honestly. Feed-width pages
             centre a 600 px column from tablets up; the rail joins at lg. */}
         <div className={cx('mx-auto flex w-full gap-8', feedWidth ? 'max-w-[min(62rem,100%_-_2*var(--gutter))] justify-center' : 'max-w-content')}>
-          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none lg:pt-6', shellChrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'md:max-w-feed')}>
+          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none focus-visible:outline-none lg:pt-6', shellChrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'md:max-w-feed')}>
             <Suspense fallback={<RouteFallback />}>
               <RouteErrorBoundary>{waiting ? <PageSkeleton /> : (children ?? <Outlet />)}</RouteErrorBoundary>
             </Suspense>
