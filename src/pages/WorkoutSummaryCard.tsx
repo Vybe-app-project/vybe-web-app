@@ -40,7 +40,7 @@ export function WorkoutSummaryCard({ summary, className }: { summary: WorkoutSum
       aria-label={`Workout summary: ${title}`}
       data-testid="workout-summary-card"
       data-unit={unit}
-      className={cx('rounded-lg border border-line bg-surface-2 p-3 text-text-1', className)}
+      className={cx('@container rounded-lg border border-(--card-border-light) bg-surface-2 p-3 text-text-1', className)}
     >
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-soft text-brand-text" aria-hidden="true">
