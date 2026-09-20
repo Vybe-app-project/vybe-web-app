@@ -32,6 +32,7 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  Zap,
 } from '../../components/icons';
 import { TimeStamp } from './adminCards';
 import '../../styles.admin.css';
@@ -64,6 +65,7 @@ const NAV: Array<{
   { to: '/admin/admins', label: 'Admins', Icon: Shield },
   { to: '/admin/audit', label: 'Audit log', Icon: List, superOnly: true },
   { to: '/admin/system', label: 'System', Icon: Server },
+  { to: '/admin/flags', label: 'Feature flags', Icon: Zap },
 ];
 
 /* ------------------------------------------------------------ shared bits */

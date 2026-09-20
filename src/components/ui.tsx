@@ -2669,6 +2669,7 @@ export function Switch({
   checked,
   onChange,
   disabled,
+  busy = false,
   label,
   id,
   className,
@@ -2676,6 +2677,11 @@ export function Switch({
   checked: boolean;
   onChange: (next: boolean) => void;
   disabled?: boolean;
+  /**
+   * A save is in flight: the switch stays in the tab order (so keyboard focus
+   * is not thrown away), reads aria-busy, dims, and ignores clicks until it settles.
+   */
+  busy?: boolean;
   label: string;
   id?: string;
   className?: string;
@@ -2687,11 +2693,14 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-busy={busy || undefined}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
+      onClick={() => {
+        if (!busy) onChange(!checked);
+      }}
       className={cx(
         'relative inline-flex h-11 w-12 shrink-0 items-center justify-center rounded-sm',
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+        disabled ? 'cursor-not-allowed opacity-50' : busy ? 'cursor-progress opacity-60' : 'cursor-pointer',
         className,
       )}
     >
