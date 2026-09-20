@@ -23,6 +23,12 @@ test('retired definitions stay hidden unless the member already earned them', ()
   assert.equal(lib.isRetired({ isActive: false }), true);
   assert.equal(lib.isRetired({ isActive: true }), false);
   assert.equal(lib.isRetired({}), false);
+  // API 3740dd9: an earned row whose definition was retired comes back with retired:true (isActive may be absent).
+  assert.equal(lib.isRetired({ retired: true }), true);
+  assert.equal(lib.isRetired({ retired: true, isActive: true }), true);
+  assert.equal(lib.isVisible({ retired: true, isEarned: true }), true);
+  assert.equal(lib.isVisible({ retired: true }), false);
+  assert.equal(lib.withMemberFields({ _id: 'a', title: 'T', isActive: true }, { _id: 'a', title: 'T', isEarned: true, retired: true }).retired, true);
   assert.equal(lib.isVisible({ isActive: false, isEarned: false }), false);
   assert.equal(lib.isVisible({ isActive: false }), false);
   assert.equal(lib.isVisible({ isActive: false, isEarned: true }), true);
@@ -209,4 +215,8 @@ test('the Profile shortcut and the page read one list under one key', () => {
   const capabilities = read('src/lib/capabilities.ts');
   const defaults = capabilities.slice(capabilities.indexOf('FEATURE_DEFAULTS'), capabilities.indexOf('});', capabilities.indexOf('FEATURE_DEFAULTS')));
   assert.doesNotMatch(defaults, /achievementAutoAward/);
+});
+
+test('the detail panel tells an earned, retired badge apart', () => {
+  assert.match(fs.readFileSync(new URL('../src/pages/Achievements.tsx', import.meta.url), 'utf8'), /This badge has been retired from the catalogue\. Yours stays in your collection\./);
 });

@@ -49,6 +49,8 @@ export type Achievement = {
   };
   /** false once the catalogue retires a definition; list routes drop those rows. */
   isActive?: boolean;
+  /** Additive since API 3740dd9: an earned row whose definition was retired keeps coming back with this flag. */
+  retired?: boolean;
   isHidden?: boolean;
   isSeasonal?: boolean;
   season?: { startDate?: string; endDate?: string };
@@ -94,13 +96,13 @@ export const categoryOf = (a: Pick<Achievement, 'category'>): Category =>
 /* -------------------------------------------------------------- visibility */
 
 /** A retired definition: the catalogue keeps the row but no longer awards it. */
-export const isRetired = (a: Pick<Achievement, 'isActive'>): boolean => a.isActive === false;
+export const isRetired = (a: Pick<Achievement, 'isActive' | 'retired'>): boolean => a.retired === true || a.isActive === false;
 
 /**
  * Retired rows stay out of the way unless the member already earned them;
  * an earned badge is theirs whatever the catalogue does later.
  */
-export const isVisible = (a: Pick<Achievement, 'isActive' | 'isEarned'>): boolean =>
+export const isVisible = (a: Pick<Achievement, 'isActive' | 'retired' | 'isEarned'>): boolean =>
   !isRetired(a) || a.isEarned === true;
 
 /**
@@ -251,6 +253,7 @@ export function withMemberFields(row: Achievement, own: Achievement | undefined)
     ...row,
     isEarned: own.isEarned,
     earnedAt: own.earnedAt,
+    retired: own.retired ?? row.retired,
     ackedAt: own.ackedAt,
     awardedBy: own.awardedBy,
     progress: own.progress,

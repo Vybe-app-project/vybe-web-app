@@ -21,6 +21,7 @@ import {
   type AchievementListResponse,
   type Category,
   type Rarity,
+  isRetired,
 } from '../lib/achievements';
 import { useMyAchievements } from '../lib/useMyAchievements';
 import {
@@ -225,9 +226,11 @@ function DetailModal({
                   <>
                     <p className="text-md font-semibold text-text-1">{earnedLine(achievement)}</p>
                     <p className="text-xs text-text-2">
-                      {awardState(achievement).kind === 'awarded'
-                        ? 'Awarded for a record you already had. This badge is in your collection.'
-                        : 'This badge is in your collection.'}
+                      {isRetired(achievement)
+                        ? 'This badge has been retired from the catalogue. Yours stays in your collection.'
+                        : awardState(achievement).kind === 'awarded'
+                          ? 'Awarded for a record you already had. This badge is in your collection.'
+                          : 'This badge is in your collection.'}
                     </p>
                   </>
                 ) : data ? (
