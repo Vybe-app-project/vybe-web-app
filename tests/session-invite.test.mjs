@@ -140,11 +140,20 @@ test('the viewer-reason sentences are the API’s, word for word, and never say 
     assert.doesNotMatch(copy, /!/);
   }
   assert.equal(lib.viewerReasonCopy('cancelled'), 'The host cancelled this session.', 'the API sentence when the name is unknown');
-  // Under the state block the ended and cancelled reasons would repeat the headline.
+  // Under a terminal state block the ended and cancelled reasons would repeat the headline.
   assert.equal(lib.viewerReasonLine({ reason: 'ended' }, 'Sam'), null);
   assert.equal(lib.viewerReasonLine({ reason: 'cancelled' }, 'Sam'), null);
+  assert.equal(lib.viewerReasonLine({ reason: 'ended' }, 'Sam', ended), null);
+  assert.equal(lib.viewerReasonLine({ reason: 'cancelled' }, 'Sam', cancelled), null);
+  assert.equal(lib.viewerReasonLine({ reason: 'cancelled' }, 'Sam', closedEmpty), null);
+  // While the cached session still reads open (a refused join, before the next detail) the line is the only statement.
+  assert.equal(lib.viewerReasonLine({ reason: 'cancelled' }, 'Sam', lobby), 'Sam cancelled this session.');
+  assert.equal(lib.viewerReasonLine({ reason: 'ended' }, 'Sam', live), 'This session has ended.');
+  assert.equal(lib.viewerReasonLine({ reason: 'ended' }, 'Sam', scheduled), 'This session has ended.');
   assert.equal(lib.viewerReasonLine({ reason: 'full' }, 'Sam'), 'This session is full.');
+  assert.equal(lib.viewerReasonLine({ reason: 'full' }, 'Sam', lobby), 'This session is full.');
   assert.equal(lib.viewerReasonLine({}, 'Sam'), null);
+  assert.equal(lib.viewerReasonLine({}, 'Sam', lobby), null);
   const source = read('src/lib/sessionInvite.ts') + read('src/pages/SessionInvite.tsx');
   assert.doesNotMatch(source, /blocked/i, 'never the word "blocked"');
 });
@@ -181,6 +190,13 @@ test('the lines: counts, visibility, program, empty people, leave confirmation',
   assert.equal(lib.countLine(lobby), '2 of 8 in · 6 spots left');
   assert.equal(lib.countLine({ ...lobby, participantCount: 7, spotsLeft: 1 }), '7 of 8 in · 1 spot left');
   assert.equal(lib.countLine({ ...lobby, participantCount: 8, spotsLeft: 0, isFull: true }), '8 of 8 in · Full');
+  assert.equal(lib.countLine({ ...scheduled, participantCount: 1, spotsLeft: 7 }), '1 of 8 in · 7 spots left');
+  assert.equal(lib.countLine(live), '2 of 8 in · 6 spots left');
+  // Nothing is left to fill once the session is over: no spots on ended or cancelled.
+  assert.equal(lib.countLine(ended), '2 of 8 in');
+  assert.equal(lib.countLine(cancelled), '2 of 8 in');
+  assert.equal(lib.countLine(closedEmpty), '0 of 8 in');
+  for (const over of [ended, cancelled, closedEmpty]) assert.doesNotMatch(lib.countLine(over), /spot|Full/, 'no spots on a finished session');
   assert.equal(lib.visibilityLine(lobby), 'Sam Rivera’s followers');
   assert.equal(lib.visibilityLine({ ...lobby, visibility: 'invite' }), 'Invite only');
   assert.equal(lib.visibilityLine({ ...lobby, visibility: 'gym', community: { _id: 'c', name: 'Iron Works' } }), 'Iron Works members');
@@ -199,10 +215,11 @@ test('the lines: counts, visibility, program, empty people, leave confirmation',
   assert.equal(lib.programPath(lobby), '/workouts/6aad635402be1805f4b9ef99');
   assert.equal(lib.sessionDeepLink(ID), `vybe://open?type=session&id=${ID}`);
   assert.equal(lib.sessionDeepLink(TOKEN), `vybe://open?type=session&id=${TOKEN}`);
-  for (const copy of [lib.SESSIONS_OFF_TITLE, lib.SESSIONS_OFF_BODY, lib.ROLLOUT_NOTE, lib.ROOM_NOTE, lib.INVALID_LINK_BODY, lib.UNAVAILABLE_BODY, lib.SIGNED_OUT_SUBTITLE]) {
+  for (const copy of [lib.SESSIONS_OFF_TITLE, lib.SESSIONS_OFF_BODY, lib.ROLLOUT_NOTE, lib.ROOM_NOTE, lib.ROOM_NOTE_DESKTOP, lib.REFRESH_FAILED, lib.INVALID_LINK_BODY, lib.UNAVAILABLE_BODY, lib.SIGNED_OUT_SUBTITLE]) {
     assert.doesNotMatch(copy, /!/, 'no exclamation marks');
   }
   assert.match(lib.UNAVAILABLE_BODY, /cancelled/, 'a token link to a cancelled session is a 404, so the copy says so');
+  assert.match(lib.ROOM_NOTE_DESKTOP, /on your phone/, 'the desktop line names the phone');
 });
 
 test('shareLinks knows the session type: /open.html?type=session lands here and the deep link type-checks', () => {
@@ -212,6 +229,12 @@ test('shareLinks knows the session type: /open.html?type=session lands here and 
   assert.equal(share.shareDestination('session', ID), `/session/${ID}`);
   assert.equal(share.shareDestination('session', '../x'), null);
   assert.equal(share.appDeepLink('session', ID), `vybe://open?type=session&id=${ID}`);
+  // The handheld check is shared: the vybe:// button is hidden on a desktop, where it does nothing.
+  assert.equal(typeof share.isHandheld, 'function');
+  assert.equal(share.isHandheld(), false, 'node is not a phone');
+  const handoff = read('src/pages/OpenHandoff.tsx');
+  assert.match(handoff, /import \{[^}]*\bisHandheld\b[^}]*\} from '\.\.\/lib\/shareLinks'/);
+  assert.doesNotMatch(handoff, /navigator\.userAgent/, 'one detector, in shareLinks');
 });
 
 /* ------------------------------------------------------------------ source pins */
@@ -255,6 +278,13 @@ test('the page calls exactly the session routes it may, keeps the return target 
   assert.match(page, /data-testid="session-(state|join|leave|cancel|open-app|participants)"/);
   assert.match(page, /aria-live="polite"/);
   assert.match(page, /refetchInterval/);
+  // A failed background poll keeps the cached session (query-core keeps data beside the error): only an empty page shows the error state.
+  assert.match(page, /if \(q\.isError && !q\.data\)/);
+  assert.match(page, /REFRESH_FAILED/);
+  assert.doesNotMatch(page, /navigator\.userAgent/, 'the handheld check comes from shareLinks');
+  assert.match(page, /import \{ isHandheld \} from '\.\.\/lib\/shareLinks'/);
+  // The Cancel button's accessible name starts with its visible label (WCAG 2.5.3 Label in Name).
+  assert.match(page, /aria-label=\{`Cancel session: \$\{title\}`\}/);
 });
 
 /* ------------------------------------------------------------------ render */
@@ -272,7 +302,12 @@ const mount = (ui, entries = ['/session/' + ID]) => {
 };
 const noop = () => {};
 const body = (session, viewer, extra = {}) =>
-  mount(h(SessionInviteBody, { session, viewer, meId: ME._id, busy: null, rolloutOff: false, onJoin: noop, onLeave: noop, onCancel: noop, timeZone: 'UTC', ...extra }));
+  mount(h(SessionInviteBody, { session, viewer, meId: ME._id, busy: null, rolloutOff: false, handheld: true, onJoin: noop, onLeave: noop, onCancel: noop, timeZone: 'UTC', ...extra }));
+const primaryOf = (html, testid) => {
+  const match = html.match(new RegExp(`class="([^"]*)"[^>]*data-testid="${testid}"`));
+  assert.ok(match, `${testid} rendered`);
+  return match[1].includes('btn-primary');
+};
 
 test('the lobby landing for an outsider: host, waiting copy, Join, people, counts, program, deep link, room note', () => {
   const html = body(lobby, outsider);
@@ -287,6 +322,8 @@ test('the lobby landing for an outsider: host, waiting copy, Join, people, count
   assert.ok(!html.includes('data-testid="session-leave"'));
   assert.ok(!html.includes('data-testid="session-cancel"'));
   assert.ok(!html.includes('NaN') && !html.includes('undefined'));
+  assert.equal(primaryOf(html, 'session-join'), true, 'Join is the primary action');
+  assert.equal(primaryOf(html, 'session-open-app'), false, 'the app link waits behind Join');
   assert.ok(!html.includes('Training together is still rolling out'), 'no rollout note when the flag is on');
   assert.ok(!html.includes('aria-label="online"') && !html.includes('aria-label="offline"'), 'no presence dot without a boolean');
 });
@@ -295,7 +332,9 @@ test('the host in a scheduled session gets Cancel and Leave, never Join; a membe
   const html = body(scheduled, host);
   assert.ok(html.includes('data-testid="session-cancel"'));
   assert.ok(html.includes('data-testid="session-leave"'));
-  assert.ok(html.includes('aria-label="Cancel Push day"'));
+  assert.ok(html.includes('aria-label="Cancel session: Push day"'), 'visible label first (Label in Name)');
+  assert.ok(!html.includes('aria-label="Cancel Push day"'));
+  assert.equal(primaryOf(html, 'session-open-app'), true, 'a member’s next step is the room in the app');
   assert.ok(!html.includes('data-testid="session-join"'));
   assert.ok(html.includes('Starts Sep 26, 2026, 09:30 UTC'));
   assert.ok(html.includes('The room opens 10 minutes before the start.'));
@@ -306,6 +345,7 @@ test('the host in a scheduled session gets Cancel and Leave, never Join; a membe
   assert.ok(asMember.includes('>You<'), 'the signed-in member is marked');
   assert.ok(asMember.includes('aria-label="online"') && asMember.includes('aria-label="offline"'));
   assert.ok(asMember.includes('Live now'));
+  assert.equal(primaryOf(asMember, 'session-open-app'), true);
 });
 
 test('ended and cancelled sessions offer only the app; a late viewer gets the program link', () => {
@@ -315,22 +355,54 @@ test('ended and cancelled sessions offer only the app; a late viewer gets the pr
   assert.ok(!done.includes('data-testid="session-join"'));
   assert.ok(done.includes('data-testid="session-open-app"'));
   assert.equal((done.match(/This session has ended\./g) || []).length, 1, 'the reason does not repeat the headline');
+  assert.ok(done.includes('2 of 8 in'));
+  assert.ok(!done.includes('spots left') && !done.includes('spot left'), 'no spots to fill once it is over');
+  assert.equal(primaryOf(done, 'session-open-app'), false, 'an outsider is not sent to the app');
 
   const canc = body(cancelled, { ...outsider, canJoin: false, reason: 'cancelled' });
   assert.ok(canc.includes('Sam Rivera cancelled this session.'));
   assert.ok(canc.includes('Gym closed tonight'));
   assert.ok(!canc.includes('data-testid="session-join"') && !canc.includes('data-testid="session-cancel"'));
+  assert.ok(!canc.includes('spots left'));
+  assert.ok(!body(closedEmpty, { ...outsider, canJoin: false, reason: 'cancelled' }).includes('spots left'));
 
   const tooLate = body(live, late);
   assert.ok(tooLate.includes('This session started more than 15 minutes ago. You can still open the program on your own.'));
   assert.ok(tooLate.includes('href="/workouts/6aad635402be1805f4b9ef99"'));
   assert.ok(tooLate.includes('Open the program'));
   assert.ok(!tooLate.includes('data-testid="session-join"'));
+  // The program is the late viewer's real next step; the app would refuse them the same way.
+  assert.match(tooLate, /class="[^"]*btn-primary[^"]*"[^>]*href="\/workouts\/6aad635402be1805f4b9ef99"/);
+  assert.equal(primaryOf(tooLate, 'session-open-app'), false);
 
   const isFull = body({ ...lobby, participantCount: 8, spotsLeft: 0, isFull: true }, full);
   assert.ok(isFull.includes('This session is full.'));
   assert.ok(isFull.includes('8 of 8 in'));
   assert.ok(!isFull.includes('data-testid="session-join"'));
+  assert.equal(primaryOf(isFull, 'session-open-app'), false, 'a refused viewer gets no primary dead end');
+  assert.equal(primaryOf(body(lobby, removed), 'session-open-app'), false);
+});
+
+test('a refused join on a still-open cache prints the cancelled or ended statement under the stale headline', () => {
+  // The page pins the API's reason (410 SESSION_CANCELLED) while the cached session still reads lobby.
+  const html = body(lobby, { ...outsider, canJoin: false, reason: 'cancelled' });
+  assert.ok(html.includes('Starting soon'), 'the cached headline is still the lobby one');
+  assert.ok(html.includes('Sam Rivera cancelled this session.'), 'the statement is on screen the moment the API refuses');
+  assert.ok(!html.includes('data-testid="session-join"'));
+  const over = body(live, { ...outsider, canJoin: false, reason: 'ended' });
+  assert.ok(over.includes('Live now') && over.includes('This session has ended.'));
+});
+
+test('on a desktop the vybe:// button gives way to a line that names the phone', () => {
+  const desk = body(lobby, joined, { handheld: false });
+  assert.ok(!desk.includes('vybe://open'), 'no dead deep link on a laptop');
+  assert.ok(!desk.includes('data-testid="session-open-app"'));
+  assert.ok(desk.includes(lib.ROOM_NOTE_DESKTOP));
+  assert.ok(desk.includes('data-testid="session-room-note"'));
+  assert.ok(!desk.includes(lib.ROOM_NOTE), 'one note, not two');
+  assert.ok(desk.includes('data-testid="session-leave"'), 'the rest of the page is unchanged');
+  const phone = body(lobby, joined, { handheld: true });
+  assert.ok(phone.includes('vybe://open') && phone.includes(lib.ROOM_NOTE) && !phone.includes(lib.ROOM_NOTE_DESKTOP));
 });
 
 test('a removed viewer sees the statement and the counts, never the room or the lone-host copy', () => {
@@ -352,8 +424,10 @@ test('the rollout callout appears only when features.sessions is off; the lone h
   assert.ok(body(alone, host).includes('Start it from the Vybe app.'));
 });
 
-test('the signed-out landing keeps the return target on Log in and offers the app the raw token', () => {
-  const html = mount(h(Routes, null, h(Route, { path: '/session/:id', element: h(SessionLanding) })), [`/session/${TOKEN}`]);
+const landing = (entry, props = {}) => mount(h(Routes, null, h(Route, { path: '/session/:id', element: h(SessionLanding, props) })), [entry]);
+
+test('the signed-out landing keeps the return target on Log in and offers the app the raw token on a phone', () => {
+  const html = landing(`/session/${TOKEN}`, { handheld: true });
   assert.ok(html.includes('Train together on Vybe'));
   assert.ok(html.includes('href="/login"'));
   assert.ok(html.includes('Log in to see this session'));
@@ -361,6 +435,22 @@ test('the signed-out landing keeps the return target on Log in and offers the ap
   assert.ok(html.includes('href="/register"'));
   assert.ok(html.includes('Join Vybe'));
   assert.ok(html.includes(lib.ROOM_NOTE));
-  const bad = mount(h(Routes, null, h(Route, { path: '/session/:id', element: h(SessionLanding) })), ['/session/not-a-link']);
+  assert.ok(!html.includes(lib.ROOM_NOTE_DESKTOP));
+
+  const desk = landing(`/session/${ID}`, { handheld: false });
+  assert.ok(desk.includes('Log in to see this session'));
+  assert.ok(!desk.includes('vybe://open'), 'no dead deep link on a laptop');
+  assert.ok(desk.includes(lib.ROOM_NOTE_DESKTOP));
+  assert.ok(!landing(`/session/${ID}`).includes('vybe://open'), 'the default detects the device (node is not a phone)');
+});
+
+test('the signed-out landing tells a visitor with a broken link so, instead of asking them to sign in first', () => {
+  const bad = landing('/session/not-a-link', { handheld: true });
+  assert.ok(bad.includes(lib.INVALID_LINK_TITLE), 'the invalid-link title');
+  assert.ok(bad.includes(lib.INVALID_LINK_BODY));
+  assert.ok(bad.includes('Go to Vybe'));
+  assert.ok(!bad.includes('Log in to see this session'), 'signing in would not mend the link');
+  assert.ok(!bad.includes('Train together on Vybe'));
   assert.ok(!bad.includes('vybe://open'), 'no deep link for a malformed param');
+  assert.ok(!bad.includes('data-testid="session-open-app"'));
 });

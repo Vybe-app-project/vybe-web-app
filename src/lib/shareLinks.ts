@@ -91,3 +91,10 @@ export function shareDestination(type: string | null, id: string | null): string
 export function appDeepLink(type: ShareType, id: string): string {
   return `vybe://open?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`;
 }
+
+/**
+ * A phone or tablet, where the vybe:// deep link can open the installed app.
+ * On a desktop browser the link does nothing (Chrome stays silent, Safari
+ * says it cannot open the page), so callers hide it there.
+ */
+export const isHandheld = (): boolean => typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);

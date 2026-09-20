@@ -143,6 +143,10 @@ export const SESSIONS_OFF_TITLE = 'Training together isn’t available right now
 export const SESSIONS_OFF_BODY = 'Sessions are switched off on this server. Check back later.';
 export const ROLLOUT_NOTE = 'Training together is still rolling out. This link works because you were invited.';
 export const ROOM_NOTE = 'The live room, progress and high fives are in the Vybe app. This page shows the details and lets you join or leave.';
+/** Stands in for the vybe:// button on a desktop, where the deep link cannot open the app. */
+export const ROOM_NOTE_DESKTOP = 'The live room, progress and high fives are in the Vybe app on your phone. This page shows the details and lets you join or leave.';
+/** A background poll failed; the loaded page stays up and says so. */
+export const REFRESH_FAILED = 'Couldn’t refresh this session. The details may be out of date.';
 export const INVALID_LINK_TITLE = 'This link isn’t valid';
 export const INVALID_LINK_BODY = 'It may have been cut short when it was copied. Ask the host for it again.';
 export const UNAVAILABLE_TITLE = 'This session isn’t available.';
@@ -251,12 +255,20 @@ export function viewerReasonCopy(reason: ViewerReason, host = 'The host'): strin
 }
 
 /**
- * The reason sentence worth printing under the state block: the ended and
- * cancelled reasons repeat the headline, so only the others come back.
+ * The reason sentence worth printing under the state block. The ended and
+ * cancelled reasons repeat a terminal headline, so they come back only while
+ * the cached session still reads open: after a refused join (410
+ * SESSION_CANCELLED or SESSION_ENDED) that line is the page's only word of
+ * the change until a fresh detail arrives.
  */
-export function viewerReasonLine(viewer: Pick<SessionViewer, 'reason'>, host: string): string | null {
+export function viewerReasonLine(
+  viewer: Pick<SessionViewer, 'reason'>,
+  host: string,
+  session: Pick<TogetherSession, 'status'> | null = null,
+): string | null {
   const { reason } = viewer;
-  if (!reason || reason === 'ended' || reason === 'cancelled') return null;
+  if (!reason) return null;
+  if ((reason === 'ended' || reason === 'cancelled') && !(session && isOpenStatus(session.status))) return null;
   return viewerReasonCopy(reason, host);
 }
 
@@ -310,13 +322,18 @@ export function viewerReasonFromCode(code: string | null | undefined): ViewerRea
 
 /* ------------------------------------------------------------------ lines */
 
-/** "2 of 8 in · 6 spots left", or "… · Full". */
-export function countLine(session: Pick<TogetherSession, 'participantCount' | 'capacity' | 'spotsLeft' | 'isFull'>): string {
+/**
+ * "2 of 8 in · 6 spots left", or "… · Full"; once the session is over just
+ * "2 of 8 in" (the mobile `people.count`), since nothing is left to fill.
+ */
+export function countLine(session: Pick<TogetherSession, 'status' | 'participantCount' | 'capacity' | 'spotsLeft' | 'isFull'>): string {
   const count = Number(session.participantCount) || 0;
   const capacity = Number(session.capacity) || 0;
+  const head = `${count} of ${capacity} in`;
+  if (!isOpenStatus(session.status)) return head;
   const spots = Math.max(0, Number(session.spotsLeft) || 0);
   const tail = session.isFull || spots === 0 ? 'Full' : `${plural(spots, 'spot')} left`;
-  return `${count} of ${capacity} in · ${tail}`;
+  return `${head} · ${tail}`;
 }
 
 /** "Invite only" | "Sam’s followers" | "Iron Works members" (or "Gym members"). */

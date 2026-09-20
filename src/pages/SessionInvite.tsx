@@ -16,8 +16,10 @@ import {
   INVALID_LINK_TITLE,
   LEAVE_TITLE,
   OPEN_IN_APP,
+  REFRESH_FAILED,
   ROLLOUT_NOTE,
   ROOM_NOTE,
+  ROOM_NOTE_DESKTOP,
   SESSIONS_OFF_BODY,
   SESSIONS_OFF_TITLE,
   SHARE_PROGRESS_HELPER,
@@ -49,6 +51,7 @@ import {
   type TogetherSession,
   type ViewerReason,
 } from '../lib/sessionInvite';
+import { isHandheld } from '../lib/shareLinks';
 import {
   Avatar,
   Badge,
@@ -102,6 +105,8 @@ export type SessionInviteBodyProps = {
   busy: Busy;
   /** features.sessions is off for this caller: the invite still works, say so once. */
   rolloutOff: boolean;
+  /** A phone or tablet: only there can the vybe:// link open the app, so a desktop gets a plain line instead. */
+  handheld: boolean;
   onJoin: (shareProgress: boolean) => void;
   onLeave: () => void;
   onCancel: () => void;
@@ -110,18 +115,17 @@ export type SessionInviteBodyProps = {
 };
 
 /** Props-only render of a loaded session; the confirm dialogs live in the page. */
-export function SessionInviteBody({ session, viewer, meId, busy, rolloutOff, onJoin, onLeave, onCancel, timeZone }: SessionInviteBodyProps) {
+export function SessionInviteBody({ session, viewer, meId, busy, rolloutOff, handheld, onJoin, onLeave, onCancel, timeZone }: SessionInviteBodyProps) {
   const [shareProgress, setShareProgress] = useState(true);
   const host = hostName(session);
   const title = programTitle(session);
   const state = sessionStateCopy(session, viewer, { timeZone });
-  const reasonLine = viewerReasonLine(viewer, host);
+  const reasonLine = viewerReasonLine(viewer, host, session);
   const actions = sessionActions(session, viewer);
   const people = activeParticipants(session);
   const emptyLine = emptyPeopleLine(session, viewer);
   const exercises = (session.snapshot?.exercises ?? []).filter((exercise) => exercise && exercise.name);
   const workoutPath = programPath(session);
-  const open = isOpenStatus(session.status);
   const redacted = viewer.reason === 'removed';
 
   return (
@@ -158,10 +162,19 @@ export function SessionInviteBody({ session, viewer, meId, busy, rolloutOff, onJ
         ) : null}
 
         <div className="mt-4 space-y-3">
-          <a href={sessionDeepLink(session._id)} className={buttonClass({ variant: open && !actions.join ? 'primary' : 'secondary', size: 'lg', block: true })} data-testid="session-open-app">
-            {OPEN_IN_APP}
-          </a>
-          <p className="text-xs leading-relaxed text-text-2">{ROOM_NOTE}</p>
+          {handheld ? (
+            <>
+              {/* Primary only for a member, whose next step is the room; a refused viewer meets the same refusal in the app. */}
+              <a href={sessionDeepLink(session._id)} className={buttonClass({ variant: viewer.joined ? 'primary' : 'secondary', size: 'lg', block: true })} data-testid="session-open-app">
+                {OPEN_IN_APP}
+              </a>
+              <p className="text-xs leading-relaxed text-text-2">{ROOM_NOTE}</p>
+            </>
+          ) : (
+            <p className="text-sm leading-relaxed text-text-2" data-testid="session-room-note">
+              {ROOM_NOTE_DESKTOP}
+            </p>
+          )}
 
           {actions.join ? (
             <div className="rounded-md border border-line p-3">
@@ -183,7 +196,7 @@ export function SessionInviteBody({ session, viewer, meId, busy, rolloutOff, onJ
           ) : null}
 
           {actions.openProgram && workoutPath ? (
-            <ButtonLink to={workoutPath} variant="secondary" size="lg" block>
+            <ButtonLink to={workoutPath} variant="primary" size="lg" block>
               Open the program
             </ButtonLink>
           ) : null}
@@ -196,7 +209,7 @@ export function SessionInviteBody({ session, viewer, meId, busy, rolloutOff, onJ
                 </Button>
               ) : null}
               {actions.cancel ? (
-                <Button variant="danger" loading={busy === 'cancel'} disabled={busy !== null} onClick={onCancel} aria-label={`Cancel ${title}`} data-testid="session-cancel">
+                <Button variant="danger" loading={busy === 'cancel'} disabled={busy !== null} onClick={onCancel} aria-label={`Cancel session: ${title}`} data-testid="session-cancel">
                   Cancel session
                 </Button>
               ) : null}
@@ -347,6 +360,7 @@ export function SessionInvitePage() {
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [handheld] = useState(isHandheld);
 
   // The kill switch hides the page (and a 503 SESSIONS_DISABLED from join or
   // cancel flips it too, since the capabilities answer is cached); the rollout
@@ -355,17 +369,26 @@ export function SessionInvitePage() {
   const rolloutOff = caps.rolloutOff;
 
   const queryKey = useMemo(() => ['session', lookup.kind, lookup.value, queryToken] as const, [lookup.kind, lookup.value, queryToken]);
-  const stillOpen = (data: SessionEnvelope | undefined) => !!data && isOpenStatus(data.session.status);
+  const inviteToken = lookup.kind === 'token' ? lookup.value : queryToken;
+
+  // A refetch the API is known to refuse: it just said the session is gone
+  // (unavailable), or the link died with the cancel (a cancel revokes the
+  // invite token; an end does not, so an ended refetch repairs the page).
+  const linkGone = (reason: ViewerReason): boolean => reason === 'unavailable' || (reason === 'cancelled' && inviteToken !== null);
+  const deadLink = localReason !== null && linkGone(localReason.reason) ? localReason : null;
+  const linkDeadFor = (dataUpdatedAt: number): boolean => deadLink !== null && deadLink.at === dataUpdatedAt;
+  // Poll only while the room can still change and the link still answers; a
+  // terminal session never refetches.
+  const stillOpen = (state: { data?: SessionEnvelope; dataUpdatedAt: number }): boolean =>
+    !!state.data && isOpenStatus(state.data.session.status) && !linkDeadFor(state.dataUpdatedAt);
 
   const q = useQuery({
     queryKey,
     enabled: lookup.kind !== 'invalid' && sessionsOn && !caps.isLoading,
     retry: false,
-    // Poll only while the room can still change; a terminal session never
-    // refetches (a cancel revokes the token, so a token refetch would 404).
-    refetchInterval: (query) => (stillOpen(query.state.data) ? 15_000 : false),
-    refetchOnWindowFocus: (query) => stillOpen(query.state.data),
-    refetchOnReconnect: (query) => stillOpen(query.state.data),
+    refetchInterval: (query) => (stillOpen(query.state) ? 15_000 : false),
+    refetchOnWindowFocus: (query) => stillOpen(query.state),
+    refetchOnReconnect: (query) => stillOpen(query.state),
     queryFn: async (): Promise<SessionEnvelope> => {
       const { data } = lookup.kind === 'token'
         ? await api.get(`/sessions/invite/${lookup.value}`)
@@ -374,7 +397,6 @@ export function SessionInvitePage() {
     },
   });
 
-  const inviteToken = lookup.kind === 'token' ? lookup.value : queryToken;
   const sessionId = q.data?.session._id ?? null;
 
   const join = useMutation({
@@ -396,8 +418,8 @@ export function SessionInvitePage() {
       const reason = viewerReasonFromCode(code);
       if (reason) {
         setLocalReason({ reason, at: q.dataUpdatedAt });
-        // Refresh the counts and status; a cancelled session's token is gone, so that one stays as told.
-        if (reason !== 'cancelled' && reason !== 'unavailable') void qc.invalidateQueries({ queryKey });
+        // Refresh the counts and status, unless the refetch is known to 404; that one stays as told.
+        if (!linkGone(reason)) void qc.invalidateQueries({ queryKey });
       }
       toast.error(errMsg(error, 'Couldn’t join the session. Try again.'));
     },
@@ -477,7 +499,10 @@ export function SessionInvitePage() {
     );
   }
 
-  if (q.isError) {
+  // Only an empty page shows the error state: a failed background poll keeps
+  // the cached session beside the error, and the loaded page (with its open
+  // dialogs) stays up and says so inline.
+  if (q.isError && !q.data) {
     const notFound = statusOf(q.error) === 404;
     return (
       <>
@@ -508,16 +533,32 @@ export function SessionInvitePage() {
   const title = programTitle(session);
   const busy: Busy = join.isPending ? 'join' : leave.isPending ? 'leave' : cancel.isPending ? 'cancel' : null;
   const activeCount = activeParticipants(session).length;
+  // A dead link is not news: the pinned reason already says why the page is as it is.
+  const refreshFailed = q.isError && !linkDeadFor(q.dataUpdatedAt);
 
   return (
     <>
       <PageHeader title={title} subtitle={`with ${host}`} />
+      {refreshFailed ? (
+        <Callout
+          tone="warning"
+          className="mx-auto mb-4 w-full max-w-form"
+          action={
+            <Button variant="secondary" size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
+              Retry
+            </Button>
+          }
+        >
+          {REFRESH_FAILED}
+        </Callout>
+      ) : null}
       <SessionInviteBody
         session={session}
         viewer={viewer}
         meId={meId}
         busy={busy}
         rolloutOff={rolloutOff}
+        handheld={handheld}
         onJoin={(shareProgress) => join.mutate(shareProgress)}
         onLeave={() => setLeaveOpen(true)}
         onCancel={() => setCancelOpen(true)}
@@ -566,19 +607,35 @@ export function SessionInvitePage() {
 
 /* ------------------------------------------------------------------ signed-out landing */
 
-/** The landing for a visitor without a session: sign in (keeping this URL), or open the app. */
-export function SessionLanding() {
+/**
+ * The landing for a visitor without a session: sign in (keeping this URL),
+ * or open the app on a phone. A malformed link is told so here, before the
+ * visitor is asked to sign in for nothing. `handheld` is a prop so the
+ * server renderer in tests can pick either branch.
+ */
+export function SessionLanding({ handheld: handheldProp }: { handheld?: boolean } = {}) {
   const { id, token } = useParams();
   const location = useLocation();
   const lookup = sessionLookup(token ?? id);
+  const [detected] = useState(isHandheld);
+  const handheld = handheldProp ?? detected;
   const from = { from: location };
+  if (lookup.kind === 'invalid') {
+    return (
+      <PublicShell title={INVALID_LINK_TITLE} subtitle={INVALID_LINK_BODY}>
+        <ButtonLink to="/" variant="primary" size="lg">
+          Go to Vybe
+        </ButtonLink>
+      </PublicShell>
+    );
+  }
   return (
     <PublicShell title={SIGNED_OUT_TITLE} subtitle={SIGNED_OUT_SUBTITLE}>
       <div className="space-y-3">
         <ButtonLink to="/login" state={from} variant="primary" size="lg" block>
           Log in to see this session
         </ButtonLink>
-        {lookup.kind !== 'invalid' ? (
+        {handheld ? (
           <a href={sessionDeepLink(lookup.value)} className={buttonClass({ variant: 'secondary', size: 'lg', block: true })} data-testid="session-open-app">
             {OPEN_IN_APP}
           </a>
@@ -586,7 +643,7 @@ export function SessionLanding() {
         <ButtonLink to="/register" state={from} variant="ghost" size="lg" block>
           Join Vybe
         </ButtonLink>
-        <p className="text-sm leading-relaxed text-text-2">{ROOM_NOTE}</p>
+        <p className="text-sm leading-relaxed text-text-2">{handheld ? ROOM_NOTE : ROOM_NOTE_DESKTOP}</p>
       </div>
     </PublicShell>
   );
