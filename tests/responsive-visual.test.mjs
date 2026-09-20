@@ -279,7 +279,8 @@ test('Notifications has one Mark-all-read control per viewport and PageHeader ho
   assert.equal((page.match(/markAllButton\('(?:sm|md)'\)/g) || []).length, 2, 'md for desktop header, sm for the phone top bar');
   assert.match(page, /mobileActions=\{unreadCount > 0 \? markAllButton\('sm'\) : null\}/);
   assert.doesNotMatch(page, /lg:hidden">[\s\S]{0,200}markAllButton/, 'the inline phone row must not repeat the button');
-  assert.match(ui, /actions: mobileActions === undefined \? actions : mobileActions/);
+  // PageHeader lives in PageChrome.tsx (ui.tsx re-exports it) since the Instagram rebuild.
+  assert.match(read('src/components/PageChrome.tsx'), /actions: mobileActions === undefined \? actions : mobileActions/);
 });
 
 test('page-level "+" actions use the quiet icon button; the Log circle is the only primary in the bar and shows a plus', () => {
