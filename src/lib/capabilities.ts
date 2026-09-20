@@ -146,3 +146,24 @@ export function useLiveEnabled() {
     refetch: capabilities.refetch,
   };
 }
+
+/**
+ * Together sessions have two switches. `capabilities.sessions` is the
+ * server's kill switch (SESSIONS_ENABLED): off means every /api/sessions
+ * write answers 503, so the landing page hides itself. `features.sessions`
+ * is the rollout flag for this caller; an invite link is real whether or not
+ * the feature is promoted, so the page only notes it. Unknown (the query is
+ * still loading) counts as on, so nothing flashes an off state.
+ */
+export function useSessionsAccess() {
+  const capabilities = useCapabilities();
+  const data = capabilities.data;
+  return {
+    /** false only once the server said the switch is off. */
+    enabled: data?.capabilities.sessions !== false,
+    /** The server has answered and the rollout flag is off for this caller. */
+    rolloutOff: !!data && !featureEnabled(data.features, 'sessions'),
+    isLoading: capabilities.isLoading,
+    isError: capabilities.isError,
+  };
+}

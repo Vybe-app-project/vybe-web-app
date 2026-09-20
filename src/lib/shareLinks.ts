@@ -5,7 +5,10 @@
  * target to its canonical route here. Keep the type list and the id rule in
  * step with the mobile module.
  */
-export const SHARE_TYPES = ['post', 'profile', 'meal', 'meal-template', 'meal-plan', 'workout', 'workout-plan', 'gym', 'community', 'live', 'challenge', 'hashtag'] as const;
+export const SHARE_TYPES = [
+  'post', 'profile', 'meal', 'meal-template', 'meal-plan', 'workout', 'workout-plan', 'gym', 'community', 'live', 'challenge', 'hashtag',
+  'session',
+] as const;
 export type ShareType = (typeof SHARE_TYPES)[number];
 
 const SHARE_ENTITY_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -23,6 +26,7 @@ export const SHARE_LABEL: Record<ShareType, string> = {
   live: 'live stream',
   challenge: 'challenge',
   hashtag: 'hashtag',
+  session: 'session',
 };
 
 export function isShareType(value: unknown): value is ShareType {
@@ -77,6 +81,9 @@ export function shareDestination(type: string | null, id: string | null): string
       return `/challenges?challenge=${q}`;
     case 'hashtag':
       return `/search?q=%23${q}`;
+    case 'session':
+      // A 24-hex session id or the API's 64-hex invite token; the page dispatches by shape.
+      return `/session/${q}`;
   }
 }
 

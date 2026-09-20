@@ -45,6 +45,8 @@ const GymCommunity = lazyPage('/communities', () => import('./pages/GymCommunity
 const Livestreams = lazyPage('/live', () => import('./pages/Livestreams'));
 const Support = lazyPage('/support', () => import('./pages/Support'));
 const OpenHandoff = lazyPage(null, () => import('./pages/OpenHandoff'));
+// Together-session landing: the module's default export is its own auth gate (signed out: sign-in hand-off; signed in: the shell).
+const SessionGate = lazyPage(null, () => import('./pages/SessionInvite'));
 const NotFound = lazyPage(null, () => import('./pages/NotFound'));
 
 const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
@@ -259,6 +261,10 @@ export default function App() {
 
             {/* Shared post links work signed out (public preview) and wear the shell when signed in */}
             <Route path="/p/:postId" element={<PostGate />} />
+
+            {/* Together-session invite landing: works signed out (sign-in hand-off), wears the shell when signed in. The param is a session id or the API's invite token. */}
+            <Route path="/session/:id" element={<SessionGate />} />
+            <Route path="/session/invite/:token" element={<SessionGate />} />
 
             {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
             <Route path="/open.html" element={<OpenHandoff />} />
