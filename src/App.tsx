@@ -46,6 +46,7 @@ const Livestreams = lazyPage('/live', () => import('./pages/Livestreams'));
 const Support = lazyPage('/support', () => import('./pages/Support'));
 const OpenHandoff = lazyPage(null, () => import('./pages/OpenHandoff'));
 const NotFound = lazyPage(null, () => import('./pages/NotFound'));
+const EmailUnsubscribe = lazyPage(null, () => import('./pages/EmailUnsubscribe'));
 
 const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
 const WorkoutDetail = lazyPage(null, () => import('./pages/WorkoutDetail'));
@@ -256,6 +257,9 @@ export default function App() {
             <Route path="/support" element={<SupportGate />} />
             {/* The API's transactional emails link to support.html (the old static page). */}
             <Route path="/support.html" element={<Navigate to="/support" replace />} />
+            {/* One-click e-mail unsubscribe. No account: the token in the path (or ?token=) is the credential; the page POSTs it to /api/email/unsubscribe. */}
+            <Route path="/email/unsubscribe/:token" element={<EmailUnsubscribe />} />
+            <Route path="/email/unsubscribe" element={<EmailUnsubscribe />} />
 
             {/* Shared post links work signed out (public preview) and wear the shell when signed in */}
             <Route path="/p/:postId" element={<PostGate />} />

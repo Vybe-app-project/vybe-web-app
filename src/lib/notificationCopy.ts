@@ -158,6 +158,8 @@ export function notificationHref(n: NotificationLike): string | null {
   if (isSystemNotification(type)) {
     const href = typeof d.href === 'string' && d.href.startsWith('/') && !d.href.startsWith('//') ? d.href : null;
     if (href) return href;
+    // "Your Vybe data is ready" (services/dataExport.js) sets no href; it belongs on the Download-your-data card.
+    if (d.notificationType === 'data_export_ready') return '/settings#data';
     if (type === 'security') return '/settings#password';
     if (type === 'account') return '/settings#account';
     return null;

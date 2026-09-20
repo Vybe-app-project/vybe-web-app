@@ -99,6 +99,9 @@ test('security, system and account rows have no actor and route to Settings, not
   assert.equal(copy.notificationHref({ type: 'security', sender: self, data: { href: '/settings#sessions' } }), '/settings#sessions');
   assert.equal(copy.notificationHref({ type: 'security', sender: self, data: { href: 'https://evil.example/x' } }), '/settings#password');
   assert.equal(copy.notificationHref({ type: 'security', sender: self, data: { href: '//evil.example' } }), '/settings#password');
+  // "Your Vybe data is ready" (services/dataExport.js) carries no href; it opens the Download-your-data card.
+  assert.equal(copy.notificationHref({ type: 'security', sender: self, data: { type: 'security', notificationType: 'data_export_ready', exportId: 'x', expiresAt: '2026-10-01' } }), '/settings#data');
+  assert.equal(copy.notificationHref({ type: 'security', sender: self, data: { notificationType: 'data_export_ready', href: '/settings#sessions' } }), '/settings#sessions', 'a server href still wins');
 
   // The row must not print the sender's name for these types.
   const page = read('src/pages/Notifications.tsx');

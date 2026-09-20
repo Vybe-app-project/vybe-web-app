@@ -118,66 +118,40 @@ export type AppNotification = {
   data?: Record<string, any>;
 };
 
-export const NOTIFICATION_SETTING_KEYS = [
-  'pauseAll',
-  'messagesFromFollowing',
-  'messagesFromOthers',
-  'newFollowers',
-  'workoutPosts',
-  'likes',
-  'comments',
-  'friendRequests',
-] as const;
-
-export type NotificationSettingKey = (typeof NOTIFICATION_SETTING_KEYS)[number];
-export type NotificationSettings = Record<NotificationSettingKey, boolean>;
-
-export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
-  pauseAll: false,
-  messagesFromFollowing: true,
-  messagesFromOthers: false,
-  newFollowers: true,
-  workoutPosts: true,
-  likes: true,
-  comments: true,
-  friendRequests: true,
-};
-
 /**
- * Email preferences are a separate store on the API
- * (GET/PUT /users/email-preferences -> settings.emailNotifications), not a
- * view over the push switches; the keys overlap on purpose, the values do not.
+ * Push switches (18 keys), their groups and copy, the hydration-time helpers
+ * and the e-mail preference keys live in the import-free module
+ * lib/notificationSettings so node:test can load them and compare them with
+ * the backend; re-exported here so every existing import path still works.
  */
-export const EMAIL_SETTING_KEYS = ['newFollowers', 'workoutPosts', 'likes', 'comments', 'friendRequests'] as const;
-export type EmailSettingKey = (typeof EMAIL_SETTING_KEYS)[number];
-export type EmailSettings = Record<EmailSettingKey, boolean>;
-export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
-  newFollowers: true,
-  workoutPosts: true,
-  likes: true,
-  comments: true,
-  friendRequests: true,
-};
-
-export function pickEmailSettings(raw: any): EmailSettings {
-  const source = raw && typeof raw === 'object' ? raw : {};
-  return EMAIL_SETTING_KEYS.reduce((acc, key) => {
-    acc[key] = typeof source[key] === 'boolean' ? source[key] : DEFAULT_EMAIL_SETTINGS[key];
-    return acc;
-  }, {} as EmailSettings);
-}
-
-/** Keep only the exact boolean keys the API accepts. */
-export function pickNotificationSettings(raw: any): NotificationSettings {
-  const source = raw && typeof raw === 'object' ? raw : {};
-  return NOTIFICATION_SETTING_KEYS.reduce((acc, key) => {
-    acc[key] =
-      typeof source[key] === 'boolean'
-        ? source[key]
-        : DEFAULT_NOTIFICATION_SETTINGS[key];
-    return acc;
-  }, {} as NotificationSettings);
-}
+export {
+  NOTIFICATION_SETTING_KEYS,
+  DEFAULT_NOTIFICATION_SETTINGS,
+  NOTIFICATION_SETTING_GROUPS,
+  NOTIFICATION_LABELS,
+  pickNotificationSettings,
+  pickNotificationSettingsResponse,
+  pickHydrationReminders,
+  validateHydrationTimes,
+  normalizeClock,
+  CLOCK_RE,
+  HYDRATION_TIMES_MAX,
+  EMPTY_NOTIFICATION_SETTINGS_RESPONSE,
+  EMAIL_SETTING_KEYS,
+  DEFAULT_EMAIL_SETTINGS,
+  EMAIL_LABELS,
+  EMAIL_PAUSE_LABEL,
+  pickEmailSettings,
+  type NotificationSettingKey,
+  type NotificationSettings,
+  type NotificationSettingGroup,
+  type NotificationSettingsResponse,
+  type HydrationReminders,
+  type QuietHours,
+  type SettingLabel,
+  type EmailSettingKey,
+  type EmailSettings,
+} from './notificationSettings';
 
 /* ------------------------------------------------------------------ *
  * Password / username policy (mirrors the API validators).
