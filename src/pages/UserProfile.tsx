@@ -15,18 +15,19 @@ import {
   IconButton,
   Menu,
   PageHeader,
+  SegmentedControl,
   Skeleton,
   StatStrip,
-  Tabs,
   cx,
   humanize,
   useToast,
   type MenuItem,
 } from './ui';
-import { Calendar, Check, Copy, Flag, Lock, MapPin, MessageCircle, ShareUp, Shield, UserPlus, Users, X } from './icons';
+import { Calendar, Check, Copy, Flag, Lock, MessageCircle, ShareUp, Shield, UserPlus, Users, X } from './icons';
 import { FollowButton, UserBadges } from './UserRow';
 import { useReportModal } from './Report';
-import { PAGE, ProfileCover } from './Profile';
+import { homeGymLabel, useViewerGym, viewerGymHref } from './PostCard';
+import { GymRow, PAGE, PROFILE_GRID, ProfileCover, ProfileHeaderSkeleton, STAT_STRIP_CLASS } from './Profile';
 import { PUBLIC_PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
 import { HighlightsRow } from './StoryTray';
 
@@ -47,6 +48,7 @@ export default function UserProfile() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const { report, reportModal } = useReportModal();
+  const viewerGym = useViewerGym();
 
   const tabParam = params.get('tab');
   // Saved posts are private to their owner; that tab does not exist here.
@@ -191,25 +193,12 @@ export default function UserProfile() {
     return (
       <div className={PAGE} aria-busy="true">
         <PageHeader title="Profile" back />
-        <Card padded={false} className="overflow-hidden">
-          <Skeleton className="h-28 w-full rounded-none sm:h-36" />
-          <div className="px-4 pb-4 sm:px-5 sm:pb-5">
-            <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <Skeleton className="h-24 w-24 rounded-full ring-4 ring-surface-1" />
-              <div className="flex gap-2">
-                <Skeleton className="h-11 w-28 rounded-sm" />
-                <Skeleton className="h-11 w-11 rounded-sm" />
-                <Skeleton className="h-11 w-11 rounded-sm" />
-              </div>
-            </div>
-            <div className="mt-4 space-y-2">
-              <Skeleton className="h-6 w-48" />
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-4 w-72 max-w-full" />
-            </div>
+        <div className={PROFILE_GRID}>
+          <div className="space-y-section">
+            <ProfileHeaderSkeleton />
+            <Skeleton className="h-16 w-full rounded-lg" />
           </div>
-        </Card>
-        <Skeleton className="h-16 w-full rounded-lg" />
+        </div>
       </div>
     );
   }
@@ -240,6 +229,10 @@ export default function UserProfile() {
   const requestId = user.friendRequestId;
   const joined = joinedLabel(user.createdAt);
   const friendBusy = addFriend.isPending || cancelFriend.isPending || acceptFriend.isPending || declineFriend.isPending;
+  // Their gym, named only when the data can: their place, or the community the two of you share.
+  const gymLabel = homeGymLabel(user, viewerGym);
+  const sharesViewerGym = !!gymLabel && !!viewerGym?.name && gymLabel === viewerGym.name;
+  const gymHref = sharesViewerGym ? viewerGymHref(viewerGym) : null;
 
   const menuItems: MenuItem[] = [
     { label: 'Share profile', icon: <ShareUp size={18} />, onSelect: shareProfile },
@@ -257,9 +250,10 @@ export default function UserProfile() {
     { label: 'Block', icon: <Shield size={18} />, danger: true, onSelect: () => setConfirmBlock(true) },
   ];
 
+  const tonal = 'border-transparent bg-surface-3';
   const friendControl =
     friendStatus === 'friends' ? (
-      <Badge tone="brand" className="h-11 px-3 text-xs">
+      <Badge className="h-11 px-3 text-xs">
         <Users size={14} />
         Friends
       </Badge>
@@ -267,6 +261,7 @@ export default function UserProfile() {
       <>
         <Button
           variant="secondary"
+          className={tonal}
           icon={<Check size={18} />}
           loading={acceptFriend.isPending}
           disabled={friendBusy}
@@ -277,6 +272,7 @@ export default function UserProfile() {
         <IconButton
           label={`Decline ${name}’s friend request`}
           variant="secondary"
+          className={tonal}
           disabled={friendBusy}
           aria-busy={declineFriend.isPending || undefined}
           onClick={() => declineFriend.mutate(requestId)}
@@ -287,6 +283,7 @@ export default function UserProfile() {
     ) : friendStatus === 'requested' || friendStatus === 'pending' ? (
       <Button
         variant="secondary"
+        className={tonal}
         title="Withdraw friend request"
         loading={cancelFriend.isPending}
         disabled={friendBusy}
@@ -297,6 +294,7 @@ export default function UserProfile() {
     ) : (
       <Button
         variant="secondary"
+        className={tonal}
         icon={<UserPlus size={18} />}
         loading={addFriend.isPending}
         disabled={friendBusy}
@@ -307,106 +305,102 @@ export default function UserProfile() {
     );
 
   // The ⋯ menu lives in the shell's top bar below `lg` (right edge, always
-  // reachable) and in the hero action row on desktop.
+  // reachable) and in the header action row on desktop.
   const overflowMenu = <Menu label="More options" items={menuItems} />;
 
   return (
     <div className={PAGE}>
       <PageHeader title={name} back mobileActions={overflowMenu} actions={<></>} />
 
-      <Card padded={false} className="overflow-hidden">
-        <ProfileCover src={user.coverPicture} />
-        <div className="px-4 pb-4 sm:px-5 sm:pb-5">
-          <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="relative z-[1] w-fit">
-              <Avatar src={user.avatar} name={name} size={96} className="bg-surface-1 ring-4 ring-surface-1" />
+      <div className={PROFILE_GRID}>
+        <div className="space-y-section">
+          <ProfileCover src={user.coverPicture} />
+
+          {/* The Instagram header: avatar left, three stats right, then name, gym and bio, then the actions. */}
+          <section aria-label={`About ${name}`} className="@container">
+            <div className="flex items-center gap-5 sm:gap-8">
+              <Avatar src={user.avatar} name={name} size={88} seed={user._id} className="shrink-0 ring-1 ring-line" />
+              <StatStrip
+                aria-label="Profile stats"
+                className={cx('flex-1', STAT_STRIP_CLASS)}
+                items={[
+                  { label: 'posts', value: postCount(user), onClick: canViewContent ? () => setTab('posts') : undefined },
+                  { label: 'followers', value: followerCount(user), to: canViewContent ? `/u/${user._id}/followers` : undefined },
+                  { label: 'following', value: followingCount(user), to: canViewContent ? `/u/${user._id}/following` : undefined },
+                ]}
+              />
             </div>
-            <div className="flex flex-wrap items-center gap-2 sm:pb-1">
+
+            <div className="mt-4 min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h2 className="text-md font-semibold text-text-1">{name}</h2>
+                <UserBadges user={user} />
+                {isPrivate ? (
+                  <Badge>
+                    <Lock size={12} />
+                    Private
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="text-sm text-text-2">@{user.username}</p>
+              <GymRow label={gymLabel} href={gymHref} />
+              {user.bio ? <p className="prose-measure mt-2 whitespace-pre-wrap text-sm leading-relaxed text-text-1">{user.bio}</p> : null}
+              {user.fields?.length ? (
+                <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Coaching specialties">
+                  {user.fields.map((f) => (
+                    <Badge key={f} tone="info">
+                      {humanize(f)}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+              <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-text-3">
+                <Calendar size={14} aria-hidden="true" />
+                {joined ? `Joined ${joined}` : 'Joined recently'}
+              </p>
+            </div>
+
+            {/* Follow is the one action in the action colour; everything beside it is tonal. */}
+            <div className="mt-4 flex flex-wrap items-center gap-2 [&>*:first-child]:flex-1">
               <FollowButton user={user} onChanged={() => userQuery.refetch()} />
               {friendControl}
-              <IconButton to={`/messages/new?to=${user._id}`} state={{ peer: user }} label={`Message ${name}`} variant="secondary">
+              <IconButton to={`/messages/new?to=${user._id}`} state={{ peer: user }} label={`Message ${name}`} variant="secondary" className={tonal}>
                 <MessageCircle size={20} />
               </IconButton>
               <span className="hidden lg:inline-flex">
-                <Menu label="More options" items={menuItems} triggerClassName="border border-line-strong bg-surface-2 hover:bg-surface-3" />
+                <Menu label="More options" items={menuItems} triggerClassName="border border-transparent bg-surface-3 hover:bg-surface-2" />
               </span>
             </div>
-          </div>
+          </section>
 
-          <div className="mt-4">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h2 className="type-heading text-xl text-text-1">{name}</h2>
-              <UserBadges user={user} />
-              {isPrivate ? (
-                <Badge>
-                  <Lock size={12} />
-                  Private
-                </Badge>
-              ) : null}
-            </div>
-            <p className="text-sm text-text-2">@{user.username}</p>
-            {user.bio ? <p className="prose-measure mt-3 whitespace-pre-wrap text-base text-text-1">{user.bio}</p> : null}
-            {user.fields?.length ? (
-              <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Coaching specialties">
-                {user.fields.map((f) => (
-                  <Badge key={f} tone="info">
-                    {humanize(f)}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-2">
-              {user.location ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <MapPin size={14} className="text-text-3" aria-hidden="true" />
-                  {user.location}
-                </span>
-              ) : null}
-              <span className="inline-flex items-center gap-1.5">
-                <Calendar size={14} className="text-text-3" aria-hidden="true" />
-                {joined ? `Joined ${joined}` : 'Joined recently'}
-              </span>
-            </div>
-          </div>
+          {canViewContent ? <HighlightsRow userId={user._id} author={user} /> : null}
         </div>
-      </Card>
 
-      {canViewContent ? <HighlightsRow userId={user._id} author={user} /> : null}
-
-      <StatStrip
-        aria-label="Profile stats"
-        items={[
-          { label: 'Posts', value: postCount(user), onClick: canViewContent ? () => setTab('posts') : undefined },
-          { label: 'Followers', value: followerCount(user), to: canViewContent ? `/u/${user._id}/followers` : undefined },
-          { label: 'Following', value: followingCount(user), to: canViewContent ? `/u/${user._id}/following` : undefined },
-          { label: 'Workouts', value: user.stats?.workouts || 0, onClick: canViewContent ? () => setTab('workouts') : undefined, tone: 'brand' },
-        ]}
-      />
-
-      {!canViewContent ? (
-        <Card>
-          <EmptyState
-            icon={<Lock size={26} />}
-            title="This account is private"
-            message={`Follow ${name} to see their posts, workouts and meals. They approve requests themselves.`}
-            action={<FollowButton user={user} onChanged={() => userQuery.refetch()} />}
-          />
-        </Card>
-      ) : (
-        <section className="space-y-4" aria-label={`${name}’s activity`}>
-          <Tabs
-            aria-label="Profile content"
-            tabs={PUBLIC_PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
-            value={tab}
-            onChange={setTab}
-          />
-          <div className={cx('anim-fade-in')} key={tab}>
-            {tab === 'posts' && <ProfilePosts userId={user._id} name={name} />}
-            {tab === 'workouts' && <ProfileWorkouts userId={user._id} name={name} />}
-            {tab === 'meals' && <ProfileMeals userId={user._id} name={name} />}
-          </div>
-        </section>
-      )}
+        {!canViewContent ? (
+          <Card>
+            <EmptyState
+              icon={<Lock size={26} />}
+              title="This account is private"
+              message={`Follow ${name} to see their posts, workouts and meals. They approve requests themselves.`}
+              action={<FollowButton user={user} onChanged={() => userQuery.refetch()} />}
+            />
+          </Card>
+        ) : (
+          <section className="space-y-4" aria-label={`${name}’s activity`}>
+            <SegmentedControl
+              aria-label="Profile content"
+              tabs={PUBLIC_PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
+              value={tab}
+              onChange={setTab}
+            />
+            <div className={cx('anim-fade-in')} key={tab}>
+              {tab === 'posts' && <ProfilePosts userId={user._id} name={name} />}
+              {tab === 'workouts' && <ProfileWorkouts userId={user._id} name={name} />}
+              {tab === 'meals' && <ProfileMeals userId={user._id} name={name} />}
+            </div>
+          </section>
+        )}
+      </div>
 
       {reportModal}
 

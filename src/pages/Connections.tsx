@@ -14,7 +14,6 @@ import {
 import { Button, ButtonLink, EmptyState, ErrorState, PageHeader, SearchField, Spinner, Tabs } from './ui';
 import { Compass, Lock, UserPlus, Users } from './icons';
 import UserRow, { UserRowSkeleton } from './UserRow';
-import { PAGE } from './Profile';
 
 export type ConnectionKind = 'followers' | 'following';
 export const CONNECTION_KINDS: ConnectionKind[] = ['followers', 'following'];
@@ -28,6 +27,9 @@ type ConnectionsPage = {
   pagination?: { page: number; limit: number; total: number; hasMore: boolean };
   total?: number;
 };
+
+/** A list of people reads best at feed width; the shell owns the gutter. */
+const PAGE = 'mx-auto w-full max-w-feed space-y-section';
 
 /**
  * Followers / Following lists (mobile parity with the follow-interaction
@@ -114,14 +116,14 @@ export default function Connections() {
   ) : own ? (
     kind === 'followers' ? (
       <EmptyState
-        icon={<Users size={26} />}
+        family="social"
         title="No followers yet"
         message="Share your profile, post a session or follow people you train with; followers usually follow back."
         action={{ label: 'Explore people', to: '/discover', icon: <Compass size={18} /> }}
       />
     ) : (
       <EmptyState
-        icon={<UserPlus size={26} />}
+        family="social"
         title="Not following anyone yet"
         message="Follow athletes and coaches to fill your feed with their sessions, meals and wins."
         action={{ label: 'Explore people', to: '/discover', icon: <Compass size={18} /> }}

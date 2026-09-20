@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -28,6 +28,7 @@ import {
   Button,
   Callout,
   Card,
+  CardGrid,
   EmptyState,
   ErrorState,
   Modal,
@@ -49,15 +50,23 @@ import {
   CheckCircle,
   Clock,
   Dumbbell,
+  Flame,
+  Footprints,
+  Heart,
   Medal,
+  Plate,
   Sparkles,
+  Star,
   Target,
   Trophy,
   Users,
+  Zap,
+  type IconProps,
 } from '../components/icons';
 import {
   AchievementGrid,
   BadgeTile,
+  CATEGORY_ICON,
   CATEGORY_LABEL,
   RARITY_STYLE,
   RarityChip,
@@ -117,6 +126,73 @@ const DETAIL_CLOSE_ID = 'achievement-detail-close';
 
 const focusViews = () =>
   document.querySelector<HTMLElement>(`#${VIEWS_ID} [role="tab"][aria-selected="true"]`)?.focus();
+
+/* ------------------------------------------------------------- badge art */
+
+/**
+ * The catalogue names each badge's glyph in the mobile client's icon
+ * vocabulary (`icon: 'ribbon'`, `iconColor: '#00D4AA'`). Known names map to
+ * our stroke icons; anything else keeps the category glyph. The colour is
+ * catalogue data, not a design token, so it tints the tile and is mixed
+ * toward the text colour for the glyph, which holds contrast in both themes.
+ */
+const BADGE_ICONS: Readonly<Record<string, (props: IconProps) => ReactNode>> = {
+  ribbon: (p) => <Medal {...p} />,
+  medal: (p) => <Medal {...p} />,
+  trophy: (p) => <Trophy {...p} />,
+  award: (p) => <Award {...p} />,
+  star: (p) => <Star {...p} />,
+  sparkles: (p) => <Sparkles {...p} />,
+  flame: (p) => <Flame {...p} />,
+  fire: (p) => <Flame {...p} />,
+  flash: (p) => <Zap {...p} />,
+  bolt: (p) => <Zap {...p} />,
+  barbell: (p) => <Dumbbell {...p} />,
+  fitness: (p) => <Dumbbell {...p} />,
+  dumbbell: (p) => <Dumbbell {...p} />,
+  nutrition: (p) => <Plate {...p} />,
+  restaurant: (p) => <Plate {...p} />,
+  people: (p) => <Users {...p} />,
+  users: (p) => <Users {...p} />,
+  heart: (p) => <Heart {...p} />,
+  footsteps: (p) => <Footprints {...p} />,
+  walk: (p) => <Footprints {...p} />,
+  calendar: (p) => <CalendarDays {...p} />,
+  target: (p) => <Target {...p} />,
+  'checkmark-circle': (p) => <CheckCircle {...p} />,
+  time: (p) => <Clock {...p} />,
+};
+
+const HEX_COLOUR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+export function badgeGlyph(achievement: Pick<Achievement, 'icon' | 'category'>): (props: IconProps) => ReactNode {
+  const key = String(achievement.icon || '')
+    .trim()
+    .toLowerCase()
+    .replace(/-(outline|sharp)$/, '');
+  return BADGE_ICONS[key] ?? CATEGORY_ICON[categoryOf(achievement)];
+}
+
+export function badgeTint(iconColor?: string | null): CSSProperties | undefined {
+  const value = (iconColor || '').trim();
+  if (!HEX_COLOUR.test(value)) return undefined;
+  return {
+    background: `color-mix(in oklab, ${value} 22%, var(--surface-1))`,
+    color: `color-mix(in oklab, ${value} 65%, var(--text-1))`,
+  };
+}
+
+/** The badge's own art where the catalogue supplies it; the rarity tile otherwise. */
+function BadgeArt({ achievement, earned }: { achievement: Achievement; earned: boolean }) {
+  const tint = badgeTint(achievement.iconColor);
+  if (!tint) return <BadgeTile achievement={achievement} size="lg" earned={earned} />;
+  const Glyph = badgeGlyph(achievement);
+  return (
+    <div className={cx('flex h-16 w-16 shrink-0 items-center justify-center rounded-md', !earned && 'opacity-70 saturate-50')} style={tint} aria-hidden="true">
+      {Glyph({ size: 30 })}
+    </div>
+  );
+}
 
 /* --------------------------------------------------------------- sub views */
 
@@ -198,7 +274,7 @@ function DetailModal({
       {achievement ? (
         <div className="space-y-5">
           <div className="flex items-center gap-4">
-            <BadgeTile achievement={achievement} size="lg" earned={earned || met} />
+            <BadgeArt achievement={achievement} earned={earned || met} />
             <div className="min-w-0 space-y-1.5">
               <RarityChip rarity={rarity} />
               <p className="text-sm leading-relaxed text-text-2">{achievement.description}</p>
@@ -290,7 +366,7 @@ function DetailModal({
 
 function GridSkeleton() {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading achievements">
+    <CardGrid min="18rem" className="gap-3" aria-busy="true" aria-label="Loading achievements">
       {Array.from({ length: 6 }).map((_, i) => (
         <Card key={i} className="space-y-3">
           <div className="flex gap-3">
@@ -305,7 +381,7 @@ function GridSkeleton() {
           <Skeleton className="h-11 w-full rounded-sm" />
         </Card>
       ))}
-    </div>
+    </CardGrid>
   );
 }
 
@@ -764,6 +840,7 @@ export default function Achievements() {
       ) : items.length === 0 ? (
         <EmptyState
           variant={filtersActive ? 'no-results' : 'first-run'}
+          family={filtersActive ? undefined : 'train'}
           title={
             tab === 'seasonal'
               ? 'No seasonal badges running'
