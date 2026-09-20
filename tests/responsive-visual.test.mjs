@@ -228,7 +228,9 @@ test('a page whose chunk is already in memory renders without suspending; only a
 
 test('the desktop sidebar scrolls visibly: compact rows, edge fades, no footer links, active item kept in view', () => {
   const sidebar = layout.slice(layout.indexOf('function Sidebar('), layout.indexOf('function DesktopTopBar('));
-  assert.match(sidebar, /className=\{cx\('scroll-visible mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3 xl:px-4', fadeClass\(edges, 'y'\)\)\}/);
+  // Gym First (P2): scroll-padding on the list + scroll-margin on the row keep the active hub clear of the edge fades.
+  assert.match(sidebar, /className=\{cx\('scroll-visible mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3 \[scroll-padding-block:3rem\] xl:px-4', fadeClass\(edges, 'y'\)\)\}/);
+  assert.match(layout.slice(layout.indexOf('function SideLink('), layout.indexOf('function SidebarGym(')), /scroll-my-12/);
   assert.match(sidebar, /useScrollEdges\(navRef, 'y'\)/);
   assert.match(sidebar, /scrollIntoView\(\{ block: 'nearest' \}\)/);
   assert.doesNotMatch(sidebar, /border-t border-line pt-3/, 'per-group rules cost 4 × 28 px');
@@ -421,7 +423,8 @@ test('unknown console URLs stay in the console and unknown member URLs get a not
 
 test('Live is only promoted when the server reports a relay, and the disabled copy is for members', () => {
   assert.match(layout, /const LIVE_PATH = '\/live';/);
-  assert.match(layout, /liveEnabled \? g\.items : g\.items\.filter\(\(i\) => i\.to !== LIVE_PATH\)/, 'sidebar');
+  // Gym First (P2): the sidebar is six flat hubs; Live is reached only through the Explore hub's tabs, which filter it.
+  assert.doesNotMatch(layout.slice(layout.indexOf('const SIDEBAR: SidebarItem[]'), layout.indexOf('const sidebarActive')), /'\/live'/, 'sidebar lists hubs, not Live');
   assert.match(layout, /\.filter\(\(t\) => liveEnabled \|\| t\.to !== LIVE_PATH\)/, 'explore hub tabs');
   assert.match(layout, /EXPLORE_MORE\.filter\(\(e\) => liveEnabled \|\| e\.to !== LIVE_PATH\)/, 'right rail');
   assert.match(read('src/lib/capabilities.ts'), /return caps\?\.livestreamRelay === true;/);
@@ -455,7 +458,7 @@ test('phone Home has a level-one heading; empty states and card headers default 
   assert.doesNotMatch(challenges, /<h3[\s>]/, 'no h3 on /challenges without an h2 above it');
   assert.match(ui, /export function EmptyState\(\{[\s\S]*?level = 2,/);
   assert.match(ui, /export function CardHeader\(\{[\s\S]*?level = 2,/);
-  assert.match(layout, /<nav aria-label="Sections" className="sticky/);
+  assert.match(layout, /<nav\s+aria-label="Sections"\s+className=\{cx\(\s*'sticky/);
 });
 
 /* ------------------------------------------------------------ tab strips and sparklines */

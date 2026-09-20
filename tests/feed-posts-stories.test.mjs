@@ -202,7 +202,9 @@ test('the responses sheet never reads a disabled query, and render errors get a 
   const boundary = read('src/components/ErrorBoundary.tsx');
   assert.match(boundary, /static getDerivedStateFromError\(error: Error\): State/);
   assert.match(boundary, /export function RouteErrorBoundary/);
-  assert.match(read('src/App.tsx'), /<RouteErrorBoundary>\n\s+<Routes>/, 'every routed screen renders inside a boundary');
+  // Gym First (P2): AppRoutes holds the <Routes> (and the sheet overlay) inside the same boundary.
+  assert.match(read('src/App.tsx'), /<RouteErrorBoundary>\n\s+<AppRoutes \/>/, 'every routed screen renders inside a boundary');
+  assert.match(read('src/App.tsx'), /function AppRoutes\(\)[\s\S]*?<Routes location=/);
   assert.match(read('src/components/Layout.tsx'), /<RouteErrorBoundary>\{waiting \? <PageSkeleton \/> : \(children \?\? <Outlet \/>\)\}<\/RouteErrorBoundary>/, 'the shell survives a broken page');
 });
 

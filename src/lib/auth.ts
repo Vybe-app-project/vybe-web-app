@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import type { AxiosError } from 'axios';
 import { api, tokenStore, adminApi, revokeSession, signOutReason } from './api';
 import { disposeSocket } from './socket';
-import type { AccountFields } from './accountTypes';
+import type { AccountFields, HomeGymRef } from './accountTypes';
 
 /**
  * Field names follow the backend `User` model: the photo is `avatar`
@@ -31,6 +31,8 @@ export type User = {
   pendingDeletion?: AccountFields['pendingDeletion'];
   deletion?: AccountFields['deletion'];
   hasPassword?: AccountFields['hasPassword'];
+  /** The viewer's home gym (GET /users/me); absent until set. */
+  homeGym?: HomeGymRef | null;
   [k: string]: any;
 };
 

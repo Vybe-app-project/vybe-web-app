@@ -462,7 +462,7 @@ test('the gate is mounted once at the root, between the 426 screen and the route
   const gate = app.indexOf('<LegalConsentGate />');
   assert.ok(gate > app.indexOf('<UpdateRequiredScreen />'), 'after the 426 screen');
   assert.ok(gate < app.indexOf('<ApiNotices />'), 'before the notices');
-  assert.ok(gate < app.indexOf('<Routes>'), 'outside the routes, so SupportGate and PostGate are covered');
+  assert.ok(gate < app.indexOf('<AppRoutes />'), 'outside the routes, so SupportGate and PostGate are covered');
   assert.ok(gate > app.indexOf('<ToastProvider>') && gate < app.indexOf('<Suspense'), 'inside the toast provider');
   assert.doesNotMatch(read('src/components/Layout.tsx'), /LegalConsentGate/, 'not a second mount in the shell');
 });
