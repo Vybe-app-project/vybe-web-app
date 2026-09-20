@@ -47,7 +47,8 @@ test('the card renders the period, the numbers and the most trained exercises', 
 
 test('feed cards and the public post page render the recap card after the workout card', () => {
   for (const source of [read('src/pages/PostCard.tsx'), read('src/pages/PublicPost.tsx')]) {
-    assert.match(source, /hasRecapSummary\(post\.recapSummary\) \? <RecapSummaryCard summary=\{post\.recapSummary\} className="mt-3" \/> : null/);
+    // PostCard adds an author-only `to=` after className; PublicPost never does.
+    assert.match(source, /hasRecapSummary\(post\.recapSummary\) \? <RecapSummaryCard summary=\{post\.recapSummary\} className="mt-3"[^>]*\/> : null/);
     assert.ok(source.indexOf('<WorkoutSummaryCard summary') < source.indexOf('<RecapSummaryCard summary'));
     assert.ok(source.indexOf('<RecapSummaryCard summary') < source.indexOf('<PostContent text={post.content}'));
   }

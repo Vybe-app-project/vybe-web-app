@@ -86,6 +86,12 @@ export function notificationHref(n: NotificationLike): string | null {
   }
   if (n.type === 'friend_request' || n.type === 'follow_request') return '/friends';
 
+  // weekly_recap / monthly_recap rows carry { kind: 'recap', recapId, ... } and
+  // also the member's own userId; the recap viewer is the destination, not
+  // their own profile.
+  const recapId = idOf(d.recapId);
+  if (recapId) return `/recaps/${recapId}`;
+
   const senderId = idOf(n.sender?._id) || idOf(d.sender) || idOf(d.senderId) || idOf(d.userId) || idOf(d.followerId);
   if (senderId) return `/u/${senderId}`;
   return null;

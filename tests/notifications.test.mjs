@@ -118,6 +118,10 @@ test('social rows resolve to the thing that happened', () => {
   assert.equal(copy.notificationHref({ type: 'workout_like', sender, data: { workoutId: 'w1' } }), '/workouts/w1');
   assert.equal(copy.notificationHref({ type: 'meal_plan_like', sender }), '/meals/plans');
   assert.equal(copy.notificationHref({ type: 'gym_member_joined', sender }), '/communities');
+  // Recap rows name the member as sender and carry their own userId; they open the recap, never the member's own profile.
+  const recapData = { kind: 'recap', recapId: 'r1', recapKind: 'week', periodKey: '2026-W38', userId: 'abc' };
+  assert.equal(copy.notificationHref({ type: 'weekly_recap', sender, data: recapData }), '/recaps/r1');
+  assert.equal(copy.notificationHref({ type: 'monthly_recap', sender, data: { ...recapData, recapKind: 'month', periodKey: '2026-09' } }), '/recaps/r1');
   assert.equal(copy.notificationText({ type: 'post_like' }), 'liked your post');
   assert.equal(copy.notificationText({ type: 'post_like', message: '  Server copy wins ' }), 'Server copy wins');
 });
