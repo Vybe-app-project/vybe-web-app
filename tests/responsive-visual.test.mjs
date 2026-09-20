@@ -466,8 +466,59 @@ test('scrollable tab strips fade at a readable width and remeasure as tabs resiz
   assert.match(tabs, /for \(const child of Array\.from\(list\.children\)\) ro\.observe\(child\);/);
 });
 
-test('a flat sparkline draws nothing (all zero) or a quiet dashed baseline (constant)', () => {
+test('a sparkline with no data or a flat series draws a quiet dashed baseline, never an empty box or axes', () => {
+  // Gym First (P1): the "nothing yet" glyph is the same dashed baseline everywhere (Sparkline, Progress, Ring, ChartEmpty).
   const spark = ui.slice(ui.indexOf('export function Sparkline('), ui.indexOf('export type StatDelta'));
-  assert.match(spark, /if \(max === min\) \{\s*if \(max === 0\) return placeholder;/);
+  assert.match(spark, /if \(!data \|\| data\.length < 2 \|\| max === min\) return baseline;/);
   assert.match(spark, /strokeDasharray="3 4"/);
+  assert.doesNotMatch(spark, /return placeholder/);
+  assert.match(ui, /emptyBaseline: \{ stroke: 'var\(--text-3\)', strokeDasharray: '3 4', strokeWidth: 1 \}/);
+  assert.match(ui, /export function ChartEmpty\(/);
+});
+
+test('dark surfaces step >=1.2:1 apart, tertiary text stays >=4.5:1 on the lightest, and light cards are tonal', () => {
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const lin = (c) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const ratio = (a, b) => {
+    const [x, y] = [lum(hex(a)), lum(hex(b))];
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  };
+  const dark = css.slice(css.indexOf('.dark {'), css.indexOf('@theme inline'));
+  const [, bg, s1, s2, s3] = dark.match(/--bg: (#[0-9a-f]{6}); --surface-1: (#[0-9a-f]{6}); --surface-2: (#[0-9a-f]{6}); --surface-3: (#[0-9a-f]{6});/);
+  assert.equal(bg, '#04101b', 'the page background is unchanged');
+  for (const [a, b] of [[bg, s1], [s1, s2], [s2, s3]]) assert.ok(ratio(a, b) >= 1.2, `dark step ${a}→${b}: ${ratio(a, b).toFixed(3)}`);
+  const text3 = dark.match(/--text-3: (#[0-9a-f]{6});/)[1];
+  assert.ok(ratio(text3, s3) >= 4.5, `dark text-3 on surface-3: ${ratio(text3, s3).toFixed(2)}`);
+  const control = dark.match(/--control-border: (#[0-9a-f]{6});/)[1];
+  assert.ok(ratio(control, s2) >= 3, `dark control-border on surface-2: ${ratio(control, s2).toFixed(2)}`);
+  // Light level-1 cards: no line, shadow only; dark rebinds the switch to the hairline; the admin console keeps its edge.
+  assert.match(css, /--card-border-light: transparent;/);
+  assert.match(dark, /--card-border-light: var\(--line\);/);
+  assert.match(css, /@utility card \{[\s\S]*?border: 1px solid var\(--card-border-light, var\(--line\)\);/);
+  assert.match(adminCss, /--card-border-light: var\(--line\);/);
+  // Fluid scale tokens exist and are mirrored into Tailwind utilities.
+  for (const token of ['--gutter', '--section-gap', '--text-h1', '--text-stat', '--text-band', '--text-figure']) {
+    assert.match(css, new RegExp(`^  ${token}: clamp\\(`, 'm'), `${token} is a clamp()`);
+  }
+  assert.match(css, /--spacing-gutter: var\(--gutter\); --spacing-section: var\(--section-gap\);/);
+  assert.match(css, /--text-band: var\(--text-band\); --text-band--line-height: 1;/);
+});
+
+test('the gym band collapses on a scroll timeline, or a passive listener, and never animates layout', () => {
+  const band = read('src/components/GymBand.tsx');
+  const hook = read('src/lib/gymBand.ts');
+  assert.match(band, /className=\{cx\('gym-band dark', className\)\}/, 'dark in both themes, like AuthShell');
+  assert.match(css, /@property --band-p \{ syntax: '<number>'; inherits: true; initial-value: 0; \}/);
+  assert.match(css, /\.gym-band\[data-collapse='css'\] \{\s*animation: band-collapse linear both;\s*animation-timeline: scroll\(\);/);
+  assert.match(css, /\.gym-band\[data-collapse='none'\]\[data-collapsed='true'\] \{ --band-p: 1; \}/);
+  assert.match(hook, /CSS\.supports\('animation-timeline: scroll\(\)'\)/);
+  assert.match(hook, /addEventListener\('scroll', onScroll, \{ passive: true \}\)/);
+  assert.match(hook, /requestAnimationFrame\(update\)/);
+  const bandRules = css.slice(css.indexOf('.gym-band {'), css.indexOf('/* ------------------------------------------------------------------ recharts */'));
+  assert.doesNotMatch(bandRules, /transition:[^;]*\b(height|width|top|margin|padding)\b/, 'no layout property animates');
+  // Copy sits on the scrim; the no-gym state is a designed state, not a hole.
+  assert.match(band, /kicker: 'Find your gym',\s*title: 'Train somewhere\?',\s*body: 'Pick your gym and Vybe fills with the people who train there\.',/);
+  assert.match(band, /if \(!text \|\| \/\^0\+\$\/\.test\(text\)\) return null;/, 'never "0 training today"');
+  assert.match(band, /const hasFigure = typeof figure === 'number' && Number\.isFinite\(figure\) && figure > 0;/, 'the figure draws only above zero');
 });
