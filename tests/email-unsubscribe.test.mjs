@@ -93,7 +93,7 @@ test('a rate-limited unsubscribe is told once: the page renders the 429 inline, 
 
 test('a stale stored session leaves the public landing in place instead of copying the token into /login?next=', () => {
   const api = read('src/lib/api.ts');
-  assert.match(api, /const NO_SESSION_PATHS = \['\/unsubscribe', '\/email\/unsubscribe'\];/);
+  assert.match(api, /const NO_SESSION_PATHS = \['\/unsubscribe', '\/email\/unsubscribe'(, '[^']+')*\];/, 'the unsubscribe landings stay exempt (other public landings may join the list)');
   const fn = api.slice(api.indexOf('function onUnauthorized('), api.indexOf('export function installClientInterceptors'));
   assert.match(fn, /tokenStore\.clear\(\);/, 'the stale token is still dropped');
   assert.match(fn, /if \(pathIsUnder\(location\.pathname, NO_SESSION_PATHS\)\) return;/);

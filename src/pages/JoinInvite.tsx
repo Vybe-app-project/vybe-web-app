@@ -144,10 +144,31 @@ function StoreLinks({ storeUrls }: { storeUrls: InvitePreview['storeUrls'] }) {
 }
 
 /**
- * The preview: who, to what, the ways in, the code. `signedIn` is null while
- * the session is still being restored, so the account links wait rather than
- * flipping mid-read. The vybe:// link is offered on a phone or tablet only;
- * on a desktop it does nothing (lib/shareLinks.ts isHandheld).
+ * The ways into an account with the code kept: sign-up on the web with
+ * ?invite=<CODE> in the URL, or sign-in that bounces back here. `signedIn`
+ * is null while the session is still being restored, so the row waits rather
+ * than flipping mid-read; a signed-in member reads the note instead, since
+ * the code is used in the app and nothing is redeemed on the web.
+ */
+function AccountRow({ code, signedIn, from, primary }: { code: string; signedIn: boolean | null; from?: unknown; primary: boolean }) {
+  if (signedIn === null) return null;
+  if (signedIn) return <Callout tone="info">{SIGNED_IN_NOTE}</Callout>;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ButtonLink to={registerWithInvitePath(code)} variant={primary ? 'primary' : 'secondary'} data-testid="invite-register">
+        {CREATE_ACCOUNT_WEB}
+      </ButtonLink>
+      <ButtonLink to="/login" state={from} variant="ghost" data-testid="invite-sign-in">
+        {SIGN_IN}
+      </ButtonLink>
+    </div>
+  );
+}
+
+/**
+ * The preview: who, to what, the ways in, the code. The vybe:// link is
+ * offered on a phone or tablet only; on a desktop it does nothing
+ * (lib/shareLinks.ts isHandheld), so there the web sign-up leads.
  */
 export function InvitePreviewBody({
   preview,
@@ -201,35 +222,33 @@ export function InvitePreviewBody({
 
       <InviteCodeBlock code={code} copyState={copyState} onCopy={onCopy} />
 
-      {signedIn === null ? null : signedIn ? (
-        <Callout tone="info">{SIGNED_IN_NOTE}</Callout>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <ButtonLink to={registerWithInvitePath(code)} variant={handheld ? 'secondary' : 'primary'} data-testid="invite-register">
-            {CREATE_ACCOUNT_WEB}
-          </ButtonLink>
-          <ButtonLink to="/login" state={from} variant="ghost" data-testid="invite-sign-in">
-            {SIGN_IN}
-          </ButtonLink>
-        </div>
-      )}
+      <AccountRow code={code} signedIn={signedIn} from={from} primary={!handheld} />
     </div>
   );
 }
 
-/** A failure in words: the title, one sentence as an alert, Try again where a retry can help, and the code when it may still be good. */
+/**
+ * A failure in words: the title, one sentence as an alert, Try again where a
+ * retry can help, and, when the failure says nothing about the code, the code
+ * with the same account row as the preview, so "Enter this code after you
+ * sign up" has a sign-up path that keeps the code.
+ */
 export function InviteFailureBody({
   failure,
   code,
+  signedIn = false,
   copyState,
   onCopy,
   onRetry,
+  from,
 }: {
   failure: InviteFailure;
   code: string | null;
+  signedIn?: boolean | null;
   copyState: CopyState;
   onCopy?: () => void;
   onRetry?: () => void;
+  from?: unknown;
 }) {
   const retry = canRetryInvite(failure) && onRetry;
   return (
@@ -257,7 +276,12 @@ export function InviteFailureBody({
           </ButtonLink>
         </div>
       </div>
-      {code && showsCodeOnFailure(failure) ? <InviteCodeBlock code={code} copyState={copyState} onCopy={onCopy} /> : null}
+      {code && showsCodeOnFailure(failure) ? (
+        <>
+          <InviteCodeBlock code={code} copyState={copyState} onCopy={onCopy} />
+          <AccountRow code={code} signedIn={signedIn} from={from} primary={false} />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -279,20 +303,33 @@ export function JoinInviteOutcome({
   onRetry?: () => void;
   from?: unknown;
 }) {
-  if (state.status === 'loading') {
-    return (
-      <div className={CARD} role="status" aria-live="polite" aria-busy="true">
-        <p className="inline-flex items-center gap-2 text-sm text-text-2">
-          <Spinner size={18} />
-          {LOADING_INVITE}
-        </p>
+  const loading = state.status === 'loading';
+  // One role="status" node at one tree position for the life of the page
+  // (the pattern EmailUnsubscribe documents): it reads the loading line, then
+  // the preview title once the preview is in, so the swap is announced rather
+  // than the node being replaced. A failure announces through its own
+  // role="alert" and leaves the region empty, so nothing is read twice.
+  const announced = loading ? LOADING_INVITE : state.status === 'ready' ? invitePreviewView(state.preview).title : '';
+  return (
+    <div>
+      <div role="status" aria-live="polite" aria-busy={loading} className={loading ? CARD : 'sr-only'} data-testid="invite-status">
+        {loading ? (
+          <p className="inline-flex items-center gap-2 text-sm text-text-2">
+            <Spinner size={18} />
+            {LOADING_INVITE}
+          </p>
+        ) : (
+          announced
+        )}
       </div>
-    );
-  }
-  if (state.status === 'failed') {
-    return <InviteFailureBody failure={state.failure} code={state.code} copyState={copyState} onCopy={onCopy} onRetry={onRetry} />;
-  }
-  return <InvitePreviewBody preview={state.preview} code={state.code} signedIn={signedIn} handheld={handheld} copyState={copyState} onCopy={onCopy} from={from} />;
+      {state.status === 'failed' ? (
+        <InviteFailureBody failure={state.failure} code={state.code} signedIn={signedIn} copyState={copyState} onCopy={onCopy} onRetry={onRetry} from={from} />
+      ) : null}
+      {state.status === 'ready' ? (
+        <InvitePreviewBody preview={state.preview} code={state.code} signedIn={signedIn} handheld={handheld} copyState={copyState} onCopy={onCopy} from={from} />
+      ) : null}
+    </div>
+  );
 }
 
 export default function JoinInvite() {
@@ -324,9 +361,11 @@ export default function JoinInvite() {
     return () => window.clearTimeout(timer);
   }, [copyState]);
 
+  // A retry after a failure is a fetch with no data yet, so it reads as loading
+  // rather than leaving the failure card in place with nothing happening.
   const state: JoinInviteState = !code
     ? { status: 'failed', code: null, failure: { kind: 'malformed' } }
-    : q.isError
+    : q.isError && !q.isFetching
       ? { status: 'failed', code, failure: classifyInviteFailure(q.error, { online: navigator.onLine }) }
       : q.data
         ? { status: 'ready', code, preview: q.data }
@@ -337,6 +376,14 @@ export default function JoinInvite() {
     setCopyState(await copyInviteCode(formatInviteCode(code) ?? code, document.getElementById('invite-code')));
   }
 
+  // Try again unmounts the button that was pressed, so focus is moved to the
+  // page's main region first (PublicShell gives it tabIndex -1); the status
+  // region then announces the loading line and the outcome.
+  function retry() {
+    document.getElementById('main')?.focus();
+    void q.refetch();
+  }
+
   return (
     <PublicShell title={INVITE_PAGE_TITLE}>
       <JoinInviteOutcome
@@ -345,7 +392,7 @@ export default function JoinInvite() {
         handheld={handheld}
         copyState={copyState}
         onCopy={() => void copy()}
-        onRetry={() => void q.refetch()}
+        onRetry={retry}
         from={{ from: location }}
       />
     </PublicShell>

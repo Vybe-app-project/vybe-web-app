@@ -46,6 +46,13 @@ test('the code rule: 8 symbols from the alphabet without 0/O/1/I; case, the VYBE
   assert.equal(lib.normaliseInviteCode('7K2MQ9RO'), null);
   assert.equal(lib.normaliseInviteCode('7K2MQ9R1'), null);
   assert.equal(lib.normaliseInviteCode('7K2MQ9RI'), null);
+  // The rule is checked before the case-fold: a non-ASCII letter that JavaScript upper-cases into the alphabet is rejected, not mapped.
+  assert.equal(lib.normaliseInviteCode('7K2MQ9R\u017f'), null, 'U+017F long s would fold to S');
+  assert.equal(lib.normaliseInviteCode('7K2MQ9\u00df'), null, 'U+00DF sharp s would fold to SS');
+  assert.equal(lib.normaliseInviteCode('7K2MQ9\ufb00'), null, 'U+FB00 ff ligature would fold to FF');
+  assert.equal(lib.normaliseInviteCode('7K2MQ9R\u0131'), null, 'dotless i');
+  assert.equal(lib.normaliseInviteCode('\uff17K2MQ9RX'), null, 'a fullwidth digit');
+  assert.equal(lib.normaliseInviteCode('\u017fybe-7k2m-q9rx'), null, 'a folded prefix is not the prefix');
   assert.equal(lib.normaliseInviteCode('7K2MQ9R'), null, 'too short');
   assert.equal(lib.normaliseInviteCode('7K2MQ9RXA'), null, 'too long');
   assert.equal(lib.normaliseInviteCode('../admin'), null);
@@ -164,7 +171,14 @@ test('failures map to words: 404 unknown code, 410 turned off, 429 the wait, off
   assert.deepEqual(lib.classifyInviteFailure(http(429, {})), { kind: 'rate-limited', retryAfterSec: null });
   assert.deepEqual(lib.classifyInviteFailure({ isAxiosError: true, code: 'ERR_NETWORK' }), { kind: 'network' });
   assert.deepEqual(lib.classifyInviteFailure({ isAxiosError: true, code: 'ECONNABORTED' }), { kind: 'network' });
-  assert.deepEqual(lib.classifyInviteFailure(http(500, { message: 'x' }), { online: false }), { kind: 'network' }, 'offline wins');
+  assert.deepEqual(lib.classifyInviteFailure({ isAxiosError: true, code: 'ETIMEDOUT' }), { kind: 'network' });
+  assert.deepEqual(lib.classifyInviteFailure({ isAxiosError: true, message: 'Request aborted' }, { online: false }), { kind: 'network' }, 'offline with no response is a connectivity problem');
+  assert.deepEqual(lib.classifyInviteFailure(undefined, { online: false }), { kind: 'network' });
+  // A response with a status proves the API was reached: the offline flag never rewrites it into "could not reach" with a useless retry.
+  assert.deepEqual(lib.classifyInviteFailure(http(404, {}), { online: false }), { kind: 'unknown-code' });
+  assert.deepEqual(lib.classifyInviteFailure(http(410, {}), { online: false }), { kind: 'revoked' });
+  assert.deepEqual(lib.classifyInviteFailure(http(429, { retryAfterSec: 30 }), { online: false }), { kind: 'rate-limited', retryAfterSec: 30 });
+  assert.deepEqual(lib.classifyInviteFailure(http(500, { message: 'x' }), { online: false }), { kind: 'failed' });
   assert.deepEqual(lib.classifyInviteFailure(http(500, { message: 'boom' })), { kind: 'failed' });
   assert.deepEqual(lib.classifyInviteFailure(http(400, { message: 'bad' })), { kind: 'failed' });
   assert.deepEqual(lib.classifyInviteFailure(new Error('The invite preview was not readable.')), { kind: 'failed' });
@@ -284,6 +298,16 @@ test('the landing is a public route before the guards, calls the one preview end
   assert.match(page, /retry: false,/);
   assert.match(page, /parseInvitePreview\(data\)/);
   assert.match(page, /classifyInviteFailure\(q\.error, \{ online: navigator\.onLine \}\)/);
+  assert.match(page, /q\.isError && !q\.isFetching\s*\?/, 'a retry in flight reads as loading, not as the old failure');
+  assert.match(page, /document\.getElementById\('main'\)\?\.focus\(\);\s*void q\.refetch\(\);/, 'Try again moves focus into the page before its button unmounts');
+  assert.match(page, /const announced = loading \? LOADING_INVITE : state\.status === 'ready' \? invitePreviewView\(state\.preview\)\.title : '';/, 'one status node reads the loading line, then the title');
+
+  // A stale stored token answering 401 on the bootstrap must not bounce the recipient to /login before the invite is seen.
+  const apiSrc = read('src/lib/api.ts');
+  const noSession = apiSrc.match(/const NO_SESSION_PATHS = \[([^\]]*)\];/);
+  assert.ok(noSession, 'NO_SESSION_PATHS is declared');
+  assert.ok(noSession[1].includes("'/join'"), '/join is a no-session path (pathIsUnder also covers /join/<code>)');
+  assert.match(apiSrc, /if \(pathIsUnder\(location\.pathname, NO_SESSION_PATHS\)\) return;/);
   assert.match(page, /<PublicShell title=\{INVITE_PAGE_TITLE\}>/);
   assert.match(page, /appDeepLink\('invite', code\)/);
   assert.match(page, /import \{[^}]*\bisHandheld\b[^}]*\} from '\.\.\/lib\/shareLinks'/);
@@ -405,32 +429,64 @@ test('the failure body: the title, the sentence as an alert, Try again only wher
   assert.ok(limited.includes('Try again in about 15 minutes.'));
   assert.ok(!limited.includes('invite-retry'), 'a retry inside the window would only repeat the 429');
   assert.ok(limited.includes(SHOWN) && limited.includes('Enter this code after you sign up.'), 'the code may still be good, so it stays');
+  // "Enter this code after you sign up" comes with the sign-up path that keeps the code, and sign-in that comes back here.
+  assert.ok(limited.includes(`href="/register?invite=${CODE}"`) && limited.includes('Create your account on the web'), 'the code block is followed by the sign-up link');
+  assert.ok(limited.includes('data-testid="invite-sign-in"') && limited.includes('href="/login"'));
+  assert.ok(!tagWith(limited, 'invite-register').includes('btn-primary'), 'on a failure the sign-up is secondary');
+  const limitedSignedIn = mount(h(InviteFailureBody, { failure: { kind: 'rate-limited', retryAfterSec: 900 }, code: CODE, signedIn: true, copyState: null }));
+  assert.ok(limitedSignedIn.includes('You are signed in; open the app to use this code'));
+  assert.ok(!limitedSignedIn.includes('invite-register') && !limitedSignedIn.includes('href="/login"'), 'a signed-in member is not offered sign-up');
+  const limitedPending = mount(h(InviteFailureBody, { failure: { kind: 'rate-limited', retryAfterSec: 900 }, code: CODE, signedIn: null, copyState: null }));
+  assert.ok(!limitedPending.includes('invite-register') && !limitedPending.includes('You are signed in'), 'nothing flips in while the session is being restored');
+  assert.ok(limitedPending.includes('data-testid="invite-code"'));
+  for (const html of [unknown, revoked]) assert.ok(!html.includes('invite-register') && !html.includes('href="/login"'), 'no sign-up row when the code itself is the problem');
 
   const offline = failure({ kind: 'network' });
   assert.ok(offline.includes('Could not reach Vybe'));
   assert.ok(offline.includes('data-testid="invite-retry"') && offline.includes('Try again'));
   assert.ok(offline.includes('data-testid="invite-code"'));
+  assert.ok(offline.includes(`href="/register?invite=${CODE}"`));
 
   const generic = failure({ kind: 'failed' });
   assert.ok(generic.includes('Something went wrong') && generic.includes('Could not load this invite.') && generic.includes('invite-retry'));
+  assert.ok(generic.includes(`href="/register?invite=${CODE}"`));
 
   const malformed = failure({ kind: 'malformed' }, null);
   assert.ok(malformed.includes('Check the letters and try again.'));
-  assert.ok(!malformed.includes('data-testid="invite-code"') && !malformed.includes('invite-retry'));
+  assert.ok(!malformed.includes('data-testid="invite-code"') && !malformed.includes('invite-retry') && !malformed.includes('invite-register'));
 
   for (const html of [unknown, revoked, limited, offline, generic, malformed]) {
     assert.ok(!html.includes('NaN') && !html.includes('undefined'));
     assert.ok(!html.includes('vybe://open'), 'no app link without a preview');
   }
 
-  // The outcome dispatch: loading is a live status; the two states render their bodies; the copy fallback has its line.
+  // The outcome dispatch: one role="status" node at the same tree position in every state, so the swap from
+  // loading to the preview is announced (loading reads the line; ready reads the title; a failure leaves it
+  // empty and announces through its own role="alert").
+  const statusNode = (html) => {
+    const match = html.match(/<div role="status" aria-live="polite" aria-busy="(true|false)" class="([^"]*)" data-testid="invite-status">(.*?)<\/div>/s);
+    assert.ok(match, 'the status node is present');
+    return { busy: match[1], className: match[2], inner: match[3] };
+  };
   const loading = mount(h(JoinInviteOutcome, { state: { status: 'loading', code: CODE }, signedIn: null, handheld: false, copyState: null }));
   assert.match(loading, /role="status" aria-live="polite" aria-busy="true"/);
   assert.ok(loading.includes('Loading your invite…'));
+  assert.ok(!statusNode(loading).className.includes('sr-only'), 'while loading the status node is the visible card');
+  assert.ok(!loading.includes('invite-preview') && !loading.includes('invite-failure'));
   const ready = mount(h(JoinInviteOutcome, { state: { status: 'ready', code: CODE, preview: preview() }, signedIn: false, handheld: false, copyState: null }));
   assert.ok(ready.includes('data-testid="invite-preview"'));
+  assert.equal(statusNode(ready).busy, 'false');
+  assert.ok(statusNode(ready).className.includes('sr-only'), 'once loaded the status node is off-screen');
+  assert.ok(statusNode(ready).inner.includes('Sam invited you to Vybe'), 'the loaded preview is announced by its title');
+  assert.ok(!ready.includes('Loading your invite…'));
+  assert.ok(ready.indexOf('data-testid="invite-status"') < ready.indexOf('data-testid="invite-preview"'), 'the status node keeps its position above the body');
   const failed = mount(h(JoinInviteOutcome, { state: { status: 'failed', code: null, failure: { kind: 'malformed' } }, signedIn: false, handheld: false, copyState: null }));
   assert.ok(failed.includes('data-testid="invite-failure"'));
+  assert.equal(statusNode(failed).inner.replace(/<!--.*?-->/g, ''), '', 'a failure is read once, through role="alert"');
+  assert.match(failed, /<p role="alert"/);
+  // The outcome passes the session through to a failure that keeps the code, so its sign-up row appears.
+  const failedLimited = mount(h(JoinInviteOutcome, { state: { status: 'failed', code: CODE, failure: { kind: 'rate-limited', retryAfterSec: 60 } }, signedIn: false, handheld: false, copyState: null }));
+  assert.ok(failedLimited.includes(`href="/register?invite=${CODE}"`));
   const selected = mount(h(InviteCodeBlock, { code: CODE, copyState: 'selected' }));
   assert.ok(selected.includes(lib.CODE_SELECTED));
   assert.ok(selected.includes('id="invite-code"'));

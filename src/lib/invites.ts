@@ -17,21 +17,29 @@ export const INVITE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const INVITE_CODE_LENGTH = 8;
 /** A normalised code: 8 symbols from the alphabet, upper case, no separators. */
 export const INVITE_CODE_RE = /^[A-HJ-NP-Z2-9]{8}$/;
+/** The same rule before case-folding: ASCII letters in either case, nothing else. */
+const INVITE_CODE_INPUT_RE = /^[A-HJ-NP-Za-hj-np-z2-9]{8}$/;
 const DISPLAY_PREFIX = 'VYBE';
+const DISPLAY_PREFIX_RE = /^[Vv][Yy][Bb][Ee]/;
 
 /**
  * Read a code as a person or a link may have written it: any case, with or
  * without the VYBE- prefix, dashes or spaces ("vybe-7k2m-q9rx", "7K2M Q9RX",
  * "7k2mq9rx"). Returns the 8 upper-case symbols, or null for anything that is
  * not a code, so a malformed value never reaches the API.
+ *
+ * The rule is checked before the case-fold, on ASCII letters only. JavaScript
+ * upper-casing maps some non-ASCII letters into the alphabet (U+017F long s
+ * to S, U+00DF sharp s to SS, the U+FB00 ff ligature to FF), and folding
+ * first would turn those malformed values into well-formed codes.
  */
 export function normaliseInviteCode(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
-  let value = raw.trim().toUpperCase().replace(/[\s\-–—_]+/g, '');
-  if (value.length === INVITE_CODE_LENGTH + DISPLAY_PREFIX.length && value.startsWith(DISPLAY_PREFIX)) {
+  let value = raw.trim().replace(/[\s\-–—_]+/g, '');
+  if (value.length === INVITE_CODE_LENGTH + DISPLAY_PREFIX.length && DISPLAY_PREFIX_RE.test(value)) {
     value = value.slice(DISPLAY_PREFIX.length);
   }
-  return INVITE_CODE_RE.test(value) ? value : null;
+  return INVITE_CODE_INPUT_RE.test(value) ? value.toUpperCase() : null;
 }
 
 /** 'VYBE-7K2M-Q9RX' for a code in any accepted form; null when it is not a code. */
@@ -219,16 +227,23 @@ const retryAfterHeader = (headers: unknown): unknown => {
 /**
  * Sorts a failed GET /public/invites/:code into the states the page renders.
  *
- * - No response, or the browser reports offline: a connectivity problem; Try again is offered.
+ * - No response (a network error, a timeout, or the browser reporting offline
+ *   while nothing came back): a connectivity problem; Try again is offered.
  * - 404: the code is not one the API knows.
  * - 410: the inviter turned the link off.
  * - 429: the per-IP preview limiter (60 per 15 minutes); the wait comes from the body or Retry-After.
  * - Anything else: a generic failure with Try again.
+ *
+ * A response with a status proves the API was reached, so the offline flag
+ * never overrides one: a 404 read while the phone later drops off the network
+ * stays "not one we know" instead of turning into "could not reach" with a
+ * retry that cannot change the answer.
  */
 export function classifyInviteFailure(error: unknown, { online = true }: { online?: boolean } = {}): InviteFailure {
   const failure = (error && typeof error === 'object' ? error : {}) as HttpFailure;
   const status = failure.response?.status;
-  if (online === false || failure.code === 'ERR_NETWORK' || (!status && (failure.code === 'ECONNABORTED' || failure.code === 'ETIMEDOUT'))) {
+  if (failure.code === 'ERR_NETWORK') return { kind: 'network' };
+  if (!status && (online === false || failure.code === 'ECONNABORTED' || failure.code === 'ETIMEDOUT')) {
     return { kind: 'network' };
   }
   if (status === 404) return { kind: 'unknown-code' };
