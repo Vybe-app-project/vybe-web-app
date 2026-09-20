@@ -89,6 +89,8 @@ const AdminTrainers = lazy(() => import('./pages/admin/AdminTrainers'));
 const AdminAdmins = lazy(() => import('./pages/admin/AdminAdmins'));
 const AdminAudit = lazy(() => import('./pages/admin/AdminAudit'));
 const AdminSystem = lazy(() => import('./pages/admin/AdminSystem'));
+// Feature flags (Wave G admin contract): GET /api/admin/flags and PUT /api/admin/flags/:name.
+const AdminFlags = lazy(() => import('./pages/admin/AdminFlags'));
 const AdminCatalog = lazy(() => import('./pages/admin/AdminCatalog'));
 const AdminCatalogWorkout = lazy(() => import('./pages/admin/AdminCatalogWorkout'));
 const AdminCatalogPlan = lazy(() => import('./pages/admin/AdminCatalogPlan'));
@@ -305,6 +307,7 @@ export default function App() {
               <Route path="admins" element={<AdminAdmins />} />
               <Route path="audit" element={<AdminAudit />} />
               <Route path="system" element={<AdminSystem />} />
+              <Route path="flags" element={<AdminFlags />} />
               {/* Unknown console URLs stay in the console. */}
               <Route path="*" element={<Navigate to="/admin" replace />} />
             </Route>
