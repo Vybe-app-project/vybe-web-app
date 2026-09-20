@@ -490,10 +490,10 @@ test('the invite surfaces hide behind features.invites, treat 404 FEATURE_DISABL
   const settings = read('src/pages/Settings.tsx');
   assert.match(settings, /import InviteCodeSection from '\.\/settings\/InviteCodeSection';/);
   assert.match(settings, /import InviteFriendsSection from '\.\/settings\/InviteFriendsSection';/);
-  assert.match(settings, /<AccountSection \/>\s*<InviteCodeSection \/>/, 'Have a code? sits right under Account');
+  assert.match(settings, /<AccountSection \/>\s*<HomeGymSection \/>\s*<InviteCodeSection \/>/, 'Have a code? sits under Account and the Home gym card');
   assert.equal((settings.match(/<InviteFriendsSection \/>/g) || []).length, 1);
   assert.equal((settings.match(/<InviteCodeSection \/>/g) || []).length, 1);
-  assert.match(settings, /<PrivacySection \/>\s*<AccountPreferenceSections \/>\s*<InviteFriendsSection \/>/, 'Invite friends follows the privacy block (Privacy › preferences is pinned elsewhere)');
+  assert.match(settings, /<InviteCodeSection \/>\s*<InviteFriendsSection \/>\s*<CoachingSection \/>/, 'Invite friends follows Have a code? in the Account group');
   assert.match(settings, /subtitle="Account, appearance, units, notifications and privacy\."/, 'the subtitle is unchanged');
 
   const friendsSection = read('src/pages/settings/InviteFriendsSection.tsx');

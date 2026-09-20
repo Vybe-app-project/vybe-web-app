@@ -27,7 +27,7 @@ export function SettingsCard({
   padded?: boolean;
 }) {
   return (
-    <Card id={id} role="region" aria-labelledby={`${id}-title`} className={cx('scroll-mt-20', className)} padded={padded}>
+    <Card id={id} role="region" aria-labelledby={`${id}-title`} className={cx('scroll-mt-28 lg:scroll-mt-20', className)} padded={padded}>
       <div className={cx(!padded && 'px-4 pt-4 sm:px-5 sm:pt-5')}>
         <h2 id={`${id}-title`} className={cx('type-heading text-lg text-text-1', titleClassName)}>
           {title}

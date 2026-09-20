@@ -207,10 +207,13 @@ test('every PUT /users/settings body the web sends is inside the backend allow-l
     for (const match of source.matchAll(re)) callSites.push({ file: path.relative(root, file), arg: match[1].trim() });
   }
   assert.ok(callSites.length >= 3, `expected the privacy, preference-sync and settings-card writers, found ${callSites.length}`);
+  // `homeGym` is accepted by the deployed API (gym-first API.md §1: `{ community }`, `{ place }` or null);
+  // the Settings Home gym card writes it as a literal until the typed SettingsPatch carries the key.
+  const literalKeys = [...BACKEND_SETTINGS_KEYS, 'homeGym'];
   for (const { file, arg } of callSites) {
     if (arg.startsWith('{')) {
       const first = arg.match(/^\{\s*([A-Za-z]+)/)?.[1];
-      assert.ok(first && BACKEND_SETTINGS_KEYS.includes(first), `${file}: literal body starts with "${first}", not an allow-listed key`);
+      assert.ok(first && literalKeys.includes(first), `${file}: literal body starts with "${first}", not an allow-listed key`);
     } else {
       assert.equal(arg, 'patch', `${file}: a non-literal body must be the typed \`patch\` variable`);
       const source = read(file);
@@ -240,7 +243,7 @@ test('Settings mounts the preference cards once and the new controls send only t
   assert.match(prefs, /<SettingsCard\s+id="comments"/);
   assert.match(prefs, /<SettingsCard id="accessibility"/);
   assert.equal((settings.match(/<AccountPreferenceSections \/>/g) || []).length, 1, 'one mount point');
-  assert.match(settings, /<PrivacySection \/>\s*<AccountPreferenceSections \/>/, 'mounted right after Privacy');
+  assert.match(settings, /<UnitsSection \/>\s*<AccountPreferenceSections \/>/, 'mounted in the Preferences group, right after Units');
   assert.match(settings, /<UnitsSection \/>/);
   // Comments: default policy + approve first.
   assert.match(prefs, /label="Who can comment by default"/);
