@@ -334,7 +334,9 @@ test('Live is gated on features.live as well as the relay, everywhere it is prom
   assert.doesNotMatch(read('src/pages/admin/AdminSystem.tsx'), /useCapabilities|useLiveEnabled/);
   // Nobody else reads the old shape. Achievements reads `features` plus the
   // query's isSuccess (Claim never flashes before the answer), not the relay.
-  const consumers = ['src/components/Layout.tsx', 'src/pages/Livestreams.tsx', 'src/lib/capabilities.ts', 'src/pages/Achievements.tsx'];
+  // The first-week card reads the optional kill switch `features.getStartedCard === false`
+  // through the shared hook and never the relay (tests/first-week-home.test.mjs pins that).
+  const consumers = ['src/components/Layout.tsx', 'src/pages/Livestreams.tsx', 'src/lib/capabilities.ts', 'src/pages/Achievements.tsx', 'src/pages/FirstWeekCard.tsx'];
   const walk = (dir) => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]));
   for (const file of walk('src').filter((f) => /\.tsx?$/.test(f) && !consumers.includes(f))) {
     assert.doesNotMatch(read(file), /useCapabilities|liveVideoEnabled|useLiveEnabled/, `${file} reads capabilities outside the shared hook`);

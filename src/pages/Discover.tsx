@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useDebounced, type Post, type PublicUser } from '../lib/hooks';
@@ -122,7 +123,26 @@ function PeopleList({
 }
 
 export default function Discover() {
-  const [tab, setTab] = useState<TabKey>('recommended');
+  // ?tab=people (the first-week card's "Follow someone", the WelcomeSheet's
+  // "See more") opens that tab; the URL follows the tab so Back returns to it.
+  const [params, setParams] = useSearchParams();
+  const urlTab = params.get('tab');
+  const [tab, setTab] = useState<TabKey>(urlTab && isTabKey(urlTab) ? urlTab : 'recommended');
+  useEffect(() => {
+    if (urlTab && isTabKey(urlTab)) setTab(urlTab);
+  }, [urlTab]);
+  const selectTab = (key: TabKey) => {
+    setTab(key);
+    setParams(
+      (prev) => {
+        const n = new URLSearchParams(prev);
+        if (key === 'recommended') n.delete('tab');
+        else n.set('tab', key);
+        return n;
+      },
+      { replace: true },
+    );
+  };
   const [peopleQuery, setPeopleQuery] = useState('');
   const [coachQuery, setCoachQuery] = useState('');
   const peopleSearch = useDebounced(peopleQuery.trim(), 300);
@@ -137,7 +157,7 @@ export default function Discover() {
           tabs={TABS.map((t) => ({ key: t.key, label: t.label }))}
           value={tab}
           onChange={(key) => {
-            if (isTabKey(key)) setTab(key);
+            if (isTabKey(key)) selectTab(key);
           }}
         />
 

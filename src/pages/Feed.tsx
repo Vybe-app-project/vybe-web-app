@@ -46,6 +46,7 @@ import {
 import { ArrowUp, Image as ImageIcon, Refresh, UserPlus, Video as VideoIcon, X } from './icons';
 import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors } from './PostCard';
 import { StoryTray } from './StoryTray';
+import FirstWeekCard from './FirstWeekCard';
 
 const MAX_CHARS = 2000;
 
@@ -612,6 +613,7 @@ export default function Feed() {
       <div className="space-y-4">
         <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
         <StoryTray variant="home" />
+        <FirstWeekCard />
         <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
         <TrendingHashtags />
 
