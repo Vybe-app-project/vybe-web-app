@@ -261,6 +261,10 @@ button, [role='button'], a { -webkit-tap-highlight-color: transparent; }
   button { font: inherit; color: inherit; }
 }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Programmatic focus targets (the page region after a route change, the skip
+   link's destination) are not controls; the ring on them drew a blue rule
+   down the left edge of every page. Unlayered, so it wins over the rule above. */
+main#main:focus-visible, [tabindex='-1']:not(input):not(textarea):not(select):not(button):not(a):focus-visible { outline: none; }
 ::selection { background: var(--brand-soft); color: var(--text-1); }
 
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
@@ -379,6 +383,14 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
 
 @utility btn-link { background: transparent; color: var(--brand-text); padding: 0 4px; min-height: 0; }
 .btn-link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Ink fill: the "do this next" control where the page's brand blue is already
+   spent (empty states, a recent workout's Start). Unlayered like the other
+   .btn-* state rules so it wins over .btn-secondary's hover. */
+.btn.btn-ink, .btn.btn-ink:hover:not(:disabled) { border-color: transparent; color: var(--bg); }
+.btn.btn-ink { background: var(--text-1); }
+.btn.btn-ink:hover:not(:disabled) { background: color-mix(in oklab, var(--text-1) 88%, var(--bg)); }
+.btn.btn-ink:disabled { background: var(--surface-3); color: var(--text-3); }
 
 @utility input-base {
   width: 100%; min-height: 44px;
@@ -533,6 +545,13 @@ input[type='range'] { accent-color: var(--brand); }
   view-transition-name: gym-band;
 }
 .gym-band[data-variant='full'] { --band-h: var(--band-h-full); }
+/* No gym yet: the "find your gym" prompt is an empty state, not a hero. It keeps
+   the cover so the shell reads the same, but at hub height, so the page's own
+   content (composer, feed, hubs) is above the fold on a laptop. */
+.gym-band[data-variant='full'][data-empty='true'] { --band-h: var(--band-h-hub); }
+@media (min-width: 64rem) {
+  .gym-band[data-variant='full'][data-empty='true'] { --band-h: clamp(148px, 10vw + 96px, 200px); }
+}
 /* CSS owns the number where scroll-driven animations exist (lib/gymBand.ts sets the mode). */
 .gym-band[data-collapse='css'] {
   animation: band-collapse linear both;
@@ -612,6 +631,23 @@ input[type='range'] { accent-color: var(--brand); }
 .gym-band-context-link svg { color: var(--mark-on-navy); }
 .gym-band-context-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .gym-band-body-copy { margin-top: 8px; max-width: 34ch; font-size: var(--text-base); line-height: 1.45; color: var(--band-ink-2); }
+/* The empty band is one row: copy left, the action right, both bottom-aligned. */
+.gym-band[data-empty='true'] .gym-band-main-full { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+.gym-band[data-empty='true'] .gym-band-title { font-size: var(--text-h1); }
+.gym-band[data-empty='true'] .gym-band-body-copy { margin-top: 4px; font-size: var(--text-sm); }
+.gym-band[data-empty='true'] .gym-band-actions { margin-top: 10px; }
+@media (min-width: 40rem) {
+  .gym-band[data-empty='true'] .gym-band-main-full > .min-w-0 { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--section-gap); align-items: end; }
+  .gym-band[data-empty='true'] .gym-band-main-full > .min-w-0 > :not(.gym-band-actions) { grid-column: 1; }
+  .gym-band[data-empty='true'] .gym-band-actions { grid-column: 2; grid-row: 1 / span 3; margin-top: 0; align-self: end; }
+}
+/* A glass button on the band: secondary controls there sit on navy, where the
+   light surface-2 fill read as a disabled control. */
+.gym-band .btn-secondary, .gym-band .btn-ghost {
+  background: var(--band-chip); border-color: var(--band-chip-line); color: var(--band-ink);
+  backdrop-filter: blur(8px);
+}
+.gym-band .btn-secondary:hover:not(:disabled), .gym-band .btn-ghost:hover:not(:disabled) { background: color-mix(in oklab, var(--band-chip) 100%, white 10%); }
 
 .gym-band-now { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: var(--text-sm); font-weight: 600; color: var(--band-ink); }
 .gym-band-stack { display: inline-flex; align-items: center; gap: 8px; }
@@ -663,6 +699,16 @@ input[type='range'] { accent-color: var(--brand); }
 .gym-band .skeleton::after { background: linear-gradient(90deg, transparent, var(--band-chip-line), transparent); }
 
 ::view-transition-old(gym-band), ::view-transition-new(gym-band) { animation: none; }
+
+/* ------------------------------------------------------------------ auth hero
+ * Login.tsx AuthShell. The signed-out left panel wears the same navy cover art
+ * as the gym band, so the app's two dark surfaces read as one brand.
+ */
+.auth-hero { background: var(--cover-art); }
+.auth-hero-geo { position: absolute; border-radius: 50%; pointer-events: none; }
+.auth-hero-geo-1 { right: -12%; top: -18%; width: clamp(240px, 32vw, 480px); height: clamp(240px, 32vw, 480px); border: clamp(36px, 5vw, 76px) solid var(--band-geo); }
+.auth-hero-geo-2 { left: -10%; bottom: -14%; width: clamp(200px, 26vw, 400px); height: clamp(200px, 26vw, 400px); background: var(--band-geo-2); }
+@media (max-width: 63.99rem) { .auth-hero-geo-1 { width: 240px; height: 240px; border-width: 36px; right: -80px; top: -90px; } .auth-hero-geo-2 { display: none; } }
 
 /* ------------------------------------------------------------------ recharts */
 .recharts-default-tooltip { border-radius: var(--radius-sm) !important; }
