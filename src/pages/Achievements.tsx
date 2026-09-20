@@ -1,10 +1,29 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, isValid, parseISO } from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { featureEnabled, useCapabilities } from '../lib/capabilities';
 import {
-  Badge,
+  CATEGORIES,
+  RARITIES,
+  awardState,
+  categoryOf,
+  criteriaExplainer,
+  criteriaUnit,
+  filterOptionsFrom,
+  isNewAward,
+  isVisible,
+  rarityOf,
+  showClaim,
+  summarize,
+  withMemberFields,
+  type Achievement,
+  type AchievementListResponse,
+  type Category,
+  type Rarity,
+} from '../lib/achievements';
+import { useMyAchievements } from '../lib/useMyAchievements';
+import {
   Button,
   Callout,
   Card,
@@ -12,9 +31,7 @@ import {
   ErrorState,
   Modal,
   PageHeader,
-  Progress,
   Ring,
-  Section,
   Select,
   Skeleton,
   Spinner,
@@ -23,80 +40,33 @@ import {
   Tabs,
   cx,
   formatStat,
-  humanize,
-  usePulse,
   useToast,
 } from '../components/ui';
 import {
   Award,
   CalendarDays,
-  Check,
   CheckCircle,
-  ChevronRight,
   Clock,
   Dumbbell,
-  Flame,
   Medal,
-  Plate,
   Sparkles,
-  Star,
   Target,
   Trophy,
   Users,
 } from '../components/icons';
+import {
+  AchievementGrid,
+  BadgeTile,
+  CATEGORY_LABEL,
+  RARITY_STYLE,
+  RarityChip,
+  earnedLine,
+  fmtDate,
+} from './AchievementCard';
+
+export type { Achievement } from '../lib/achievements';
 
 /* ------------------------------------------------------------------ types */
-
-type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
-type Category =
-  | 'workout'
-  | 'nutrition'
-  | 'social'
-  | 'streak'
-  | 'milestone'
-  | 'special'
-  | 'seasonal';
-
-export type Achievement = {
-  _id: string;
-  name: string;
-  title: string;
-  description: string;
-  category: Category;
-  type?: 'single' | 'progressive' | 'recurring' | 'hidden';
-  icon: string;
-  iconColor?: string;
-  rarity: Rarity;
-  criteria: {
-    type: string;
-    value: number;
-    timeframe?: string;
-  };
-  rewards?: {
-    points?: number;
-    coins?: number;
-    experience?: number;
-    badges?: string[];
-    unlocks?: string[];
-  };
-  isSeasonal?: boolean;
-  season?: { startDate?: string; endDate?: string };
-  stats?: { totalEarned?: number; totalUsers?: number; completionRate?: number };
-  display?: { showProgress?: boolean; showPercentage?: boolean; order?: number };
-  /* Present only on GET /achievements/user */
-  isEarned?: boolean;
-  earnedAt?: string | null;
-  progress?: number;
-  required?: number;
-  progressPercentage?: number;
-  canClaim?: boolean;
-};
-
-type AchievementListResponse = {
-  success: boolean;
-  achievements: Achievement[];
-  pagination?: { page: number; limit: number; total: number; pages: number };
-};
 
 type AchievementProgress = {
   current: number;
@@ -107,117 +77,8 @@ type AchievementProgress = {
 
 type ClaimRewards = { points?: number; coins?: number; experience?: number };
 
-const RARITIES: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
-
-const CATEGORIES: Category[] = [
-  'workout',
-  'nutrition',
-  'social',
-  'streak',
-  'milestone',
-  'special',
-  'seasonal',
-];
-
-/**
- * Visual treatment per rarity tier, expressed only in semantic tokens.
- * Common is quiet, uncommon is the brand mint, rare is sky, epic is the
- * lilac viz colour (text stays `text-1` so it holds contrast in light mode),
- * legendary is gold. Ember is NOT used here — it is reserved for effort
- * (streaks and things ready to claim), per the design direction.
- */
-const RARITY_STYLE: Record<
-  Rarity,
-  {
-    label: string;
-    tile: string;
-    chip: string;
-    bar: 'brand' | 'protein' | 'alt' | 'carbs';
-    ring: 'brand' | 'protein' | 'alt' | 'carbs';
-  }
-> = {
-  common: {
-    label: 'Common',
-    tile: 'bg-surface-2 text-text-2',
-    chip: 'bg-surface-2 text-text-2 border border-line',
-    bar: 'brand',
-    ring: 'brand',
-  },
-  uncommon: {
-    label: 'Uncommon',
-    tile: 'bg-brand-soft text-brand-text',
-    chip: 'bg-brand-soft text-brand-text',
-    bar: 'brand',
-    ring: 'brand',
-  },
-  rare: {
-    label: 'Rare',
-    tile: 'bg-info-soft text-info-text',
-    chip: 'bg-info-soft text-info-text',
-    bar: 'protein',
-    ring: 'protein',
-  },
-  epic: {
-    label: 'Epic',
-    tile: 'bg-viz-alt/20 text-text-1 [&_svg]:text-viz-alt',
-    chip: 'bg-viz-alt/20 text-text-1',
-    bar: 'alt',
-    ring: 'alt',
-  },
-  legendary: {
-    label: 'Legendary',
-    tile: 'bg-warning-soft text-warning-text',
-    chip: 'bg-warning-soft text-warning-text',
-    bar: 'carbs',
-    ring: 'carbs',
-  },
-};
-
-const RARITY_ORDER: Record<Rarity, number> = {
-  legendary: 0,
-  epic: 1,
-  rare: 2,
-  uncommon: 3,
-  common: 4,
-};
-
-const CATEGORY_LABEL: Record<Category, string> = {
-  workout: 'Training',
-  nutrition: 'Nutrition',
-  social: 'Community',
-  streak: 'Consistency',
-  milestone: 'Milestones',
-  special: 'Special',
-  seasonal: 'Seasonal',
-};
-
-/** One stroke icon per category — replaces the platform-dependent emoji. */
-const CATEGORY_ICON: Record<Category, (props: { size?: number; filled?: boolean }) => ReactNode> = {
-  workout: (p) => <Dumbbell {...p} />,
-  nutrition: (p) => <Plate {...p} />,
-  social: (p) => <Users {...p} />,
-  streak: (p) => <Flame {...p} />,
-  milestone: (p) => <Target {...p} />,
-  special: (p) => <Sparkles {...p} />,
-  seasonal: (p) => <CalendarDays {...p} />,
-};
-
-const rarityOf = (a: Achievement): Rarity =>
-  RARITIES.includes(a.rarity) ? a.rarity : 'common';
-
-const categoryOf = (a: Achievement): Category =>
-  CATEGORIES.includes(a.category) ? a.category : 'special';
-
-const fmtDate = (iso?: string | null) => {
-  if (!iso) return '';
-  const d = parseISO(iso);
-  return isValid(d) ? format(d, 'MMM d, yyyy') : '';
-};
-
+/** utils/localDate.js expects Date#getTimezoneOffset's sign (UTC minus local). */
 const tzOffset = () => new Date().getTimezoneOffset();
-
-/** "12 / 20 workouts" — the criteria key is an enum, so humanise it. */
-const criteriaLabel = (a: Achievement) => humanize(a.criteria?.type).toLowerCase();
 
 const rewardSummary = (r?: ClaimRewards | null) =>
   [
@@ -226,181 +87,10 @@ const rewardSummary = (r?: ClaimRewards | null) =>
     r?.experience ? `${formatStat(r.experience)} XP` : '',
   ].filter(Boolean);
 
+const isNotFound = (error: unknown) =>
+  (error as { response?: { status?: number } } | undefined)?.response?.status === 404;
+
 /* --------------------------------------------------------------- sub views */
-
-function RarityChip({ rarity, size = 'md' }: { rarity: Rarity; size?: 'sm' | 'md' }) {
-  const style = RARITY_STYLE[rarity];
-  const strong = rarity === 'epic' || rarity === 'legendary';
-  return (
-    <span
-      className={cx(
-        'inline-flex items-center gap-1 whitespace-nowrap rounded-xs font-semibold',
-        size === 'sm' ? 'h-5 px-1.5 text-2xs' : 'h-6 px-2 text-2xs',
-        style.chip,
-      )}
-    >
-      <Star size={12} filled={strong} />
-      {style.label}
-    </span>
-  );
-}
-
-function BadgeTile({
-  achievement,
-  size = 'md',
-  className,
-  earned,
-}: {
-  achievement: Achievement;
-  size?: 'md' | 'lg';
-  className?: string;
-  earned?: boolean;
-}) {
-  const rarity = rarityOf(achievement);
-  const Icon = CATEGORY_ICON[categoryOf(achievement)];
-  return (
-    <div
-      className={cx(
-        'flex shrink-0 items-center justify-center rounded-md',
-        size === 'lg' ? 'h-16 w-16' : 'h-12 w-12',
-        RARITY_STYLE[rarity].tile,
-        earned === false && 'opacity-70 saturate-50',
-        className,
-      )}
-      aria-hidden="true"
-    >
-      {Icon({ size: size === 'lg' ? 30 : 22 })}
-    </div>
-  );
-}
-
-function AchievementCard({
-  achievement,
-  onClaim,
-  claiming,
-  celebrate,
-  onOpen,
-}: {
-  achievement: Achievement;
-  onClaim: () => void;
-  claiming: boolean;
-  /** Flips to true once right after a successful claim to play the spring. */
-  celebrate: boolean;
-  onOpen: () => void;
-}) {
-  const rarity = rarityOf(achievement);
-  const style = RARITY_STYLE[rarity];
-  const earned = Boolean(achievement.isEarned);
-  const required = achievement.required ?? achievement.criteria?.value ?? 1;
-  const current = achievement.progress ?? 0;
-  const percent =
-    achievement.progressPercentage ??
-    (required > 0 ? Math.min((current / required) * 100, 100) : 0);
-  // "9 / 1 posts" reads as a bug; once the target is met the count caps there.
-  const shown = Math.min(current, required);
-  const claimable = Boolean(achievement.canClaim) && !earned;
-  const { className: pulseClass, pulse } = usePulse();
-
-  useEffect(() => {
-    if (celebrate) pulse();
-  }, [celebrate, pulse]);
-
-  return (
-    <Card
-      interactive
-      padded={false}
-      className={cx(
-        'relative flex h-full flex-col gap-3 p-4',
-        claimable && 'border-accent/40',
-        earned && 'border-brand/30',
-      )}
-    >
-      {/* Whole-card target; controls below sit above it. */}
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={`${achievement.title}: details`}
-        className="absolute inset-0 z-[1] rounded-[inherit]"
-      />
-
-      <div className="flex items-start gap-3">
-        <BadgeTile achievement={achievement} earned={earned || claimable} className={pulseClass} />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-md font-semibold text-text-1">{achievement.title}</h3>
-          <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-text-2">
-            {achievement.description}
-          </p>
-        </div>
-        {earned ? (
-          <span
-            className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-text"
-            aria-label="Earned"
-            role="img"
-          >
-            <Check size={16} />
-          </span>
-        ) : null}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        <RarityChip rarity={rarity} />
-        {achievement.isSeasonal ? (
-          <Badge tone="warning">
-            <CalendarDays size={12} /> Seasonal
-          </Badge>
-        ) : null}
-        {achievement.rewards?.points ? (
-          <Badge tone="brand" className="tabular">+{formatStat(achievement.rewards.points)} pts</Badge>
-        ) : null}
-        {achievement.rewards?.experience ? (
-          <Badge tone="info" className="tabular">+{formatStat(achievement.rewards.experience)} XP</Badge>
-        ) : null}
-      </div>
-
-      {earned ? (
-        <p className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-text">
-          <Trophy size={14} /> Earned {fmtDate(achievement.earnedAt) || 'recently'}
-        </p>
-      ) : (
-        <div className="space-y-1.5">
-          <Progress
-            value={percent}
-            size="sm"
-            tone={claimable ? 'accent' : style.bar}
-            label={`${achievement.title} progress`}
-          />
-          <p className="flex items-baseline justify-between text-xs text-text-2">
-            <span className="tabular">
-              {formatStat(shown)} / {formatStat(required)} {criteriaLabel(achievement)}
-            </span>
-            <span className={cx('tabular font-semibold', claimable ? 'text-accent-text' : 'text-text-1')}>
-              {current >= required ? 'Criteria met' : `${Math.round(percent)}%`}
-            </span>
-          </p>
-        </div>
-      )}
-
-      <div className="mt-auto pt-1">
-        {claimable ? (
-          <Button
-            variant="primary"
-            block
-            loading={claiming}
-            onClick={onClaim}
-            icon={<Award size={18} />}
-            className="relative z-[2]"
-          >
-            Claim reward
-          </Button>
-        ) : (
-          <span className="inline-flex h-6 items-center gap-1 text-xs font-semibold text-text-2">
-            Details <ChevronRight size={14} />
-          </span>
-        )}
-      </div>
-    </Card>
-  );
-}
 
 function RewardTile({ label, value }: { label: string; value: number }) {
   return (
@@ -413,11 +103,15 @@ function RewardTile({ label, value }: { label: string; value: number }) {
 
 function DetailModal({
   achievement,
+  claimAllowed,
+  autoAward,
   onClose,
   onClaim,
   claiming,
 }: {
   achievement: Achievement | null;
+  claimAllowed: boolean;
+  autoAward: boolean;
   onClose: () => void;
   onClaim: (a: Achievement) => void;
   claiming: boolean;
@@ -437,8 +131,15 @@ function DetailModal({
   const rarity = achievement ? rarityOf(achievement) : 'common';
   const style = RARITY_STYLE[rarity];
   const earned = Boolean(achievement?.isEarned);
-  const claimable = Boolean(achievement && !earned && (achievement.canClaim || data?.canEarn));
+  const met = Boolean(achievement && !earned && (achievement.canClaim || data?.canEarn));
+  const claimable = claimAllowed && met;
   const percent = data?.percentage ?? achievement?.progressPercentage ?? 0;
+  const criteriaType = achievement?.criteria?.type;
+  const explainer = criteriaExplainer(criteriaType);
+  const coins = achievement?.rewards?.coins ?? 0;
+  // Auto-award never grants coins (only the claim route does), so the tile stays honest.
+  const showCoins = !autoAward && coins > 0;
+  const remaining = data ? Math.max(0, data.required - data.current) : 0;
 
   return (
     <Modal
@@ -469,10 +170,11 @@ function DetailModal({
       {achievement ? (
         <div className="space-y-5">
           <div className="flex items-center gap-4">
-            <BadgeTile achievement={achievement} size="lg" earned={earned || claimable} />
+            <BadgeTile achievement={achievement} size="lg" earned={earned || met} />
             <div className="min-w-0 space-y-1.5">
               <RarityChip rarity={rarity} />
               <p className="text-sm leading-relaxed text-text-2">{achievement.description}</p>
+              {explainer ? <p className="text-xs leading-5 text-text-2">{explainer}</p> : null}
             </div>
           </div>
 
@@ -485,7 +187,7 @@ function DetailModal({
               <Ring
                 value={earned ? 100 : percent}
                 size={88}
-                color={claimable ? 'accent' : style.ring}
+                color={met ? 'accent' : style.ring}
                 label="Progress"
               >
                 {earned ? <CheckCircle size={28} className="text-brand" /> : <span className="text-xl">{Math.round(percent)}%</span>}
@@ -494,8 +196,12 @@ function DetailModal({
                 <p className="type-label text-text-2">Progress</p>
                 {earned ? (
                   <>
-                    <p className="text-md font-semibold text-text-1">Earned {fmtDate(achievement.earnedAt) || 'recently'}</p>
-                    <p className="text-xs text-text-2">This badge is in your collection.</p>
+                    <p className="text-md font-semibold text-text-1">{earnedLine(achievement)}</p>
+                    <p className="text-xs text-text-2">
+                      {awardState(achievement).kind === 'awarded'
+                        ? 'Awarded for a record you already had. This badge is in your collection.'
+                        : 'This badge is in your collection.'}
+                    </p>
                   </>
                 ) : data ? (
                   <>
@@ -503,13 +209,17 @@ function DetailModal({
                       {formatStat(Math.min(data.current, data.required))}
                       <span className="text-text-3"> / {formatStat(data.required)}</span>
                       <span className="ml-1.5 align-baseline text-xs font-semibold tracking-normal text-text-2 [font-variation-settings:'wdth'_100]">
-                        {criteriaLabel(achievement)}
+                        {criteriaUnit(criteriaType, data.required)}
                       </span>
                     </p>
                     <p className={cx('text-xs', data.canEarn ? 'font-semibold text-accent-text' : 'text-text-2')}>
                       {data.canEarn
-                        ? 'Criteria met. Claim it to bank the reward.'
-                        : `${formatStat(Math.max(0, data.required - data.current))} ${criteriaLabel(achievement)} to go.`}
+                        ? autoAward
+                          ? 'Criteria met. Your award arrives on its own.'
+                          : claimAllowed
+                            ? 'Criteria met. Claim it to bank the reward.'
+                            : 'Criteria met.'
+                        : `${formatStat(remaining)} ${criteriaUnit(criteriaType, remaining)} to go.`}
                     </p>
                   </>
                 ) : (
@@ -519,9 +229,9 @@ function DetailModal({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className={cx('grid gap-2', showCoins ? 'grid-cols-3' : 'grid-cols-2')}>
             <RewardTile label="Points" value={achievement.rewards?.points ?? 0} />
-            <RewardTile label="Coins" value={achievement.rewards?.coins ?? 0} />
+            {showCoins ? <RewardTile label="Coins" value={coins} /> : null}
             <RewardTile label="XP" value={achievement.rewards?.experience ?? 0} />
           </div>
 
@@ -538,9 +248,6 @@ function DetailModal({
                 <span className="tabular">
                   Earned by {formatStat(achievement.stats.totalEarned)} athlete
                   {achievement.stats.totalEarned === 1 ? '' : 's'}
-                  {typeof achievement.stats.completionRate === 'number'
-                    ? ` (${Math.round(achievement.stats.completionRate)}% of Vybe)`
-                    : ''}
                 </span>
               </li>
             ) : null}
@@ -581,6 +288,16 @@ export default function Achievements() {
   const toast = useToast();
   const me = useAuth((s) => s.user);
 
+  /*
+   * Under auto-award the server grants badges the moment a trigger fires and
+   * the Claim route is retired from the UI. Claim is offered only once the
+   * capabilities answer has arrived AND says the flag is off, so it never
+   * flashes for a frame on production.
+   */
+  const capabilities = useCapabilities();
+  const autoAward = featureEnabled(capabilities.data?.features, 'achievementAutoAward');
+  const claimAllowed = capabilities.isSuccess && !autoAward;
+
   const [tab, setTab] = useState<TabKey>('mine');
   const [category, setCategory] = useState<'' | Category>('');
   const [rarity, setRarity] = useState<'' | Rarity>('');
@@ -592,18 +309,10 @@ export default function Achievements() {
   /*
    * The member's whole set, unfiltered and always loaded: the summary tiles
    * read from it on every tab, and the catalogue tab merges its earned and
-   * claimable flags in. Deriving the tiles from the visible list made "All
+   * award flags in. Deriving the tiles from the visible list made "All
    * badges" show Earned 0 and Points banked 0 the moment you switched tabs.
    */
-  const summaryQuery = useQuery({
-    queryKey: ['achievements', 'user', 'summary'],
-    queryFn: async (): Promise<Achievement[]> => {
-      const { data } = await api.get<AchievementListResponse>('/achievements/user', {
-        params: { timezoneOffsetMinutes: tzOffset() },
-      });
-      return data.achievements ?? [];
-    },
-  });
+  const summaryQuery = useMyAchievements();
 
   /* Personalised list: earned flags, progress and claimability. */
   const userAchievements = useQuery({
@@ -670,20 +379,40 @@ export default function Achievements() {
       );
       setCelebrateId(achievement._id);
       // Reflect the earned state immediately so the card springs in place.
+      const now = new Date().toISOString();
       qc.setQueriesData<Achievement[]>({ queryKey: ['achievements'] }, (list) =>
         Array.isArray(list)
           ? list.map((a) =>
               a._id === achievement._id
-                ? { ...a, isEarned: true, canClaim: false, earnedAt: new Date().toISOString() }
+                ? { ...a, isEarned: true, canClaim: false, earnedAt: now, awardedBy: 'claim', ackedAt: now }
                 : a,
             )
           : list,
       );
-      setDetail((d) => (d && d._id === achievement._id ? { ...d, isEarned: true, canClaim: false } : d));
+      setDetail((d) => (d && d._id === achievement._id ? { ...d, isEarned: true, canClaim: false, awardedBy: 'claim' } : d));
       qc.invalidateQueries({ queryKey: ['achievements'] });
     },
     onError: (e) => toast.error(errMsg(e, 'Could not claim that badge. Try again.')),
     onSettled: () => setClaimingId(null),
+  });
+
+  /*
+   * Mark new awards as seen so another device does not replay the notice.
+   * Best effort: a 404 means the row is not (or no longer) earned, and any
+   * other failure only means the notice shows once more.
+   */
+  const ack = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.post(`/achievements/${id}/ack`)));
+      return results.filter((r) => r.status === 'rejected' && !isNotFound(r.reason)).length;
+    },
+    onMutate: (ids) => {
+      const now = new Date().toISOString();
+      qc.setQueriesData<Achievement[]>({ queryKey: ['achievements', 'user'] }, (list) =>
+        Array.isArray(list) ? list.map((a) => (ids.includes(a._id) && !a.ackedAt ? { ...a, ackedAt: now } : a)) : list,
+      );
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['achievements', 'user'] }),
   });
 
   useEffect(() => {
@@ -707,50 +436,27 @@ export default function Achievements() {
     if (tab !== 'mine' && summaryQuery.data) {
       // The catalogue endpoints carry no per-member flags; borrow them.
       const mine = new Map(summaryQuery.data.map((a) => [a._id, a]));
-      list = list.map((a) => {
-        const own = mine.get(a._id);
-        return own
-          ? { ...a, isEarned: own.isEarned, earnedAt: own.earnedAt, progress: own.progress, required: own.required, progressPercentage: own.progressPercentage, canClaim: own.canClaim }
-          : a;
-      });
+      list = list.map((a) => withMemberFields(a, mine.get(a._id)));
     }
-    return list;
+    // Retired definitions stay out of the way unless already earned.
+    return list.filter(isVisible);
   }, [active.data, tab, category, rarity, summaryQuery.data]);
 
-  const grouped = useMemo(() => {
-    const buckets = new Map<Category, Achievement[]>();
-    for (const a of items) {
-      const key = categoryOf(a);
-      const bucket = buckets.get(key);
-      if (bucket) bucket.push(a);
-      else buckets.set(key, [a]);
-    }
-    for (const bucket of buckets.values()) {
-      bucket.sort((x, y) => {
-        const claimDelta = Number(Boolean(y.canClaim && !y.isEarned)) - Number(Boolean(x.canClaim && !x.isEarned));
-        if (claimDelta !== 0) return claimDelta;
-        const rarityDelta = RARITY_ORDER[rarityOf(x)] - RARITY_ORDER[rarityOf(y)];
-        return rarityDelta !== 0 ? rarityDelta : x.title.localeCompare(y.title);
-      });
-    }
-    return CATEGORIES.filter((c) => buckets.has(c)).map(
-      (c) => [c, buckets.get(c) as Achievement[]] as const,
-    );
-  }, [items]);
-
   /* Summary tiles: the member's real totals, whatever tab or filter is showing. */
-  const summary = summaryQuery.data ?? [];
-  const summaryLoading = summaryQuery.isLoading;
-  const earnedCount = summary.filter((a) => a.isEarned).length;
-  const claimableItems = summary.filter((a) => a.canClaim && !a.isEarned);
+  const summary = useMemo(() => (summaryQuery.data ?? []).filter(isVisible), [summaryQuery.data]);
+  const stats = useMemo(() => summarize(summary), [summary]);
+  const summaryLoading = summaryQuery.isLoading || capabilities.isLoading;
+  const earnedCount = stats.earned;
+  const claimableItems = useMemo(() => summary.filter((a) => showClaim(a, claimAllowed)), [summary, claimAllowed]);
   const claimableCount = claimableItems.length;
-  const totalPoints = summary.reduce(
-    (sum, a) => (a.isEarned ? sum + (a.rewards?.points ?? 0) : sum),
-    0,
-  );
-  const pendingPoints = claimableItems.reduce((sum, a) => sum + (a.rewards?.points ?? 0), 0);
-  const streakEarned = summary.filter((a) => a.isEarned && categoryOf(a) === 'streak').length;
-  const streakTotal = summary.filter((a) => categoryOf(a) === 'streak').length;
+  const newRows = useMemo(() => summary.filter(isNewAward), [summary]);
+  const totalPoints = stats.points;
+  const pendingPoints = stats.pendingPoints;
+
+  /* Filters offer only what the API returned; a stale option would always yield an empty grid. */
+  const options = useMemo(() => filterOptionsFrom(summary), [summary]);
+  const categoryOptions = summary.length ? options.categories : CATEGORIES;
+  const rarityOptions = summary.length ? options.rarities : RARITIES;
 
   const claimAll = async () => {
     if (!claimableItems.length || claimingAll) return;
@@ -773,6 +479,12 @@ export default function Achievements() {
       const parts = rewardSummary(totals);
       toast.success(`${claimed} badges claimed${parts.length ? `: ${parts.join(', ')}` : ''}`);
     }
+  };
+
+  const openDetail = (a: Achievement) => {
+    setDetail(a);
+    // Opening a new award counts as seeing it.
+    if (isNewAward(a)) ack.mutate([a._id]);
   };
 
   const filtersActive = Boolean(category || rarity);
@@ -799,14 +511,25 @@ export default function Achievements() {
           loading={summaryLoading}
           hint={summary.length ? `${Math.round((earnedCount / summary.length) * 100)}% of all badges` : undefined}
         />
-        <StatTile
-          label="Ready to claim"
-          value={claimableCount}
-          icon={<Sparkles size={20} />}
-          tone={claimableCount > 0 ? 'accent' : 'neutral'}
-          loading={summaryLoading}
-          hint={claimableCount > 0 ? `${formatStat(pendingPoints)} pts waiting` : 'Nothing pending'}
-        />
+        {autoAward ? (
+          <StatTile
+            label="New awards"
+            value={stats.newAwards}
+            icon={<Sparkles size={20} />}
+            tone={stats.newAwards > 0 ? 'accent' : 'neutral'}
+            loading={summaryLoading}
+            hint={stats.newAwards > 0 ? 'Since you last looked' : 'Awards arrive on their own'}
+          />
+        ) : (
+          <StatTile
+            label="Ready to claim"
+            value={claimableCount}
+            icon={<Sparkles size={20} />}
+            tone={claimableCount > 0 ? 'accent' : 'neutral'}
+            loading={summaryLoading}
+            hint={claimableCount > 0 ? `${formatStat(pendingPoints)} pts waiting` : 'Nothing pending'}
+          />
+        )}
         <StatTile
           label="Points banked"
           value={formatStat(totalPoints)}
@@ -814,18 +537,45 @@ export default function Achievements() {
           icon={<Medal size={20} />}
           loading={summaryLoading}
         />
-        <StatTile
-          label="Streak badges"
-          value={streakEarned}
-          unit={streakTotal ? `of ${streakTotal}` : undefined}
-          icon={<Flame size={20} />}
-          tone={streakEarned > 0 ? 'accent' : 'neutral'}
-          loading={summaryLoading}
-          hint={streakTotal ? 'Consistency pays' : 'None yet'}
-        />
+        {stats.weeksKept ? (
+          <StatTile
+            label="Weeks kept"
+            value={Math.min(stats.weeksKept.progress, stats.weeksKept.required)}
+            unit={`of ${stats.weeksKept.required}`}
+            icon={<CalendarDays size={20} />}
+            tone={stats.weeksKept.progress > 0 ? 'accent' : 'neutral'}
+            loading={summaryLoading}
+            hint="Weekly Rhythm"
+          />
+        ) : (
+          <StatTile
+            label="Milestones"
+            value={stats.milestones.earned}
+            unit={stats.milestones.total ? `of ${stats.milestones.total}` : undefined}
+            icon={<Target size={20} />}
+            tone={stats.milestones.earned > 0 ? 'brand' : 'neutral'}
+            loading={summaryLoading}
+            hint={stats.milestones.total ? 'Long-run targets' : 'None yet'}
+          />
+        )}
       </StatGrid>
 
-      {claimableCount > 0 && tab === 'mine' ? (
+      {autoAward && newRows.length > 0 ? (
+        <Callout
+          tone="brand"
+          icon={<Sparkles size={20} className="text-brand" />}
+          title={newRows.length === 1 ? `New award: ${newRows[0].title}` : `${newRows.length} new awards`}
+          action={
+            <Button variant="secondary" loading={ack.isPending} onClick={() => ack.mutate(newRows.map((a) => a._id))}>
+              Got it
+            </Button>
+          }
+        >
+          Awards arrive on their own the moment your record crosses the line.
+        </Callout>
+      ) : null}
+
+      {claimAllowed && claimableCount > 0 && tab === 'mine' ? (
         <Callout
           tone="brand"
           icon={<Sparkles size={20} className="text-accent" />}
@@ -864,7 +614,7 @@ export default function Achievements() {
           onChange={(v) => setCategory(v as '' | Category)}
           options={[
             { value: '', label: 'All categories' },
-            ...CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
+            ...categoryOptions.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
           ]}
         />
         <Select
@@ -874,7 +624,7 @@ export default function Achievements() {
           onChange={(v) => setRarity(v as '' | Rarity)}
           options={[
             { value: '', label: 'All rarities' },
-            ...RARITIES.map((r) => ({ value: r, label: RARITY_STYLE[r].label })),
+            ...rarityOptions.map((r) => ({ value: r, label: RARITY_STYLE[r].label })),
           ]}
         />
         {filtersActive ? (
@@ -918,7 +668,7 @@ export default function Achievements() {
               ? 'Seasonal badges appear here while a season is live.'
               : filtersActive
                 ? 'Widen the category or rarity filter to see more.'
-                : 'Log workouts, meals and streaks and badges unlock as you go.'
+                : 'Log workouts and posts and awards arrive as you go.'
           }
           action={
             filtersActive
@@ -935,52 +685,21 @@ export default function Achievements() {
           }
         />
       ) : (
-        <div className="space-y-8">
-          {grouped.map(([cat, list]) => {
-            const earnedHere = list.filter((a) => a.isEarned).length;
-            return (
-              <Section
-                key={cat}
-                title={
-                  <span className="inline-flex items-center gap-2">
-                    <span className={cx(cat === 'streak' ? 'text-accent' : 'text-brand')}>
-                      {CATEGORY_ICON[cat]({ size: 20 })}
-                    </span>
-                    {CATEGORY_LABEL[cat]}
-                  </span>
-                }
-                action={
-                  tab === 'mine' ? (
-                    <span className="tabular text-xs font-semibold text-text-2">
-                      {earnedHere}/{list.length} earned
-                    </span>
-                  ) : (
-                    <span className="tabular text-xs font-semibold text-text-2">
-                      {list.length} {list.length === 1 ? 'badge' : 'badges'}
-                    </span>
-                  )
-                }
-              >
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {list.map((achievement) => (
-                    <AchievementCard
-                      key={achievement._id}
-                      achievement={achievement}
-                      claiming={claimingId === achievement._id && claim.isPending}
-                      celebrate={celebrateId === achievement._id}
-                      onClaim={() => claim.mutate(achievement)}
-                      onOpen={() => setDetail(achievement)}
-                    />
-                  ))}
-                </div>
-              </Section>
-            );
-          })}
-        </div>
+        <AchievementGrid
+          items={items}
+          claimAllowed={claimAllowed}
+          claimingId={claim.isPending ? claimingId : null}
+          celebrateId={celebrateId}
+          onClaim={(a) => claim.mutate(a)}
+          onOpen={openDetail}
+          showEarnedCounts={tab === 'mine'}
+        />
       )}
 
       <DetailModal
         achievement={detail}
+        claimAllowed={claimAllowed}
+        autoAward={autoAward}
         onClose={() => setDetail(null)}
         claiming={!!detail && claimingId === detail._id && claim.isPending}
         onClaim={(a) => claim.mutate(a)}

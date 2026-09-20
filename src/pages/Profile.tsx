@@ -2,7 +2,10 @@ import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, fieldErrorsOf, mediaUrl } from '../lib/api';
+import { summarize } from '../lib/achievements';
 import { useAuth } from '../lib/auth';
+import { useFeature } from '../lib/capabilities';
+import { useMyAchievements } from '../lib/useMyAchievements';
 import {
   ACCEPTED_IMAGE_TYPES,
   MAX_UPLOAD_BYTES,
@@ -39,8 +42,6 @@ import { Award, Calendar, Camera, ChevronRight, Edit, MapPin, Settings as Settin
 import { UserBadges } from './UserRow';
 import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileSaved, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
 import { HighlightsRow } from './StoryTray';
-
-const tzOffset = () => new Date().getTimezoneOffset();
 
 /** Profile pages read best at post width; the shell owns the gutter. */
 export const PAGE = 'mx-auto w-full max-w-[52rem] space-y-6';
@@ -112,19 +113,13 @@ function ShortcutCard({
 }
 
 function ProfileShortcuts() {
-  const achievements = useQuery({
-    queryKey: ['achievements', 'user', 'summary'],
-    staleTime: 5 * 60_000,
-    queryFn: async () => {
-      const { data } = await api.get('/achievements/user', { params: { timezoneOffsetMinutes: tzOffset() } });
-      const list: Array<{ isEarned?: boolean; canClaim?: boolean }> = data?.achievements || [];
-      return {
-        earned: list.filter((a) => a.isEarned).length,
-        claimable: list.filter((a) => a.canClaim).length,
-        total: list.length,
-      };
-    },
-  });
+  /*
+   * Same list and key as the Achievements page (one shape under one key).
+   * Under auto-award nothing is left to claim; the badge counts awards the
+   * member has not yet seen instead.
+   */
+  const autoAward = useFeature('achievementAutoAward');
+  const achievements = useMyAchievements(summarize);
   const photos = useQuery({
     queryKey: ['progress-photos', 'count'],
     staleTime: 5 * 60_000,
@@ -167,13 +162,17 @@ function ProfileShortcuts() {
           loading={achievements.isLoading}
           value={achievements.isError ? null : achievements.data?.earned}
           hint={
-            achievements.data?.claimable
-              ? `${achievements.data.claimable} to claim`
-              : achievements.data
-                ? `of ${achievements.data.total} earned`
-                : undefined
+            !achievements.data
+              ? undefined
+              : autoAward
+                ? achievements.data.newAwards
+                  ? `${achievements.data.newAwards} new`
+                  : `of ${achievements.data.total} earned`
+                : achievements.data.claimable
+                  ? `${achievements.data.claimable} to claim`
+                  : `of ${achievements.data.total} earned`
           }
-          badge={achievements.data?.claimable || 0}
+          badge={achievements.data ? (autoAward ? achievements.data.newAwards : achievements.data.claimable) : 0}
         />
         <ShortcutCard
           to="/health/photos"
