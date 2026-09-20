@@ -60,7 +60,7 @@ export type GymBandProps = {
   figure?: number | null;
   figureLabel?: string;
   figureUnit?: string;
-  /** Primary CTA (the one mint control on the band). */
+  /** Primary CTA (the one `--brand` control on the band; the mint stays in the pin and cover art). */
   action?: ReactNode;
   secondaryAction?: ReactNode;
   /** Gym-scoped tabs rendered on the band. */

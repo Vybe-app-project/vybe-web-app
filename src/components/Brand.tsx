@@ -4,7 +4,9 @@ import type { SVGProps } from 'react';
  * The Vybe mark: two figures whose raised arms form the "V" — literally
  * training together. Hand-authored on a 24 grid from the shipped mobile
  * LaunchLogo (mint on navy). Drawn in `currentColor` so it themes; the
- * colour is decided by the caller (`text-brand` for the mint mark).
+ * colour is decided by the caller. The mark is the one place the Vybe mint
+ * survives on the Instagram palette: colour it `text-mark`, never
+ * `text-brand` (which is the blue action colour).
  */
 export const BRAND_MARK_VIEWBOX = '0 0 24 24';
 
@@ -69,22 +71,23 @@ export type BrandProps = {
   /** `lockup` = mark + wordmark (default); `mark` = mark only; `wordmark` = text only. */
   variant?: 'lockup' | 'mark' | 'wordmark';
   className?: string;
-  /** Force the lockup to render entirely in mint (for use on navy hero panels). */
+  /** `brand` forces the whole lockup into the mint mark colour (for navy hero panels). */
   tone?: 'auto' | 'brand' | 'inverse';
 };
 
 /**
  * `<Brand />` replaces the hand-rolled gradient wordmarks. On dark it is
- * solid mint; on light the mark stays mint and the word uses `text-1`.
+ * solid mint (`--mark`); on light the mark stays mint and the word uses
+ * `text-1`. Nothing here reads `--brand`: that is the blue action colour.
  */
 export function Brand({ size = 'md', variant = 'lockup', className, tone = 'auto' }: BrandProps) {
   const s = SIZES[size];
   const wordCls =
     tone === 'brand'
-      ? 'text-brand'
+      ? 'text-mark'
       : tone === 'inverse'
         ? 'text-text-1'
-        : 'text-text-1 dark:text-brand';
+        : 'text-text-1 dark:text-mark';
   const word = (
     <span className={`type-display ${s.text} leading-none ${wordCls}`} aria-hidden={variant === 'lockup' ? true : undefined}>
       Vybe
@@ -94,11 +97,11 @@ export function Brand({ size = 'md', variant = 'lockup', className, tone = 'auto
     return <span className={`inline-flex items-center ${className ?? ''}`} aria-label="Vybe">{word}</span>;
   }
   if (variant === 'mark') {
-    return <BrandMark size={s.mark} title="Vybe" className={`text-brand ${className ?? ''}`} />;
+    return <BrandMark size={s.mark} title="Vybe" className={`text-mark ${className ?? ''}`} />;
   }
   return (
     <span className={`inline-flex items-center ${s.gap} ${className ?? ''}`} role="img" aria-label="Vybe">
-      <BrandMark size={s.mark} className="shrink-0 text-brand" />
+      <BrandMark size={s.mark} className="shrink-0 text-mark" />
       {word}
     </span>
   );
@@ -117,7 +120,7 @@ export function PairFigure({ size = 96, className }: { size?: number; className?
         <path d="M14 40 48 84 82 40" />
         <path d="M22 66c-3 6-6 12-7 18M74 66c3 6 6 12 7 18" />
       </g>
-      <path d="M36 62 48 38l12 24" fill="none" stroke="var(--brand)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M36 62 48 38l12 24" fill="none" stroke="var(--mark)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
