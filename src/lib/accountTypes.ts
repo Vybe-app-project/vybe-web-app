@@ -8,6 +8,7 @@
  *   models/extensions/user/safety.js        hiddenWords, settings.health, settings.commentDefault
  *   models/extensions/user/preferences.js   settings.units / locale / timezone / accessibility
  *   models/extensions/user/data-lifecycle.js pendingDeletion, deletion
+ *   models/extensions/user/workout-preferences.js settings.workout (progressionHints, defaultRepRange)
  *   utils/userPreferences.js                validators (units, locale, timezone, accessibility)
  *
  * Another member's profile (`GET /users/:id`) exposes `settings` as exactly
@@ -41,6 +42,16 @@ export type AccessibilitySettings = {
 
 export type UnitsSetting = 'metric' | 'imperial';
 
+/**
+ * `settings.workout` (models/extensions/user/workout-preferences.js): the two
+ * preferences behind the suggested next set. Schema defaults are true / 8-12
+ * on every account; read them defensively anyway (lib/progress workoutPreferencesOf).
+ */
+export type WorkoutSettings = {
+  progressionHints?: boolean;
+  defaultRepRange?: { min: number; max: number };
+};
+
 export type AccountSettings = {
   privacy?: 'public' | 'private' | string;
   /** Push preferences; the notifications lane owns the key list. */
@@ -56,6 +67,8 @@ export type AccountSettings = {
   timezone?: string;
   /** Absent until set; partial allowed. */
   accessibility?: AccessibilitySettings;
+  /** Suggestions switch and default rep range (Wave F progression). */
+  workout?: WorkoutSettings;
 };
 
 /** `hiddenWords` on the owner's own account (defaults true/true/true/[]). */
@@ -91,6 +104,7 @@ export const SETTINGS_KEYS = [
   'locale',
   'timezone',
   'accessibility',
+  'workout',
 ] as const;
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
 
@@ -109,6 +123,8 @@ export type SettingsPatch = {
   locale?: string | null;
   timezone?: string | null;
   accessibility?: { reduceMotion?: boolean | null; largeText?: boolean | null } | null;
+  /** `defaultRepRange: null` returns to 8-12; min < max, whole numbers 1-50 (services/progression.js workoutSettingsPatch). */
+  workout?: { progressionHints?: boolean; defaultRepRange?: { min: number; max: number } | null };
 };
 
 /** The owner-only account fields `GET /users/me` adds on top of the public profile. */

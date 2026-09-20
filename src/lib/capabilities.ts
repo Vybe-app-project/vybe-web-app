@@ -167,3 +167,21 @@ export function useSessionsAccess() {
     isError: capabilities.isError,
   };
 }
+
+/**
+ * A rollout flag with the query state a page gate needs. `useFeature` reads
+ * false while the capabilities query is still pending, so a page that
+ * redirected on it would bounce every cold load; the gate exposes `isPending`
+ * so the page holds a skeleton until the server has answered, then hides the
+ * surface (Navigate away) or renders it.
+ */
+export function useFeatureGate(name: string) {
+  const capabilities = useCapabilities();
+  return {
+    enabled: featureEnabled(capabilities.data?.features, name),
+    isPending: capabilities.isPending,
+    isError: capabilities.isError,
+    error: capabilities.error,
+    refetch: capabilities.refetch,
+  };
+}
