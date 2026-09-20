@@ -23,15 +23,17 @@ import {
 import { Share } from './icons';
 import { RecapBody } from './RecapBody';
 import {
-  HIDDEN_FIELDS,
-  HIDDEN_FIELD_HELP,
-  HIDDEN_FIELD_LABELS,
+  INCLUDE_WEIGHTS_HELP,
+  INCLUDE_WEIGHTS_LABEL,
   LOCKED_SHARE_MESSAGE,
   canShare,
+  captionPlaceholder,
+  offersWeights,
   recapTitle,
   runningBadge,
+  shareDescription,
+  shareHiddenFields,
   sharePostBody,
-  type HiddenField,
   type RecapView,
 } from '../lib/recapView';
 
@@ -40,7 +42,9 @@ import {
  * https://vybeapp.fit/recaps/<id> lands here too). The API answers 404 for
  * another member's recap as well as for an unknown or malformed id, so the
  * not-found state says both. Opening a recap marks it viewed once; sharing
- * creates the post first and records the share second, best effort.
+ * creates the post first and records the share second, best effort. Weights
+ * stay off the shared card unless the member switches them on, the same
+ * default as every export and the mobile share sheet.
  */
 
 const CAPTION_MAX = 2000;
@@ -108,21 +112,19 @@ export default function RecapDetail() {
   /* ---------------------------------------------------------- share dialog */
   const [shareOpen, setShareOpen] = useState(false);
   const [caption, setCaption] = useState('');
-  const [hidden, setHidden] = useState<HiddenField[]>([]);
+  // Off until the member switches it on, every time the dialog opens.
+  const [includeWeights, setIncludeWeights] = useState(false);
   const [shareError, setShareError] = useState<{ message: string; field: string | null } | null>(null);
-
-  const toggleHidden = (field: HiddenField, next: boolean) => {
-    setHidden((prev) => (next ? (prev.includes(field) ? prev : [...prev, field]) : prev.filter((f) => f !== field)));
-  };
 
   const openShare = () => {
     setShareError(null);
+    setIncludeWeights(false);
     setShareOpen(true);
   };
 
   const share = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post('/posts/create', sharePostBody({ recapId: id, caption, hiddenFields: hidden }));
+      const { data } = await api.post('/posts/create', sharePostBody({ recapId: id, caption, hiddenFields: shareHiddenFields(includeWeights) }));
       const post = ((data as { post?: Post }).post ?? data) as Post;
       try {
         await api.post(`/recaps/${id}/shared`, { destination: 'vybe', variant: 'feed' });
@@ -230,7 +232,7 @@ export default function RecapDetail() {
           if (!share.isPending) setShareOpen(false);
         }}
         title="Share as a post"
-        description="The card carries your sessions, time, records and most trained exercises. Gyms and buddies never appear on a card."
+        description={shareDescription(recap)}
         size="sm"
         footer={
           <div className="flex flex-wrap justify-end gap-2">
@@ -244,19 +246,16 @@ export default function RecapDetail() {
         }
       >
         <div className="space-y-3">
-          <fieldset className="space-y-0.5">
-            <legend className="mb-1 text-sm font-semibold text-text-1">What to leave off</legend>
-            {HIDDEN_FIELDS.map((field) => (
-              <Checkbox
-                key={field}
-                checked={hidden.includes(field)}
-                onChange={(next) => toggleHidden(field, next)}
-                label={HIDDEN_FIELD_LABELS[field]}
-                description={HIDDEN_FIELD_HELP[field]}
-                disabled={share.isPending}
-              />
-            ))}
-          </fieldset>
+          {offersWeights(recap.data) ? (
+            <Checkbox
+              checked={includeWeights}
+              onChange={setIncludeWeights}
+              label={INCLUDE_WEIGHTS_LABEL}
+              description={INCLUDE_WEIGHTS_HELP}
+              disabled={share.isPending}
+              id="recap-share-include-weights"
+            />
+          ) : null}
           <Textarea
             label="Caption (optional)"
             value={caption}
@@ -264,7 +263,7 @@ export default function RecapDetail() {
             maxLength={CAPTION_MAX}
             rows={3}
             autoGrow
-            placeholder="Say something about the week"
+            placeholder={captionPlaceholder(recap.kind)}
             error={captionError}
             disabled={share.isPending}
           />

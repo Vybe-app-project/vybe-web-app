@@ -13,7 +13,8 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 const { createElement: h } = await import('react');
 const { renderToString } = await import('react-dom/server');
 const { MemoryRouter } = await import('react-router-dom');
-const { RecapBody } = await import('../src/pages/RecapBody.tsx');
+const { RecapBody, RecapHeadline } = await import('../src/pages/RecapBody.tsx');
+const { compareDeltas, recapHeadline } = await import('../src/lib/recapView.ts');
 
 const byDay = ['14', '15', '16', '17', '18', '19', '20'].map((d, i) => ({ date: `2026-09-${d}`, sessions: [1, 0, 1, 1, 0, 1, 0][i], minutes: [50, 0, 48, 44, 0, 50, 0][i] }));
 
@@ -83,7 +84,7 @@ const render = (recap, unit) => renderToString(h(MemoryRouter, null, h(RecapBody
 
 test('a ready week shows the period numbers in the viewer unit, the records and the most trained list', () => {
   const html = render(readyWeek, 'lb');
-  for (const text of ['3 h 12 min', '31,306 lb', 'Bench press', 'Heaviest weight', '209.4 lb → 220.5 lb', 'aria-label="Most trained"', 'aria-label="Records"', 'aria-label="Sessions by day"', '4 active days', '8 weeks kept · 3+ days a week', 'vs last week', '3 sessions · 12 sets']) {
+  for (const text of ['3 h 12 min', '31,306 lb', 'Bench press', 'Heaviest weight', '209.4 lb → 220.5 lb', 'aria-label="Most trained"', 'aria-label="Records"', 'aria-label="Sessions by day"', '4 active days', '8 weeks kept · 3+ days a week', '3 sessions · 12 sets']) {
     assert.ok(html.includes(text), `ready week shows ${text}`);
   }
   assert.ok(!html.includes('>Gyms<') && !html.includes('aria-label="Gyms"'), 'no Gyms section when the API sent null');
@@ -91,7 +92,37 @@ test('a ready week shows the period numbers in the viewer unit, the records and 
   assert.ok(!html.includes('NaN'));
   assert.ok(!html.includes('undefined'));
   assert.ok(render(readyWeek, 'kg').includes('14,200 kg'), 'metric viewers see kilograms');
-  assert.match(html, /Monday, Sep 14: 1 session, 50 min/);
+  // Each day cell carries its description as screen-reader text, not as aria-label on a static <li>.
+  assert.match(html, /<span class="sr-only">Monday, Sep 14: 1 session, 50 min<\/span>/);
+  assert.ok(!html.includes('aria-label="Monday, Sep 14'), 'no aria-label on the day cell');
+  assert.match(html, /<li title="Tuesday, Sep 15: rest"/);
+  // A week grid names its weekdays in the cells, so it has no header row.
+  assert.ok(!html.includes('data-testid="recap-weekday-header"'));
+});
+
+test('the comparison is closed by default and opens behind an expanded toggle', () => {
+  const closed = render(readyWeek, 'lb');
+  assert.ok(!closed.includes('vs last week'), 'no delta until the member asks');
+  assert.match(closed, /<button[^>]*aria-expanded="false"[^>]*data-testid="recap-compare-toggle"[^>]*>/);
+  assert.ok(closed.includes('Compare with last week'));
+  assert.ok(!closed.includes('Hide comparison'));
+
+  const stats = recapHeadline(readyWeek.data, 'lb');
+  const deltas = compareDeltas(readyWeek.data, 'lb', 'week');
+  const open = renderToString(h(RecapHeadline, { stats, deltas, kind: 'week', compareOpen: true, onToggleCompare: () => {} }));
+  assert.ok(open.includes('vs last week'));
+  assert.ok(open.includes('+1') && open.includes('+42 min') && open.includes('+4,850 lb'));
+  assert.ok(open.includes('Hide comparison'));
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /aria-controls="([^"]+)"/);
+  const controls = /aria-controls="([^"]+)"/.exec(open)[1];
+  assert.ok(open.includes(`id="${controls}"`), 'the toggle points at the tile grid');
+
+  const shut = renderToString(h(RecapHeadline, { stats, deltas, kind: 'week', compareOpen: false, onToggleCompare: () => {} }));
+  assert.ok(!shut.includes('vs last week'));
+  // Nothing to compare with, no toggle.
+  const none = renderToString(h(RecapHeadline, { stats, deltas: {}, kind: 'week', compareOpen: false, onToggleCompare: () => {} }));
+  assert.ok(!none.includes('recap-compare-toggle'));
 });
 
 test('a locked month explains the unlock rule from the API progress block and cannot be shared yet', () => {
@@ -100,13 +131,19 @@ test('a locked month explains the unlock rule from the API progress block and ca
   assert.ok(html.includes('This recap unlocks later in the month. Share it once it is ready.'));
   assert.match(html, /role="progressbar"[^>]*aria-valuemax="3"/);
   assert.ok(!html.includes('vs last month'), 'no comparison on a locked month');
+  assert.ok(!html.includes('recap-compare-toggle'), 'nothing to compare with on a locked month');
   assert.ok(!html.includes('26th'), 'the unlock day is never hard-coded');
+  // A month grid gets a Monday-first weekday header so the leading offset reads as calendar, not as a gap.
+  assert.match(html, /<div aria-hidden="true" class="[^"]*grid-cols-7[^"]*" data-testid="recap-weekday-header">/);
+  for (const weekday of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) assert.ok(html.includes(`>${weekday}</span>`), `header shows ${weekday}`);
+  assert.ok(html.indexOf('recap-weekday-header') < html.indexOf('aria-label="Sessions by day"'), 'the header sits above the grid');
 });
 
 test('a quiet week says so plainly and compares to nothing', () => {
   const html = render(quietWeek, 'lb');
   assert.ok(html.includes('A quiet week. The next one is a fresh start.'));
   assert.ok(!html.includes('vs last week'));
+  assert.ok(!html.includes('recap-compare-toggle'));
   assert.ok(!html.includes('0 lb') && !html.includes('0 kg'), 'no zero volume stat');
   assert.ok(!html.includes('NaN'));
 });
@@ -151,6 +188,14 @@ test('the viewer routes, nav entries and API calls are wired', () => {
   // Viewed fires once, only while viewedAt is null.
   assert.match(detail, /viewedAt/);
   assert.match(detail, /useRef/);
+  // Weights are opt-in on a web share: off when the dialog opens, one switch, only when the card would show volume.
+  assert.match(detail, /const \[includeWeights, setIncludeWeights\] = useState\(false\)/);
+  assert.match(detail, /setIncludeWeights\(false\);\s*setShareOpen\(true\)/);
+  assert.match(detail, /hiddenFields: shareHiddenFields\(includeWeights\)/);
+  assert.match(detail, /\{offersWeights\(recap\.data\) \? \(\s*<Checkbox/);
+  assert.match(detail, /description=\{shareDescription\(recap\)\}/);
+  assert.match(detail, /placeholder=\{captionPlaceholder\(recap\.kind\)\}/);
+  assert.ok(!detail.includes('Hide gyms') && !detail.includes('Hide buddies') && !detail.includes('HIDDEN_FIELDS.map'), 'no switch that changes nothing');
 
   const list = read('src/pages/Recaps.tsx');
   assert.match(list, /api\.get\('\/recaps\/current'/);
@@ -159,6 +204,7 @@ test('the viewer routes, nav entries and API calls are wired', () => {
   assert.match(list, /browserTimeZone\(\)/);
   assert.match(list, /localDayParams\(\)/);
   assert.match(list, /dedupeHistory\(/);
+  assert.match(list, /aria-label=\{historyRowLabel\(row\)\}/);
 
   // The author-only link on shared recap cards is decided client-side (the API never says 403 on GET /recaps/:id).
   assert.match(read('src/pages/PostCard.tsx'), /to=\{isOwn \? `\/recaps\/\$\{post\.recapSummary\.recapId\}` : null\}/);

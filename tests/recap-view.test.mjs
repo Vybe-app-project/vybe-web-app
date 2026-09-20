@@ -118,9 +118,47 @@ test('the share body is exactly what POST /posts/create accepts', () => {
     recapSummary: { recapId: 'abc', hiddenFields: [] },
   });
   assert.deepEqual(lib.HIDDEN_FIELDS, ['weights', 'gyms', 'buddies']);
-  assert.deepEqual(Object.keys(lib.HIDDEN_FIELD_LABELS), ['weights', 'gyms', 'buddies']);
-  assert.match(lib.HIDDEN_FIELD_HELP.gyms, /never appear on a shared card/);
-  assert.match(lib.HIDDEN_FIELD_HELP.buddies, /never appear on a shared card/);
+});
+
+test('a web share leaves weights off unless the member switches them on', () => {
+  // The same default as every export and the mobile share sheet: weights are opt-in.
+  assert.deepEqual(lib.SHARE_DEFAULT_HIDDEN, ['weights']);
+  assert.deepEqual(lib.shareHiddenFields(false), ['weights']);
+  assert.deepEqual(lib.shareHiddenFields(true), []);
+  assert.deepEqual(lib.sharePostBody({ recapId: 'abc', hiddenFields: lib.shareHiddenFields(false) }).recapSummary, { recapId: 'abc', hiddenFields: ['weights'] });
+  // The switch is only offered when it changes the card: the card shows volume only above zero.
+  assert.equal(lib.offersWeights({ volumeKg: 14200 }), true);
+  assert.equal(lib.offersWeights({ volumeKg: 0 }), false);
+  assert.equal(lib.offersWeights({}), false);
+  assert.equal(lib.INCLUDE_WEIGHTS_LABEL, 'Include weights');
+  assert.match(lib.INCLUDE_WEIGHTS_HELP, /volume you lifted/);
+  // The description names volume and only promises weeks kept on a monthly card.
+  const week = lib.shareDescription({ kind: 'week', data: ready });
+  assert.equal(week, 'The card carries your sessions, time, records and most trained exercises. Volume lifted only goes on when you include it. Gyms and buddies never appear on a card.');
+  const month = lib.shareDescription({ kind: 'month', data: ready });
+  assert.ok(month.includes('most trained exercises, plus weeks kept.'));
+  assert.ok(!lib.shareDescription({ kind: 'month', data: { ...ready, weeksKept: null } }).includes('weeks kept'));
+  assert.ok(!lib.shareDescription({ kind: 'week', data: { ...ready, volumeKg: 0 } }).includes('Volume lifted'));
+  assert.equal(lib.captionPlaceholder('week'), 'Say something about the week');
+  assert.equal(lib.captionPlaceholder('month'), 'Say something about the month');
+});
+
+test('the comparison sits behind a toggle whose label names the previous period', () => {
+  assert.equal(lib.compareLabel('week', false), 'Compare with last week');
+  assert.equal(lib.compareLabel('month', false), 'Compare with last month');
+  assert.equal(lib.compareLabel('week', true), 'Hide comparison');
+  assert.equal(lib.hasDeltas({}), false);
+  assert.equal(lib.hasDeltas(lib.compareDeltas(ready, 'kg', 'week')), true);
+  assert.deepEqual(lib.MONDAY_FIRST_WEEKDAYS, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+});
+
+test('a history row is named by kind, period, badges and its summary', () => {
+  const row = { kind: 'week', periodLabel: 'Sep 14–20, 2026', viewedAt: null, shared: true, summary: { sessions: 4, minutes: 192, prCount: 2 } };
+  assert.equal(lib.historyRowLabel(row), 'Weekly recap: Sep 14–20, 2026, new, shared. 4 sessions, 3 h 12 min, 2 records');
+  assert.equal(lib.historyRowLabel({ ...row, viewedAt: '2026-09-21T12:00:00.000Z', shared: false }), 'Weekly recap: Sep 14–20, 2026. 4 sessions, 3 h 12 min, 2 records');
+  assert.equal(lib.historyRowLabel({ ...row, kind: 'month', periodLabel: 'August 2026', viewedAt: 'x', shared: false, summary: { sessions: 0, minutes: 0, prCount: 0 } }), 'Monthly recap: August 2026. No sessions');
+  // The prefix is the label the row always carried; only the tail grew.
+  assert.ok(lib.historyRowLabel(row).startsWith('Weekly recap: Sep 14–20, 2026'));
 });
 
 test('history drops the rows already shown as current cards and repeated ids', () => {

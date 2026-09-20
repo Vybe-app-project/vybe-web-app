@@ -10,6 +10,7 @@ import { Badge, Button, Callout, Card, EmptyState, ErrorState, PageHeader, Progr
 import { ChevronRight, Lock } from './icons';
 import {
   dedupeHistory,
+  historyRowLabel,
   lockedCopy,
   quietCopy,
   recapHeadline,
@@ -103,7 +104,7 @@ function HistoryRow({ row }: { row: RecapListRow }) {
         to={`/recaps/${row._id}`}
         viewTransition
         className="flex min-h-14 items-center gap-3 px-4 py-3 transition-colors dur-1 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
-        aria-label={`${recapTitle(row.kind)}: ${row.periodLabel}`}
+        aria-label={historyRowLabel(row)}
         data-testid="recap-history-row"
       >
         <div className="min-w-0 flex-1">

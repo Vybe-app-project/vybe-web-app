@@ -138,6 +138,9 @@ export function mondayFirstIndex(dateKey: string): number {
   return weekday === null ? 0 : (weekday + 6) % 7;
 }
 
+/** The header row over a month grid, in the same Monday-first order as mondayFirstIndex. */
+export const MONDAY_FIRST_WEEKDAYS: readonly string[] = [...WEEKDAYS_SHORT.slice(1), WEEKDAYS_SHORT[0]];
+
 /** "Monday, Sep 14: 1 session, 50 min" for a day cell's accessible name. */
 export function dayDescription(day: RecapDay): string {
   const weekday = weekdayIndex(day.date);
@@ -214,6 +217,15 @@ const direction = (diff: number): RecapDelta['direction'] => (diff > 0 ? 'up' : 
  * recap carries `previous`; anything else compares to nothing (no loss
  * statement on a quiet stretch).
  */
+/** Whether compareDeltas produced anything to show. */
+export const hasDeltas = (deltas: RecapDeltas): boolean => Boolean(deltas.sessions || deltas.time || deltas.volume);
+
+/** The toggle that reveals the comparison; closed by default, like the mobile viewer. */
+export function compareLabel(kind: RecapKind, open: boolean): string {
+  if (open) return 'Hide comparison';
+  return kind === 'month' ? 'Compare with last month' : 'Compare with last week';
+}
+
 export function compareDeltas(data: RecapData, unit: WorkoutSummaryUnit, kind: RecapKind): RecapDeltas {
   const previous = data.previous;
   if (!previous) return {};
@@ -280,21 +292,50 @@ export function summaryLine(summary: RecapSummaryNumbers): string {
   return bits.join(' · ');
 }
 
+/**
+ * The accessible name of a history row link: the kind and period first, then
+ * the badges it shows, then the summary line with spoken separators.
+ * "Weekly recap: Sep 14–20, 2026, new, shared. 4 sessions, 3 h 12 min, 2 records"
+ */
+export function historyRowLabel(row: Pick<RecapListRow, 'kind' | 'periodLabel' | 'viewedAt' | 'shared' | 'summary'>): string {
+  const badges = `${row.viewedAt === null ? ', new' : ''}${row.shared ? ', shared' : ''}`;
+  return `${recapTitle(row.kind)}: ${row.periodLabel}${badges}. ${summaryLine(row.summary).replace(/ · /g, ', ')}`;
+}
+
+/** Everything POST /posts/create accepts under recapSummary.hiddenFields. */
 export const HIDDEN_FIELDS = ['weights', 'gyms', 'buddies'] as const;
 export type HiddenField = (typeof HIDDEN_FIELDS)[number];
 
-export const HIDDEN_FIELD_LABELS: Record<HiddenField, string> = {
-  weights: 'Hide weights',
-  gyms: 'Hide gyms',
-  buddies: 'Hide buddies',
-};
+/**
+ * What a web share leaves off unless the member switches it on. Weights are
+ * opt-in, as on every export (docs/api-contract.md, Recaps: "exports hide
+ * both by default"). Gyms and buddies never reach a card (services/recapSummary.js),
+ * so the web offers no switch for them and records nothing.
+ */
+export const SHARE_DEFAULT_HIDDEN: readonly HiddenField[] = ['weights'];
 
-/** Honest helper text: only weights change the card; gyms and buddies are never on one. */
-export const HIDDEN_FIELD_HELP: Record<HiddenField, string> = {
-  weights: 'Leaves the volume you lifted off the card.',
-  gyms: 'Gyms never appear on a shared card. This only records your choice.',
-  buddies: 'Buddies never appear on a shared card. This only records your choice.',
-};
+export const INCLUDE_WEIGHTS_LABEL = 'Include weights';
+export const INCLUDE_WEIGHTS_HELP = 'Adds the volume you lifted to the card. Left off, no weight figure is shared.';
+
+/** Only offer the weights switch when it changes the card: the card shows volume only above zero. */
+export const offersWeights = (data: Pick<RecapData, 'volumeKg'>): boolean => typeof data.volumeKg === 'number' && data.volumeKg > 0;
+
+/** The hidden list for a web share: the default minus what the member switched on. */
+export function shareHiddenFields(includeWeights: boolean): HiddenField[] {
+  return SHARE_DEFAULT_HIDDEN.filter((field) => !(field === 'weights' && includeWeights));
+}
+
+/** What the card will carry, in the share dialog's own words; weeks kept only shows on a monthly card. */
+export function shareDescription(recap: Pick<RecapView, 'kind' | 'data'>): string {
+  const weeks = recap.kind === 'month' && !!recap.data.weeksKept && recap.data.weeksKept.count > 0;
+  const carries = `The card carries your sessions, time, records and most trained exercises${weeks ? ', plus weeks kept' : ''}.`;
+  const volume = offersWeights(recap.data) ? ' Volume lifted only goes on when you include it.' : '';
+  return `${carries}${volume} Gyms and buddies never appear on a card.`;
+}
+
+export function captionPlaceholder(kind: RecapKind): string {
+  return kind === 'month' ? 'Say something about the month' : 'Say something about the week';
+}
 
 export const isHiddenField = (value: unknown): value is HiddenField => typeof value === 'string' && (HIDDEN_FIELDS as readonly string[]).includes(value);
 
