@@ -128,6 +128,12 @@ export const CATEGORY_ICON: Record<Category, (props: { size?: number; filled?: b
   seasonal: (p) => <CalendarDays {...p} />,
 };
 
+/**
+ * The card's whole-surface details button carries a stable id so the page can
+ * hand focus to it once a Claim control has replaced itself with "Details".
+ */
+export const detailsButtonId = (achievementId: string) => `achievement-${achievementId}-details`;
+
 export const fmtDate = (iso?: string | null) => {
   if (!iso) return '';
   const d = parseISO(iso);
@@ -263,6 +269,7 @@ export function AchievementCard({
       {/* Whole-card target; controls below sit above it. */}
       <button
         type="button"
+        id={detailsButtonId(achievement._id)}
         onClick={onOpen}
         aria-label={`${achievement.title}: details`}
         className="absolute inset-0 z-[1] rounded-[inherit]"

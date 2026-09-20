@@ -60,6 +60,7 @@ import {
   CATEGORY_LABEL,
   RARITY_STYLE,
   RarityChip,
+  detailsButtonId,
   earnedLine,
   fmtDate,
 } from './AchievementCard';
@@ -89,6 +90,32 @@ const rewardSummary = (r?: ClaimRewards | null) =>
 
 const isNotFound = (error: unknown) =>
   (error as { response?: { status?: number } } | undefined)?.response?.status === 404;
+
+/**
+ * errMsg prefers the API's own sentence, and on a 5xx that sentence never
+ * names the action ("Something went wrong on our side."). For a failure whose
+ * only other trace is a notice quietly coming back, the action goes first.
+ */
+const withReason = (lead: string, error: unknown) => {
+  const reason = errMsg(error, 'Try again.');
+  return `${lead} ${/[.!?]$/.test(reason) ? reason : `${reason}.`}`;
+};
+
+/* ------------------------------------------------------------------- focus */
+
+/*
+ * "Got it" and "Claim reward" unmount themselves on success. Focus is handed
+ * to a stable element first, so a keyboard or screen-reader user keeps their
+ * place instead of restarting from "Skip to content".
+ */
+
+/** Wraps the view tabs; the selected tab is where focus lands after the notice goes. */
+const VIEWS_ID = 'achievement-views';
+/** The detail dialog's footer Close: what remains once its Claim control has gone. */
+const DETAIL_CLOSE_ID = 'achievement-detail-close';
+
+const focusViews = () =>
+  document.querySelector<HTMLElement>(`#${VIEWS_ID} [role="tab"][aria-selected="true"]`)?.focus();
 
 /* --------------------------------------------------------------- sub views */
 
@@ -150,7 +177,7 @@ function DetailModal({
       footer={
         achievement ? (
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={onClose}>
+            <Button id={DETAIL_CLOSE_ID} variant="secondary" onClick={onClose}>
               Close
             </Button>
             {claimable ? (
@@ -391,6 +418,10 @@ export default function Achievements() {
       );
       setDetail((d) => (d && d._id === achievement._id ? { ...d, isEarned: true, canClaim: false, awardedBy: 'claim' } : d));
       qc.invalidateQueries({ queryKey: ['achievements'] });
+      // The Claim control is about to go: in the dialog its footer keeps Close,
+      // on the grid the card keeps its details target.
+      const target = detail && detail._id === achievement._id ? DETAIL_CLOSE_ID : detailsButtonId(achievement._id);
+      document.getElementById(target)?.focus();
     },
     onError: (e) => toast.error(errMsg(e, 'Could not claim that badge. Try again.')),
     onSettled: () => setClaimingId(null),
@@ -398,20 +429,28 @@ export default function Achievements() {
 
   /*
    * Mark new awards as seen so another device does not replay the notice.
-   * Best effort: a 404 means the row is not (or no longer) earned, and any
-   * other failure only means the notice shows once more.
+   * A 404 means the row is not (or no longer) earned and stays silent. Any
+   * other failure is said out loud: the notice is removed optimistically and
+   * comes back on refetch, and without a message that click looks ignored.
+   * `announce` is true from the "Got it" control, whose success is otherwise
+   * only a notice vanishing; opening a detail acks quietly.
    */
   const ack = useMutation({
-    mutationFn: async (ids: string[]) => {
+    mutationFn: async ({ ids }: { ids: string[]; announce: boolean }) => {
       const results = await Promise.allSettled(ids.map((id) => api.post(`/achievements/${id}/ack`)));
-      return results.filter((r) => r.status === 'rejected' && !isNotFound(r.reason)).length;
+      const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected' && !isNotFound(r.reason));
+      if (failed) throw failed.reason;
     },
-    onMutate: (ids) => {
+    onMutate: ({ ids }) => {
       const now = new Date().toISOString();
       qc.setQueriesData<Achievement[]>({ queryKey: ['achievements', 'user'] }, (list) =>
         Array.isArray(list) ? list.map((a) => (ids.includes(a._id) && !a.ackedAt ? { ...a, ackedAt: now } : a)) : list,
       );
     },
+    onSuccess: (_result, { announce }) => {
+      if (announce) toast.success('Marked as seen');
+    },
+    onError: (e) => toast.error(withReason('Could not mark those awards as seen.', e)),
     onSettled: () => qc.invalidateQueries({ queryKey: ['achievements', 'user'] }),
   });
 
@@ -446,6 +485,15 @@ export default function Achievements() {
   const summary = useMemo(() => (summaryQuery.data ?? []).filter(isVisible), [summaryQuery.data]);
   const stats = useMemo(() => summarize(summary), [summary]);
   const summaryLoading = summaryQuery.isLoading || capabilities.isLoading;
+  /*
+   * Two facts the tiles must not assert without knowing them: the member's
+   * totals (the summary list failed) and which award flow this server runs
+   * (the capabilities query got no answer). Loading is a skeleton; a failure
+   * is a dash, never a zero that reads as "you hold nothing".
+   */
+  const summaryUnknown = summaryQuery.isError;
+  const flagUnknown = !capabilities.isSuccess && !capabilities.isLoading;
+  const awardsLabel = flagUnknown ? 'Awards' : autoAward ? 'New awards' : 'Ready to claim';
   const earnedCount = stats.earned;
   const claimableItems = useMemo(() => summary.filter((a) => showClaim(a, claimAllowed)), [summary, claimAllowed]);
   const claimableCount = claimableItems.length;
@@ -484,7 +532,7 @@ export default function Achievements() {
   const openDetail = (a: Achievement) => {
     setDetail(a);
     // Opening a new award counts as seeing it.
-    if (isNewAward(a)) ack.mutate([a._id]);
+    if (isNewAward(a)) ack.mutate({ ids: [a._id], announce: false });
   };
 
   const filtersActive = Boolean(category || rarity);
@@ -502,63 +550,103 @@ export default function Achievements() {
       />
 
       <StatGrid columns={4}>
-        <StatTile
-          label="Earned"
-          value={earnedCount}
-          unit={`of ${summary.length}`}
-          icon={<Trophy size={20} />}
-          tone="brand"
-          loading={summaryLoading}
-          hint={summary.length ? `${Math.round((earnedCount / summary.length) * 100)}% of all badges` : undefined}
-        />
-        {autoAward ? (
-          <StatTile
-            label="New awards"
-            value={stats.newAwards}
-            icon={<Sparkles size={20} />}
-            tone={stats.newAwards > 0 ? 'accent' : 'neutral'}
-            loading={summaryLoading}
-            hint={stats.newAwards > 0 ? 'Since you last looked' : 'Awards arrive on their own'}
-          />
+        {summaryUnknown ? (
+          <>
+            <StatTile label="Earned" value="—" icon={<Trophy size={20} />} tone="brand" />
+            <StatTile label={awardsLabel} value="—" icon={<Sparkles size={20} />} />
+            <StatTile label="Points banked" value="—" icon={<Medal size={20} />} />
+            <StatTile label="Milestones" value="—" icon={<Target size={20} />} />
+          </>
         ) : (
-          <StatTile
-            label="Ready to claim"
-            value={claimableCount}
-            icon={<Sparkles size={20} />}
-            tone={claimableCount > 0 ? 'accent' : 'neutral'}
-            loading={summaryLoading}
-            hint={claimableCount > 0 ? `${formatStat(pendingPoints)} pts waiting` : 'Nothing pending'}
-          />
-        )}
-        <StatTile
-          label="Points banked"
-          value={formatStat(totalPoints)}
-          unit="pts"
-          icon={<Medal size={20} />}
-          loading={summaryLoading}
-        />
-        {stats.weeksKept ? (
-          <StatTile
-            label="Weeks kept"
-            value={Math.min(stats.weeksKept.progress, stats.weeksKept.required)}
-            unit={`of ${stats.weeksKept.required}`}
-            icon={<CalendarDays size={20} />}
-            tone={stats.weeksKept.progress > 0 ? 'accent' : 'neutral'}
-            loading={summaryLoading}
-            hint="Weekly Rhythm"
-          />
-        ) : (
-          <StatTile
-            label="Milestones"
-            value={stats.milestones.earned}
-            unit={stats.milestones.total ? `of ${stats.milestones.total}` : undefined}
-            icon={<Target size={20} />}
-            tone={stats.milestones.earned > 0 ? 'brand' : 'neutral'}
-            loading={summaryLoading}
-            hint={stats.milestones.total ? 'Long-run targets' : 'None yet'}
-          />
+          <>
+            <StatTile
+              label="Earned"
+              value={earnedCount}
+              unit={`of ${summary.length}`}
+              icon={<Trophy size={20} />}
+              tone="brand"
+              loading={summaryLoading}
+              hint={summary.length ? `${Math.round((earnedCount / summary.length) * 100)}% of all badges` : undefined}
+            />
+            {flagUnknown ? (
+              <StatTile
+                label={awardsLabel}
+                value="—"
+                icon={<Sparkles size={20} />}
+                loading={summaryLoading}
+                hint="Could not check server settings"
+              />
+            ) : autoAward ? (
+              <StatTile
+                label={awardsLabel}
+                value={stats.newAwards}
+                icon={<Sparkles size={20} />}
+                tone={stats.newAwards > 0 ? 'accent' : 'neutral'}
+                loading={summaryLoading}
+                hint={stats.newAwards > 0 ? 'Since you last looked' : 'Awards arrive on their own'}
+              />
+            ) : (
+              <StatTile
+                label={awardsLabel}
+                value={claimableCount}
+                icon={<Sparkles size={20} />}
+                tone={claimableCount > 0 ? 'accent' : 'neutral'}
+                loading={summaryLoading}
+                hint={claimableCount > 0 ? `${formatStat(pendingPoints)} pts waiting` : 'Nothing pending'}
+              />
+            )}
+            <StatTile
+              label="Points banked"
+              value={formatStat(totalPoints)}
+              unit="pts"
+              icon={<Medal size={20} />}
+              loading={summaryLoading}
+            />
+            {stats.weeksKept ? (
+              <StatTile
+                label="Weeks kept"
+                value={Math.min(stats.weeksKept.progress, stats.weeksKept.required)}
+                unit={`of ${stats.weeksKept.required}`}
+                icon={<CalendarDays size={20} />}
+                tone={stats.weeksKept.progress > 0 ? 'accent' : 'neutral'}
+                loading={summaryLoading}
+                hint="Weekly Rhythm"
+              />
+            ) : (
+              <StatTile
+                label="Milestones"
+                value={stats.milestones.earned}
+                unit={stats.milestones.total ? `of ${stats.milestones.total}` : undefined}
+                icon={<Target size={20} />}
+                tone={stats.milestones.earned > 0 ? 'brand' : 'neutral'}
+                loading={summaryLoading}
+                hint={stats.milestones.total ? 'Long-run targets' : 'None yet'}
+              />
+            )}
+          </>
         )}
       </StatGrid>
+
+      {/*
+        * On "My progress" the grid has its own list, so a failed summary is
+        * explained here next to the dashes; when that list failed too, the
+        * grid's own error state already says it once. The other tabs say it
+        * in place of the grid (below), since their rows borrow the member
+        * fields from the summary.
+        */}
+      {summaryUnknown && tab === 'mine' && !active.isError ? (
+        <Callout
+          tone="warning"
+          title="Your progress could not be loaded"
+          action={
+            <Button variant="secondary" loading={summaryQuery.isFetching} onClick={() => void summaryQuery.refetch()}>
+              Try again
+            </Button>
+          }
+        >
+          Totals and earned marks stay hidden until it loads.
+        </Callout>
+      ) : null}
 
       {autoAward && newRows.length > 0 ? (
         <Callout
@@ -566,7 +654,15 @@ export default function Achievements() {
           icon={<Sparkles size={20} className="text-brand" />}
           title={newRows.length === 1 ? `New award: ${newRows[0].title}` : `${newRows.length} new awards`}
           action={
-            <Button variant="secondary" loading={ack.isPending} onClick={() => ack.mutate(newRows.map((a) => a._id))}>
+            <Button
+              variant="secondary"
+              loading={ack.isPending}
+              onClick={() => {
+                // The notice leaves as soon as the optimistic update lands, so focus moves first.
+                focusViews();
+                ack.mutate({ ids: newRows.map((a) => a._id), announce: true });
+              }}
+            >
               Got it
             </Button>
           }
@@ -595,16 +691,18 @@ export default function Achievements() {
         </Callout>
       ) : null}
 
-      <Tabs
-        aria-label="Achievement views"
-        active={tab}
-        onChange={(k) => setTab(k as TabKey)}
-        tabs={[
-          { key: 'mine', label: 'My progress', icon: <Trophy size={16} /> },
-          { key: 'all', label: 'All badges', icon: <Award size={16} /> },
-          { key: 'seasonal', label: 'Seasonal', icon: <CalendarDays size={16} /> },
-        ]}
-      />
+      <div id={VIEWS_ID}>
+        <Tabs
+          aria-label="Achievement views"
+          active={tab}
+          onChange={(k) => setTab(k as TabKey)}
+          tabs={[
+            { key: 'mine', label: 'My progress', icon: <Trophy size={16} /> },
+            { key: 'all', label: 'All badges', icon: <Award size={16} /> },
+            { key: 'seasonal', label: 'Seasonal', icon: <CalendarDays size={16} /> },
+          ]}
+        />
+      </div>
 
       <div className="flex flex-wrap items-end gap-3">
         <Select
@@ -652,6 +750,13 @@ export default function Achievements() {
           error={active.error}
           title="Could not load achievements"
           retry={() => active.refetch()}
+        />
+      ) : summaryUnknown && tab !== 'mine' ? (
+        <ErrorState
+          error={summaryQuery.error}
+          title="Your progress could not be loaded"
+          message="Each badge shows your progress on it, so the list waits until that loads."
+          retry={() => summaryQuery.refetch()}
         />
       ) : items.length === 0 ? (
         <EmptyState

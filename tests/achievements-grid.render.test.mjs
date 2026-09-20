@@ -11,7 +11,7 @@ register('./ts-loader.mjs', import.meta.url);
 const { createElement: h } = await import('react');
 const { renderToString } = await import('react-dom/server');
 const { MemoryRouter } = await import('react-router-dom');
-const { AchievementGrid, earnedLine, groupByCategory } = await import('../src/pages/AchievementCard.tsx');
+const { AchievementGrid, detailsButtonId, earnedLine, groupByCategory } = await import('../src/pages/AchievementCard.tsx');
 const { seed } = await import('./achievements-seed.mjs');
 
 const noop = () => {};
@@ -91,6 +91,10 @@ test('the grid groups by category in display order with per-group earned counts 
   assert.ok(html.includes('0/3 earned'), 'Milestones: none earned, retired row excluded');
   assert.ok(html.includes('1/5 earned'), 'Community: one of five earned');
   assert.match(html, /aria-label="First Move: details"/);
+  // The details target carries a stable id, so focus can land on it after Claim replaces itself.
+  assert.equal(detailsButtonId(backfill._id), `achievement-${backfill._id}-details`);
+  assert.ok(html.includes(`id="${detailsButtonId(backfill._id)}" aria-label="First Move: details"`), 'details button id precedes its label');
+  assert.equal(new Set(html.match(/id="achievement-[0-9a-f]{24}-details"/g)).size, 12, 'one id per visible card');
   assert.match(html, /aria-label="Four weeks kept progress"/);
   const catalogue = render(rows, false, { showEarnedCounts: false });
   assert.ok(catalogue.includes('3 badges'));

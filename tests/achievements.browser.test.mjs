@@ -95,8 +95,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * The routes these pages touch, answering like controllers/achievementController.js:
  * list routes filter isActive, /user carries the member fields, ack is 204 and
  * idempotent, claim grants the row. Everything else is a 404 the pages handle.
+ * `fail` names routes that answer 500 instead (the envelope every 5xx wears),
+ * after `failDelayMs`: instant failures undo an optimistic update before the
+ * browser has painted it, which no network ever does.
  */
-async function stubApi(context, log, { autoAward, delayCapabilitiesMs = 0 }) {
+async function stubApi(context, log, { autoAward, delayCapabilitiesMs = 0, fail = [], failDelayMs = 0 }) {
   const rows = seed().filter((r) => r.isActive !== false);
   const acked = new Set();
   const claimed = new Set();
@@ -117,12 +120,19 @@ async function stubApi(context, log, { autoAward, delayCapabilitiesMs = 0 }) {
     };
     const idOf = () => url.pathname.match(/\/api\/achievements\/([0-9a-f]{24})\//)?.[1];
 
+    const serverError = async () => {
+      if (failDelayMs) await sleep(failDelayMs);
+      return json(500, { error: { code: 'INTERNAL', message: 'Internal server error', requestId: 'req-browser-test' } });
+    };
+
     if (key === 'GET /api/users/me') return json(200, { user: ME });
     if (key === 'GET /api/capabilities' || key === 'GET /api/capabilities/authenticated') {
       if (delayCapabilitiesMs) await sleep(delayCapabilitiesMs);
+      if (fail.includes('capabilities')) return serverError();
       return json(200, capabilitiesBody(autoAward));
     }
     if (key === 'GET /api/achievements/user') {
+      if (fail.includes('user')) return serverError();
       const category = url.searchParams.get('category');
       const rarity = url.searchParams.get('rarity');
       const list = rows.filter((r) => (!category || r.category === category) && (!rarity || r.rarity === rarity)).map(memberRow);
@@ -144,6 +154,7 @@ async function stubApi(context, log, { autoAward, delayCapabilitiesMs = 0 }) {
       return json(200, { success: true, progress: { current: r.progress, required: r.required, percentage: r.progressPercentage, canEarn: r.canClaim } });
     }
     if (/^POST \/api\/achievements\/[0-9a-f]{24}\/ack$/.test(key)) {
+      if (fail.includes('ack')) return serverError();
       const r = rows.find((x) => x._id === idOf());
       if (!r || !(r.isEarned || claimed.has(r._id))) return json(404, { success: false, message: 'Achievement not earned' });
       acked.add(r._id);
@@ -208,6 +219,17 @@ if (!PLAYWRIGHT) {
     /** A StatTile by its label (the achievement cards carry no .type-label). */
     const tile = (page, label) => page.locator('.card', { has: page.locator('.type-label', { hasText: label }) });
     const claimControls = (page) => page.getByRole('button', { name: /^Claim( reward| all)?$/ });
+    /** Where keyboard focus sits: the element's aria-label, else its text, else its tag. */
+    const focused = (page) =>
+      page.evaluate(() => {
+        const el = document.activeElement;
+        return el ? el.getAttribute('aria-label') || el.textContent?.trim() || el.tagName : null;
+      });
+    /** Activate a control the way a keyboard user does. */
+    const pressEnterOn = async (locator) => {
+      await locator.focus();
+      await locator.page().keyboard.press('Enter');
+    };
 
     test('Profile → Achievements with the flag on: one list under one key, no Claim anywhere, Awarded and New, ack on Got it', async () => {
       const { page, context, errors, requests } = await open('/profile', { autoAward: true });
@@ -242,9 +264,12 @@ if (!PLAYWRIGHT) {
       const notice = page.getByRole('note').filter({ hasText: 'New award: Building Momentum' });
       await notice.waitFor();
       const acked = page.waitForRequest((r) => r.method() === 'POST' && /\/api\/achievements\/[0-9a-f]{24}\/ack$/.test(r.url()));
-      await notice.getByRole('button', { name: 'Got it' }).click();
+      await pressEnterOn(notice.getByRole('button', { name: 'Got it' }));
       await acked;
       await notice.waitFor({ state: 'detached' });
+      // Focus was handed to the selected view tab before the notice left, and the result is announced.
+      assert.equal(await focused(page), 'My progress');
+      await page.getByRole('status').filter({ hasText: 'Marked as seen' }).waitFor();
       await page.getByText('New', { exact: true }).waitFor({ state: 'detached' });
       assert.equal(requests.filter((r) => /\/ack$/.test(r)).length, 1);
 
@@ -295,7 +320,7 @@ if (!PLAYWRIGHT) {
       await page.getByRole('note').filter({ hasText: 'One badge is ready to claim' }).waitFor();
 
       const claimedResponse = page.waitForResponse((r) => r.request().method() === 'POST' && /\/api\/achievements\/[0-9a-f]{24}\/claim/.test(r.url()));
-      await page.getByRole('button', { name: 'Claim reward' }).click();
+      await pressEnterOn(page.getByRole('button', { name: 'Claim reward' }));
       const claimResponse = await claimedResponse;
       assert.equal(claimResponse.status(), 200, `claim answered ${claimResponse.status()} ${await claimResponse.text()}; rows=${JSON.stringify(requests.filter((r) => /achievements/.test(r)))}`);
       try {
@@ -306,7 +331,86 @@ if (!PLAYWRIGHT) {
       }
       await page.getByRole('button', { name: 'Claim reward', exact: true }).waitFor({ state: 'detached' });
       await page.getByRole('img', { name: 'Earned' }).nth(3).waitFor();
+      // Claim replaced itself with "Details"; focus stays on that card.
+      assert.equal(await focused(page), 'Social Spark: details');
       assert.equal(requests.filter((r) => /\/ack$/.test(r)).length, 0, 'claims are not acked (they are not auto awards)');
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    test('claiming from the detail dialog keeps focus inside the dialog', async () => {
+      const { page, context, errors } = await open('/achievements', { autoAward: false });
+      await page.getByRole('button', { name: 'Claim reward' }).waitFor();
+      await page.getByRole('button', { name: 'Social Spark: details' }).click();
+      const dialog = page.getByRole('dialog');
+      await dialog.waitFor();
+      await dialog.getByText('Criteria met. Claim it to bank the reward.').waitFor();
+      await pressEnterOn(dialog.getByRole('button', { name: 'Claim reward' }));
+      await page.getByRole('status').filter({ hasText: 'Social Spark claimed' }).waitFor();
+      await dialog.getByRole('button', { name: 'Claim reward' }).waitFor({ state: 'detached' });
+      assert.equal(await focused(page), 'Close');
+      assert.ok(await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null), 'focus is inside the dialog');
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    test('a failed ack is said out loud, focus is kept, and the notice comes back', async () => {
+      const { page, context, errors, requests } = await open('/achievements', { autoAward: true, fail: ['ack'], failDelayMs: 600 });
+      const notice = page.getByRole('note').filter({ hasText: 'New award: Building Momentum' });
+      await notice.waitFor();
+      await pressEnterOn(notice.getByRole('button', { name: 'Got it' }));
+      // The optimistic update removes the notice at once; focus has already moved.
+      await notice.waitFor({ state: 'detached' });
+      assert.equal(await focused(page), 'My progress');
+      const failure = page.getByRole('status').filter({ hasText: 'Could not mark those awards as seen.' });
+      await failure.waitFor();
+      assert.equal((await failure.textContent())?.trim(), 'Could not mark those awards as seen. Internal server error.', 'the action first, then the server reason');
+      assert.equal(await focused(page), 'My progress', 'the failure does not move focus again');
+      // The optimistic removal is undone by the refetch, so the notice and the New chip return with the message.
+      await notice.waitFor();
+      await page.getByText('New', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('status').filter({ hasText: 'Marked as seen' }).count(), 0);
+      assert.equal(requests.filter((r) => /\/ack -> 500/.test(r)).length, 1);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    test('a failed summary list shows dashes, never zeros, and the catalogue waits for it', async () => {
+      const { page, context, errors } = await open('/achievements', { autoAward: true, fail: ['user'] });
+      // The list route fails after the client's two 5xx retries; the grid shows its error state.
+      await page.getByText('Could not load achievements').waitFor({ timeout: 20000 });
+      for (const label of ['Earned', 'New awards', 'Points banked', 'Milestones']) {
+        const text = (await tile(page, label).textContent()) ?? '';
+        assert.ok(text.includes('—'), `${label} shows a dash: ${text}`);
+        assert.ok(!/\d/.test(text), `${label} states no number: ${text}`);
+      }
+      assert.equal(await page.getByText('Awards arrive on their own').count(), 0);
+      assert.equal(await page.getByText('Nothing pending').count(), 0);
+      assert.equal(await page.getByText('None yet').count(), 0);
+      // Catalogue rows borrow their member fields from that list, so the tab explains instead of painting every badge unearned.
+      await page.getByRole('tab', { name: 'All badges' }).click();
+      await page.getByText('Your progress could not be loaded').waitFor({ timeout: 20000 });
+      await page.getByText('Each badge shows your progress on it, so the list waits until that loads.').waitFor();
+      assert.equal(await page.getByText('0 / 1 session').count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'First Move: details' }).count(), 0);
+      assert.ok((await page.getByRole('button', { name: 'Try again' }).count()) >= 1);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    test('when the capabilities answer fails the awards tile says so and nothing offers Claim', async () => {
+      const { page, context, errors } = await open('/achievements', { autoAward: false, fail: ['capabilities'] });
+      await page.getByRole('img', { name: 'Earned' }).first().waitFor();
+      const awards = tile(page, 'Awards');
+      await awards.waitFor({ timeout: 20000 });
+      const text = (await awards.textContent()) ?? '';
+      assert.ok(text.includes('—'), `awards tile shows a dash: ${text}`);
+      assert.ok(text.includes('Could not check server settings'), text);
+      assert.equal(await page.getByText('Ready to claim').count(), 0);
+      assert.equal(await page.getByText('New awards').count(), 0);
+      assert.equal(await page.getByText('Nothing pending').count(), 0);
+      assert.equal(await claimControls(page).count(), 0, 'Claim is never offered without the server answer');
+      assert.equal(await page.getByRole('note').count(), 0, 'no callout asserts a flow the page does not know');
       assert.deepEqual(errors, []);
       await context.close();
     });

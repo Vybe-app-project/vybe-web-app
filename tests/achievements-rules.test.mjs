@@ -156,12 +156,35 @@ test('the page gates Claim on the capabilities answer and the auto-award flag', 
   assert.doesNotMatch(page, /completionRate/);
   assert.match(page, /'Log workouts and posts and awards arrive as you go\.'/);
   assert.doesNotMatch(page, /streak/i);
+  // What the tiles do not know they show as a dash, never as a zero: a failed
+  // summary list, and a capabilities query that got no answer (loading is a skeleton).
+  assert.match(page, /const summaryUnknown = summaryQuery\.isError;/);
+  assert.match(page, /const flagUnknown = !capabilities\.isSuccess && !capabilities\.isLoading;/);
+  assert.match(page, /const awardsLabel = flagUnknown \? 'Awards' : autoAward \? 'New awards' : 'Ready to claim';/);
+  assert.equal((page.match(/value="—"/g) ?? []).length, 5, 'four summary tiles and the awards slot fall back to a dash');
+  assert.match(page, /hint="Could not check server settings"/);
+  assert.match(page, /summaryUnknown && tab === 'mine' && !active\.isError/);
+  assert.match(page, /summaryUnknown && tab !== 'mine'/);
+  assert.equal((page.match(/Your progress could not be loaded/g) ?? []).length, 2, 'the summary failure is said once per tab');
+  // A failed ack is said out loud (a 404 stays silent), and Got it announces its success.
+  assert.match(page, /if \(failed\) throw failed\.reason;/);
+  assert.match(page, /toast\.error\(withReason\('Could not mark those awards as seen\.', e\)\)/);
+  assert.match(page, /const reason = errMsg\(error, 'Try again\.'\);/);
+  assert.match(page, /if \(announce\) toast\.success\('Marked as seen'\);/);
+  assert.match(page, /ack\.mutate\(\{ ids: \[a\._id\], announce: false \}\)/);
+  // Controls that remove themselves hand focus on first: Got it to the selected
+  // view tab, Claim to the card's details target or the dialog's Close.
+  assert.match(page, /focusViews\(\);\s*ack\.mutate\(\{ ids: newRows\.map/);
+  assert.match(page, /<div id=\{VIEWS_ID\}>\s*<Tabs/);
+  assert.match(page, /detail && detail\._id === achievement\._id \? DETAIL_CLOSE_ID : detailsButtonId\(achievement\._id\)/);
+  assert.match(page, /<Button id=\{DETAIL_CLOSE_ID\} variant="secondary" onClick=\{onClose\}>/);
   // The card carries the rule and the labels that must not change.
   const card = read('src/pages/AchievementCard.tsx');
   assert.match(card, /showClaim\(achievement, claimAllowed\)/);
   assert.match(card, /aria-label="Earned"/);
   assert.match(card, /aria-label=\{`\$\{achievement\.title\}: details`\}/);
   assert.match(card, /label=\{`\$\{achievement\.title\} progress`\}/);
+  assert.match(card, /id=\{detailsButtonId\(achievement\._id\)\}/);
   assert.match(card, /streak: 'Consistency'/);
   // "streak" survives only as the category key; no new copy uses the word.
   assert.doesNotMatch(card.replace(/streak: /g, '').replace(/'streak'/g, ''), /streak/i);
