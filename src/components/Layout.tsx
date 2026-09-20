@@ -123,6 +123,8 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/challenges', title: 'Challenges', tab: 'workouts', nav: '/challenges', hub: 'train' },
   { pattern: '/achievements', title: 'Achievements', tab: 'workouts', nav: '/achievements', hub: 'train' },
   { pattern: '/workouts/:workoutId', title: 'Workout', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
+  { pattern: '/recaps', title: 'Recaps', tab: 'workouts', nav: '/recaps', hub: 'train' },
+  { pattern: '/recaps/:id', title: 'Recap', tab: 'workouts', nav: '/recaps', parent: '/recaps' },
   { pattern: '/meals', title: 'Meals', tab: 'meals', nav: '/meals', root: true, hub: 'fuel' },
   { pattern: '/meals/templates', title: 'Meal templates', tab: 'meals', nav: '/meals/templates', hub: 'fuel' },
   { pattern: '/meals/plans', title: 'Weekly plans', tab: 'meals', nav: '/meals/plans', hub: 'fuel' },
@@ -145,6 +147,7 @@ export const HUBS: Record<HubKey, Array<{ to: string; label: string; badge?: 'ch
     { to: '/workouts/logs', label: 'Log' },
     { to: '/challenges', label: 'Challenges' },
     { to: '/achievements', label: 'Achievements' },
+    { to: '/recaps', label: 'Recaps' },
   ],
   fuel: [
     { to: '/meals', label: 'Today' },
@@ -200,6 +203,7 @@ const SIDEBAR: Array<{ label?: string; items: SidebarItem[] }> = [
       { to: '/workouts/logs', label: 'Log', Icon: ClipboardList },
       { to: '/challenges', label: 'Challenges', Icon: Zap },
       { to: '/achievements', label: 'Achievements', Icon: Award },
+      { to: '/recaps', label: 'Recaps', Icon: CalendarDays },
     ],
   },
   {

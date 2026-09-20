@@ -1,5 +1,6 @@
+import { Link } from 'react-router-dom';
 import { Badge, cx } from './ui';
-import { Calendar, Trophy } from './icons';
+import { Calendar, ChevronRight, Trophy } from './icons';
 import { useUnits, weightUnit } from '../lib/units';
 import { hasRecapSummary, recapKindLabel, recapStats, type RecapSummary } from '../lib/recapSummary';
 
@@ -8,10 +9,11 @@ export { hasRecapSummary };
 /**
  * A weekly or monthly recap shared as a post: the server-built snapshot,
  * printed in the viewer's unit (recaps carry no unit of their own). The
- * mobile card shows the same numbers; the web has no recap viewer yet, so
- * there is no "View recap" row here.
+ * mobile card shows the same numbers. `to` adds a "View recap" link into the
+ * owner-only viewer (/recaps/:id); the caller passes it for the author alone,
+ * since the API answers 404 to anyone else.
  */
-export function RecapSummaryCard({ summary, className }: { summary: RecapSummary; className?: string }) {
+export function RecapSummaryCard({ summary, className, to }: { summary: RecapSummary; className?: string; to?: string | null }) {
   const system = useUnits((s) => s.system);
   const unit = weightUnit(system);
   const stats = recapStats(summary, unit);
@@ -65,6 +67,16 @@ export function RecapSummaryCard({ summary, className }: { summary: RecapSummary
             </li>
           ))}
         </ul>
+      ) : null}
+      {to ? (
+        <Link
+          to={to}
+          viewTransition
+          className="relative z-[2] mt-2.5 inline-flex min-h-11 items-center gap-1 rounded-xs text-sm font-semibold text-brand-text underline-offset-2 hover:underline"
+        >
+          View recap
+          <ChevronRight size={16} aria-hidden="true" />
+        </Link>
       ) : null}
     </section>
   );

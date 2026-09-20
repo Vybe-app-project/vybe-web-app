@@ -63,6 +63,8 @@ const Water = lazyPage('/health/water', () => import('./pages/Water'));
 const ProgressPhotos = lazyPage('/health/photos', () => import('./pages/ProgressPhotos'));
 const Challenges = lazyPage('/challenges', () => import('./pages/Challenges'));
 const Achievements = lazyPage('/achievements', () => import('./pages/Achievements'));
+const Recaps = lazyPage('/recaps', () => import('./pages/Recaps'));
+const RecapDetail = lazyPage(null, () => import('./pages/RecapDetail'));
 
 const Login = lazyPage(null, () => import('./pages/Login'));
 const Register = lazyPage(null, () => import('./pages/Register'));
@@ -330,6 +332,9 @@ export default function App() {
               <Route path="health/photos" element={<ProgressPhotos />} />
               <Route path="challenges" element={<Challenges />} />
               <Route path="achievements" element={<Achievements />} />
+              {/* Weekly and monthly recaps; /recaps/:id is also the mobile deep link. */}
+              <Route path="recaps" element={<Recaps />} />
+              <Route path="recaps/:id" element={<RecapDetail />} />
 
               {/* Aliases and legacy paths → canonical routes */}
               <Route path="create" element={<Navigate to="/?compose=1" replace />} />

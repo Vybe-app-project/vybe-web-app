@@ -182,6 +182,12 @@ export function notificationHref(n: NotificationLike): string | null {
   if (type === 'new_workout_plan' || type.startsWith('workout_plan_')) return '/workouts';
   if (type.startsWith('gym_')) return '/communities';
 
+  // weekly_recap / monthly_recap rows carry { kind: 'recap', recapId, recapKind,
+  // periodKey, userId } with the member as sender; the recap viewer is the
+  // destination, not their own profile.
+  const recapId = idOf(d.recapId);
+  if (recapId) return `/recaps/${recapId}`;
+
   const senderId = idOf(n.sender?._id) || idOf(d.sender) || idOf(d.senderId) || idOf(d.userId) || idOf(d.followerId);
   if (senderId) return `/u/${senderId}`;
   return null;

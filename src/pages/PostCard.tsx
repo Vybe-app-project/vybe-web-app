@@ -915,7 +915,7 @@ export default function PostCard({
       {/* media first, then the workout card, then text */}
       <PostMediaGrid post={post} className="mt-3" expanded={expandMedia} onOpen={setLightbox} />
       {hasWorkoutSummary(post.workoutSummary) ? <WorkoutSummaryCard summary={post.workoutSummary} className="mt-3" /> : null}
-      {hasRecapSummary(post.recapSummary) ? <RecapSummaryCard summary={post.recapSummary} className="mt-3" /> : null}
+      {hasRecapSummary(post.recapSummary) ? <RecapSummaryCard summary={post.recapSummary} className="mt-3" to={isOwn ? `/recaps/${post.recapSummary.recapId}` : null} /> : null}
       <PostContent text={post.content} hashtags={post.hashtags} className="mt-3" clamp={!expandMedia} />
 
       {/* action bar */}
