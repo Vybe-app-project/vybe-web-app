@@ -518,8 +518,6 @@ export default function WorkoutLogs() {
   const [pendingDelete, setPendingDelete] = useState<WorkoutLog | null>(null);
   const [metric, setMetric] = useState<Metric>('volume');
   const compact = useIsCompact();
-  // Wave F progression hub: the "View progress" entry point exists only while the flag is on for this member.
-  const progressionEnabled = useFeature('progression');
   const { hash } = useLocation();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -703,11 +701,9 @@ export default function WorkoutLogs() {
         subtitle="Every session you have completed, with weekly volume."
         actions={
           <>
-            {progressionEnabled ? (
-              <ButtonLink to="/workouts/progress" variant="secondary" icon={<TrendingUp size={18} />}>
+            <ButtonLink to="/workouts/progress" variant="secondary" icon={<TrendingUp size={18} />}>
                 View progress
               </ButtonLink>
-            ) : null}
             <Button variant="primary" icon={<Plus size={18} />} onClick={() => openNew()}>
               Log session
             </Button>

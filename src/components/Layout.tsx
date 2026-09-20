@@ -626,7 +626,7 @@ function SideLink({ item, active, badge }: { item: SidebarItem; active: boolean;
  * scrolled into view on every route change so the current section is never
  * below the fold.
  */
-function Sidebar({ meta, chats, notifications, liveEnabled, progressionEnabled }: { meta: RouteMeta; chats: string | number | null; notifications: string | number | null; liveEnabled: boolean; progressionEnabled: boolean }) {
+function Sidebar({ meta, chats, notifications, liveEnabled }: { meta: RouteMeta; chats: string | number | null; notifications: string | number | null; liveEnabled: boolean }) {
   const { user } = useAuth();
   const navRef = useRef<HTMLElement>(null);
   const edges = useScrollEdges(navRef, 'y');
@@ -635,11 +635,8 @@ function Sidebar({ meta, chats, notifications, liveEnabled, progressionEnabled }
   }, [meta.nav]);
   const groups = useMemo(
     () =>
-      SIDEBAR.map((g) => ({ ...g, items: liveEnabled ? g.items : g.items.filter((i) => i.to !== LIVE_PATH) })).map((g) => ({
-        ...g,
-        items: progressionEnabled ? g.items : g.items.filter((i) => i.to !== PROGRESS_PATH),
-      })),
-    [liveEnabled, progressionEnabled],
+      SIDEBAR.map((g) => ({ ...g, items: liveEnabled ? g.items : g.items.filter((i) => i.to !== LIVE_PATH) })),
+    [liveEnabled],
   );
   return (
     <aside className="vt-sidebar sticky top-0 hidden h-dvh w-[4.5rem] shrink-0 flex-col border-r border-line bg-surface-1 lg:flex xl:w-60">
@@ -800,19 +797,16 @@ function SectionTabs({
   chats,
   notifications,
   liveEnabled,
-  progressionEnabled,
 }: {
   hub: HubKey;
   pathname: string;
   chats: string | number | null;
   notifications: string | number | null;
   liveEnabled: boolean;
-  progressionEnabled: boolean;
 }) {
   const start = usePendingNavigation((s) => s.start);
   const tabs = HUBS[hub]
     .filter((t) => liveEnabled || t.to !== LIVE_PATH)
-    .filter((t) => progressionEnabled || t.to !== PROGRESS_PATH)
     .map((t) => ({
       key: t.to,
       label: t.label,
@@ -1069,7 +1063,6 @@ export default function Layout({ children }: { children?: ReactNode }) {
   useEffect(() => preloadWhenIdle(TAB_ROOT_PATHS), []);
 
   const liveEnabled = useLiveEnabled().enabled;
-  const progressionEnabled = useFeature('progression');
 
   const unreadChats = useUnreadChats(!!user);
   const unreadNotifs = useUnreadNotifications(!!user);
@@ -1102,7 +1095,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
     <div className="min-h-dvh bg-bg text-text-1 lg:flex">
       <SkipLink />
       <NavProgress />
-      <Sidebar meta={navMeta} chats={chats} notifications={notifications} liveEnabled={liveEnabled} progressionEnabled={progressionEnabled} />
+      <Sidebar meta={navMeta} chats={chats} notifications={notifications} liveEnabled={liveEnabled} />
 
       <div className="min-w-0 flex-1 overflow-x-clip">
         {!shellChrome?.hideTopBar ? (
@@ -1112,7 +1105,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
           </>
         ) : null}
         <OfflineBanner />
-        {hub ? <SectionTabs hub={hub} pathname={shellPath} chats={chats} notifications={notifications} liveEnabled={liveEnabled} progressionEnabled={progressionEnabled} /> : null}
+        {hub ? <SectionTabs hub={hub} pathname={shellPath} chats={chats} notifications={notifications} liveEnabled={liveEnabled} /> : null}
 
         {/* Feed-width pages centre a 600 px column from tablets up (a 720 px
             4:5 photo was 900 px tall); the rail joins at lg. */}

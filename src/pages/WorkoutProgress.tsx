@@ -71,7 +71,8 @@ export default function WorkoutProgress() {
 
   const summary = useQuery({
     queryKey: ['workout-progress', 'summary', range.from, range.to, range.timezoneOffsetMinutes],
-    enabled,
+    // GET /workouts/records/summary is not flag-gated (the app shows the hub with the flag off too).
+    enabled: !gate.isPending,
     staleTime: 60_000,
     queryFn: async () => {
       const { data } = await api.get<ProgressSummary>('/workouts/records/summary', { params: { from: range.from, to: range.to, ...localDayParams() } });
@@ -122,7 +123,9 @@ export default function WorkoutProgress() {
 
   if (gate.isPending) return <PageSkeleton />;
   if (gate.isError) return <ErrorState title="Could not check what is available" error={gate.error} onRetry={() => gate.refetch()} />;
-  if (!enabled) return <Navigate to="/workouts/logs" replace />;
+  // The hub is visible with the flag off, as in the app; only the Year calendar, the hints and the
+  // Settings switch wait for `progression`. A Year deep link falls back to the quarter while off.
+  if (!enabled && period === 'year') return <Navigate to="/workouts/progress" replace />;
 
   // Which days feed the heatmap, and what the calendar card says about them.
   const calendarHidden = period === 'year' && calendar.isError && isFeatureDisabled(calendar.error);
@@ -148,7 +151,7 @@ export default function WorkoutProgress() {
         <Tabs
           variant="segmented"
           aria-label={PROGRESS_STRINGS.period}
-          tabs={PERIODS.map((p) => ({ key: p.key, label: p.label }))}
+          tabs={PERIODS.filter((p) => enabled || p.key !== 'year').map((p) => ({ key: p.key, label: p.label }))}
           value={period}
           onChange={(k: string) => setPeriod(k as ProgressPeriod)}
           className="max-w-md"

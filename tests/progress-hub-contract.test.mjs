@@ -39,17 +39,16 @@ test('the route and its entry points are registered, and every one hides behind 
   assert.match(layout, /\{ to: '\/workouts\/progress', label: 'Progress' \}/, 'HUBS.train');
   assert.match(layout, /\{ to: '\/workouts\/progress', label: 'Progress', Icon: TrendingUp \}/, 'SIDEBAR Train');
   assert.match(layout, /const PROGRESS_PATH = '\/workouts\/progress';/);
-  assert.match(layout, /const progressionEnabled = useFeature\('progression'\);/);
-  assert.match(layout, /progressionEnabled \? g\.items : g\.items\.filter\(\(i\) => i\.to !== PROGRESS_PATH\)/, 'sidebar filter');
-  assert.match(layout, /\.filter\(\(t\) => progressionEnabled \|\| t\.to !== PROGRESS_PATH\)/, 'hub tab filter');
-  assert.match(layout, /progressionEnabled=\{progressionEnabled\}/);
+  // The hub is visible with the flag off, like the app (GET /workouts/records/summary is not gated): no nav or tab filter.
+  assert.doesNotMatch(layout, /progressionEnabled/);
+  assert.match(layout, /\{ to: '\/workouts\/progress', label: 'Progress', Icon: TrendingUp \}/);
   // The Live gating this sits beside is untouched.
   assert.match(layout, /liveEnabled \? g\.items : g\.items\.filter\(\(i\) => i\.to !== LIVE_PATH\)/);
   assert.match(layout, /import \{ useLiveEnabled \} from '\.\.\/lib\/capabilities';/);
   assert.equal(count(layout, /useLiveEnabled\(\)\.enabled/g), 2);
   // WorkoutLogs: the button and the invalidation.
-  assert.match(logs, /const progressionEnabled = useFeature\('progression'\);/);
-  assert.match(logs, /\{progressionEnabled \? \(\s*<ButtonLink to="\/workouts\/progress" variant="secondary" icon=\{<TrendingUp size=\{18\} \/>\}>\s*View progress\s*<\/ButtonLink>\s*\) : null\}/);
+  assert.doesNotMatch(logs, /progressionEnabled/);
+  assert.match(logs, /<ButtonLink to="\/workouts\/progress" variant="secondary" icon=\{<TrendingUp size=\{18\} \/>\}>\s*View progress\s*<\/ButtonLink>/, 'View progress shows with the flag off');
   // Both writers of the log invalidate the hub: the save path and the delete path (the hub's queries carry a 60 s staleTime).
   assert.equal(count(logs, /qc\.invalidateQueries\(\{ queryKey: \['workout-progress'\] \}\);/g), 2, 'save and delete both invalidate the hub');
   assert.match(logs, /\^day-\\d\{4\}-\\d\{2\}-\\d\{2\}\$/, 'the #day-<date> deep link from a calendar cell');
@@ -65,14 +64,13 @@ test('the route and its entry points are registered, and every one hides behind 
   assert.match(logs, /api\.get<LogsResponse>\('\/workouts\/logs', \{ params: \{ page: 1, limit: 100 \} \}\)/);
 });
 
-test('the page waits for the capabilities answer, then hides or renders; nothing fetches before the flag is true', () => {
+test('the page waits for the capabilities answer; the summary is not flag-gated, the Year calendar is', () => {
   assert.match(caps, /export function useFeatureGate\(name: string\)/);
   assert.match(caps, /isPending: capabilities\.isPending,/);
   assert.match(page, /const gate = useFeatureGate\('progression'\);/);
   assert.match(page, /if \(gate\.isPending\) return <PageSkeleton \/>;/);
   assert.match(page, /if \(gate\.isError\) return <ErrorState title="Could not check what is available"/);
-  assert.match(page, /if \(!enabled\) return <Navigate to="\/workouts\/logs" replace \/>;/);
-  assert.match(page, /^\s+enabled,\s*$/m, 'the summary query is gated on the flag');
+  assert.match(page, /enabled: !gate\.isPending,/, 'the summary query waits only for the capabilities answer (the route is not flag-gated, as in the app)');
   assert.match(page, /enabled: enabled && period === 'year',/, 'the calendar query is gated on the flag and the Year chip');
   assert.doesNotMatch(page, /useCapabilities/, 'reads the shared gate, not the raw query');
   // useFeature keeps its pinned shape and FEATURE_DEFAULTS stays at four keys (progression rides on the unknown-name default).
@@ -184,4 +182,13 @@ test('the new surface carries none of the design\'s banned words and no exclamat
     }
     assert.doesNotMatch(read(file), /e-mail/i, 'email, not e-mail');
   }
+});
+
+test('with the flag off the hub stays, only the Year calendar and the hints wait (parity with the app)', () => {
+  const page = fs.readFileSync(new URL('../src/pages/WorkoutProgress.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(page, /if \(!enabled\) return <Navigate to="\/workouts\/logs" replace \/>;/);
+  assert.match(page, /if \(!enabled && period === 'year'\) return <Navigate to="\/workouts\/progress" replace \/>;/);
+  assert.match(page, /PERIODS\.filter\(\(p\) => enabled \|\| p\.key !== 'year'\)/);
+  assert.match(page, /enabled: enabled && period === 'year',/, 'the calendar read still waits for the flag');
+  assert.match(fs.readFileSync(new URL('../src/pages/settings/WorkoutSettingsSection.tsx', import.meta.url), 'utf8'), /useFeature\('progression'\)/, 'the hints switch still waits for the flag');
 });
