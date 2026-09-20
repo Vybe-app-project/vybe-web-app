@@ -18,9 +18,11 @@
  * mobile) and the premade catalogue for the starter. No Wave F flag gates
  * this card and no flagged route is called; the only switch is the optional
  * kill switch `features.getStartedCard === false` (absent = on; the flag is
- * not seeded, so useFeature would read it as off for ever).
+ * not seeded, so useFeature would read it as off for ever). Until
+ * /capabilities has answered the switch is undecided and nothing renders,
+ * so a switched-off card never flashes its skeleton on a cold load.
  */
-import { useEffect, useId, useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ComponentType, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, parseApiError } from '../lib/api';
@@ -89,11 +91,14 @@ export type FirstWeekCardViewProps = {
   doneTitles: readonly string[];
   progress: Progress;
   state: FirstWeekCardState;
-  onDismiss: () => void;
+  /** Receives the dismiss button's click, so the container can move focus before the card leaves. */
+  onDismiss: (event: MouseEvent<HTMLButtonElement>) => void;
   /** While true the "Log a workout" row is a button that opens the starter dialog instead of a link. */
   starterOffered?: boolean;
   onOpenStarter?: () => void;
   onRetry?: () => void;
+  /** True while a retry's reads are in flight: the Retry button shows busy and ignores a second press. */
+  isRetrying?: boolean;
 };
 
 const ROW_CLASS =
@@ -137,6 +142,7 @@ export function FirstWeekCardView({
   starterOffered: offered = false,
   onOpenStarter,
   onRetry,
+  isRetrying = false,
 }: FirstWeekCardViewProps) {
   const titleId = useId();
   return (
@@ -174,7 +180,7 @@ export function FirstWeekCardView({
       {state === 'error' ? (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <p className="text-sm text-text-2">{strings.states.error}</p>
-          <Button variant="secondary" size="sm" aria-label={strings.states.retryLabel} onClick={onRetry}>
+          <Button variant="secondary" size="sm" aria-label={strings.states.retryLabel} loading={isRetrying} onClick={onRetry}>
             {strings.states.retry}
           </Button>
         </div>
@@ -221,7 +227,11 @@ export type StarterSessionChoicesProps = {
   onClose?: () => void;
 };
 
-/** The body of "Your first session": Start here (when the catalogue has it) and Start empty. */
+/**
+ * The body of "Your first session": Start here (when the catalogue has it)
+ * and Start empty. Neither link overrides its name: the visible text is the
+ * accessible name, so "click Start here" works for speech input (WCAG 2.5.3).
+ */
 export function StarterSessionChoices({ template, onClose }: StarterSessionChoicesProps) {
   const copy = strings.starter;
   const minutes = starterMinutes(template === 'loading' ? null : template);
@@ -241,7 +251,6 @@ export function StarterSessionChoices({ template, onClose }: StarterSessionChoic
           size="lg"
           block
           className={choice}
-          aria-label={copy.label(minutes)}
           icon={<Play size={22} aria-hidden="true" className="shrink-0" />}
           onClick={onClose}
           data-testid="starter-start-here"
@@ -262,7 +271,6 @@ export function StarterSessionChoices({ template, onClose }: StarterSessionChoic
         size="lg"
         block
         className={choice}
-        aria-label={copy.emptyLabel}
         icon={<Plus size={22} aria-hidden="true" className="shrink-0" />}
         onClick={onClose}
         data-testid="starter-start-empty"
@@ -303,6 +311,25 @@ function browserStorage(): Storage | null {
   }
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Keep keyboard focus on the page when the card leaves: the first rendered
+ * focusable element after `root` in document order (on Home, the composer's
+ * "Share a session…" field, right where the card was), else the shell's main
+ * landmark. Called while the dismiss button still holds focus; without it
+ * focus falls to <body> and the toast's Undo sits at the far end of the DOM.
+ */
+function focusAfter(root: Element | null): void {
+  if (typeof document === 'undefined') return;
+  const next = root
+    ? Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).find(
+        (el) => !root.contains(el) && (root.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 && el.getClientRects().length > 0,
+      )
+    : undefined;
+  (next ?? document.getElementById('main'))?.focus();
+}
+
 export default function FirstWeekCard() {
   const user = useAuth((s) => s.user);
   const refreshUser = useAuth((s) => s.refreshUser);
@@ -311,17 +338,22 @@ export default function FirstWeekCard() {
   const capabilities = useCapabilities();
   const [starterOpen, setStarterOpen] = useState(false);
   const [dismissVersion, setDismissVersion] = useState(0);
+  /** Set by Undo: once the card is back, focus returns to its dismiss button, where it was. */
+  const restoreFocus = useRef(false);
 
   const userId = user?._id ? String(user._id) : null;
   const createdAt: unknown = user?.createdAt;
   const storage = useMemo(browserStorage, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const dismissedAt = useMemo(() => readDismissedAt(storage, userId), [storage, userId, dismissVersion]);
-  const featureOff = capabilities.data?.features?.getStartedCard === false;
+  // Pending counts as off: nothing renders until the switch has answered
+  // (Achievements gates on the same query the same way). The shell caches the
+  // answer for five minutes, so after the first paint this costs nothing.
+  const featureOff = capabilities.isPending || capabilities.data?.features?.getStartedCard === false;
   const now = Date.now();
 
-  // Decide before reading anything: a day-9 account, a dismissed card or the
-  // kill switch make no request at all.
+  // Decide before reading anything: a day-9 account, a dismissed card, an
+  // undecided switch or the kill switch make no request at all.
   const pre = decideCard({ userId, createdAt, now, dismissedAt, steps: null, featureOff });
   const enabled = pre.show;
 
@@ -400,6 +432,15 @@ export default function FirstWeekCard() {
       : null;
 
   const decision = decideCard({ userId, createdAt, now, dismissedAt, steps, featureOff });
+
+  // After Undo the card is mounted again; put focus back on its dismiss button
+  // (the toast's Undo has just unmounted from under the keyboard).
+  useEffect(() => {
+    if (!restoreFocus.current || !decision.show) return;
+    restoreFocus.current = false;
+    document.querySelector<HTMLElement>('[data-testid="first-week-dismiss"]')?.focus();
+  }, [decision.show]);
+
   if (!decision.show || !userId) return null;
 
   const createdAtMs = parseCreatedAt(createdAt) ?? now;
@@ -418,7 +459,9 @@ export default function FirstWeekCard() {
         : 'offline'
       : 'ready';
 
-  const dismiss = () => {
+  const dismiss = (event: MouseEvent<HTMLButtonElement>) => {
+    // Move focus first, while the card (the region around the button) is still in the DOM.
+    focusAfter(event.currentTarget.closest('[role="region"]'));
     writeDismissed(storage, userId, Date.now());
     setDismissVersion((v) => v + 1);
     toast.info(strings.dismiss.toast, {
@@ -426,6 +469,7 @@ export default function FirstWeekCard() {
         label: strings.dismiss.undo,
         onClick: () => {
           clearDismissed(storage, userId);
+          restoreFocus.current = true;
           setDismissVersion((v) => v + 1);
         },
       },
@@ -438,6 +482,9 @@ export default function FirstWeekCard() {
     void meals.refetch();
     void achievements.refetch();
   };
+  // A failed query keeps status 'error' while it refetches, so the state stays
+  // 'error'; the Retry button carries the busy signal instead.
+  const isRetrying = logs.isFetching || communities.isFetching || meals.isFetching || achievements.isFetching;
 
   const template: StarterTemplateLike | null | 'loading' = premade.isSuccess ? pickStarterTemplate(premade.data) : premade.isError ? null : 'loading';
 
@@ -453,6 +500,7 @@ export default function FirstWeekCard() {
         starterOffered={steps ? starterOffered(steps) : false}
         onOpenStarter={() => setStarterOpen(true)}
         onRetry={retry}
+        isRetrying={isRetrying}
       />
       <Modal open={starterOpen} onClose={() => setStarterOpen(false)} title={strings.starter.sheetTitle} size="sm">
         <StarterSessionChoices template={template} onClose={() => setStarterOpen(false)} />

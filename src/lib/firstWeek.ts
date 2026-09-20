@@ -260,21 +260,25 @@ export function windowDay(createdAtMs: number, now: number): number {
 
 export const isWithinWindow = (createdAtMs: number, now: number): boolean => windowDay(createdAtMs, now) <= FIRST_WEEK_DAYS;
 
-/** Midnight before `ms` in the device's zone. */
-export function startOfLocalDay(ms: number): number {
+/**
+ * The device-zone calendar date of `ms` as a whole day count, taken from the
+ * local year, month and day, so two dates subtract to whole calendar days
+ * even when a DST change makes the local day 23 or 25 hours long.
+ */
+export function localDayNumber(ms: number): number {
   const date = new Date(ms);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
 }
 
 /**
  * "Day 3 of your first week" is a position in the device's calendar: the day
- * after a 23:00 sign-up is day 2 the next morning. Clamped to 1..7 so the
- * line never names a day the card has already left (`windowDay` decides
- * visibility by elapsed time). Never a remaining count (DP-004).
+ * after a 23:00 sign-up is day 2 the next morning, and the day after a
+ * spring-forward Sunday is still day 2. Clamped to 1..7 so the line never
+ * names a day the card has already left (`windowDay` decides visibility by
+ * elapsed time). Never a remaining count (DP-004).
  */
 export function firstWeekDay(createdAtMs: number, now: number): number {
-  const days = Math.floor((startOfLocalDay(now) - startOfLocalDay(createdAtMs)) / DAY_MS) + 1;
+  const days = localDayNumber(now) - localDayNumber(createdAtMs) + 1;
   return Math.min(FIRST_WEEK_DAYS, Math.max(1, days));
 }
 
@@ -396,8 +400,10 @@ export type StarterLogSeed = {
 /** D-83 default: the seeded catalogue entry's title and its four moves, for matching either way. */
 export const STARTER_TEMPLATE_TITLE = 'Foundation Full Body';
 export const STARTER_EXERCISE_NAMES: readonly string[] = ['Bodyweight Squat', 'Incline Push-Up', 'Glute Bridge', 'Dead Bug'];
-/** The log's name, on both clients. */
+/** The log's name, on both clients (mobile starts the session with the same name). */
 export const STARTER_SESSION_NAME = 'Start here';
+/** The log form's seed key for the starter, so the form can word its description for a first session. */
+export const STARTER_SEED_KEY = 'starter';
 /** The spec's estimate; the catalogue's own `duration` wins when it carries one (the seed says 28). */
 export const STARTER_SESSION_MINUTES = 18;
 
@@ -543,8 +549,8 @@ export const firstWeekStrings = {
     emptyBody: 'Add your own exercises.',
     unavailable: 'The starter session isn’t available right now. Start empty instead.',
     loading: 'Checking the starter session',
-    label: (min: number) => `Start the starter session, about ${min} minutes`,
-    emptyLabel: 'Start an empty workout',
+    /** Under the log form's title when it is seeded with the starter (the library wording would read "Based on Start here."). */
+    logDescription: 'Your first session is filled in. Adjust what you actually did.',
     closeLabel: 'Close your first session',
   },
 } as const;

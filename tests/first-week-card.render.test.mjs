@@ -120,6 +120,14 @@ test('loading, error and offline states', () => {
   const error = view({ state: 'error', rows: [], onRetry: noop });
   assert.match(error, /Couldn’t load your first steps\./);
   assert.match(error, /<button[^>]*aria-label="Retry loading your first steps"[^>]*>[\s\S]*?Retry/);
+  const idle = error.match(/<button[^>]*aria-label="Retry loading your first steps"[^>]*>/)?.[0];
+  assert.ok(idle && !/aria-busy|disabled/.test(idle), 'Retry is idle before a press');
+
+  const retrying = view({ state: 'error', rows: [], onRetry: noop, isRetrying: true });
+  const busy = retrying.match(/<button[^>]*aria-label="Retry loading your first steps"[^>]*>/)?.[0];
+  assert.ok(busy, 'Retry stays while the reads are refetched');
+  assert.match(busy, /aria-busy="true"/, 'Retry shows busy while the reads are in flight');
+  assert.match(busy, /disabled/, 'a second press is ignored while retrying');
 
   const offline = view({ state: 'offline', rows: [] });
   assert.match(offline, /You’re offline\. Your first steps will show when you’re back online\./);
@@ -161,13 +169,13 @@ test('with the seeded template: Start here · 28 min to the starter link, plus S
   const here = html.match(/<a [^>]*data-testid="starter-start-here"[^>]*>/)?.[0];
   assert.ok(here, 'Start here is a link');
   assert.match(here, /href="\/workouts\/logs\?log=1&starter=1"/);
-  assert.match(here, /aria-label="Start the starter session, about 28 minutes"/);
+  assert.doesNotMatch(here, /aria-label=|aria-labelledby=/, 'the visible "Start here · 28 min" is the accessible name (WCAG 2.5.3)');
   assert.match(html, /Start here · 28 min/);
   assert.match(html, /Four moves, bodyweight, about 28 minutes\. Any length counts\./);
   const empty = html.match(/<a [^>]*data-testid="starter-start-empty"[^>]*>/)?.[0];
   assert.ok(empty, 'Start empty is a link');
   assert.match(empty, /href="\/workouts\/logs\?log=1"/);
-  assert.match(empty, /aria-label="Start an empty workout"/);
+  assert.doesNotMatch(empty, /aria-label=|aria-labelledby=/, 'the visible "Start empty" is the accessible name (WCAG 2.5.3)');
   assert.match(html, /Start empty/);
   assert.match(html, /Add your own exercises\./);
   assert.doesNotMatch(html, /starter-unavailable|aria-busy/);
@@ -195,5 +203,5 @@ test('while the catalogue is read: aria-busy, no Start here yet, Start empty alr
 test('a template without a duration reads 18 min', () => {
   const html = choices({ ...SEED, duration: undefined });
   assert.match(html, /Start here · 18 min/);
-  assert.match(html, /aria-label="Start the starter session, about 18 minutes"/);
+  assert.match(html, /Four moves, bodyweight, about 18 minutes\. Any length counts\./);
 });

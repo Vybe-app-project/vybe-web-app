@@ -15,7 +15,7 @@ import {
 } from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import { formatSeconds } from '../lib/duration';
-import { pickStarterTemplate, starterLogSeed } from '../lib/firstWeek';
+import { STARTER_SEED_KEY, firstWeekStrings, pickStarterTemplate, starterLogSeed } from '../lib/firstWeek';
 import {
   Badge,
   Button,
@@ -256,7 +256,15 @@ function LogModal({
       open={open}
       onClose={onClose}
       title={editing ? 'Edit session' : 'Log a session'}
-      description={editing ? undefined : seed?.name ? `Based on ${seed.name}. Adjust what you actually did.` : 'What you did, when, and how much you moved.'}
+      description={
+        editing
+          ? undefined
+          : seedKey === STARTER_SEED_KEY
+            ? firstWeekStrings.starter.logDescription
+            : seed?.name
+              ? `Based on ${seed.name}. Adjust what you actually did.`
+              : 'What you did, when, and how much you moved.'
+      }
       size="lg"
       footer={
         <>
@@ -546,7 +554,7 @@ export default function WorkoutLogs() {
     if (fromId && fromWorkout.isPending) return; // wait for the prefill
     if (wantsStarter && premade.isPending) return; // wait for the catalogue; a failure falls back to the constant
     if (fromId && fromWorkout.isError) toast.error('Could not load that workout; starting an empty session.');
-    if (wantsStarter) openNew({ key: 'starter', value: starterLogSeed(premade.isSuccess ? pickStarterTemplate(premade.data) : null) });
+    if (wantsStarter) openNew({ key: STARTER_SEED_KEY, value: starterLogSeed(premade.isSuccess ? pickStarterTemplate(premade.data) : null) });
     else openNew(fromId && fromWorkout.data ? { key: fromWorkout.data._id, value: seedFromWorkout(fromWorkout.data) } : null);
     setParams(
       (prev) => {

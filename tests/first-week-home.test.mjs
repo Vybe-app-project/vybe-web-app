@@ -7,11 +7,12 @@
  * brief says (one Feed mount, the kill-switch read, no flagged route).
  */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { register } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 register('./ts-loader.mjs', import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -51,6 +52,42 @@ test('firstWeekDay is a calendar position in the device zone; windowDay is elaps
   assert.equal(fw.firstWeekDay(created, local(2026, 9, 22, 12, 0)), 7, 'clamped to 7, never 9');
   assert.equal(fw.firstWeekDay(created, local(2026, 9, 10, 12, 0)), 1, 'a future createdAt is day 1');
   assert.equal(fw.windowDay(created, local(2026, 9, 10, 12, 0)), 1);
+  assert.equal(fw.localDayNumber(local(2026, 9, 15, 23, 59)) - fw.localDayNumber(local(2026, 9, 14, 0, 0)), 1, 'one calendar day apart, whatever the hours');
+  assert.equal(fw.localDayNumber(local(2026, 9, 15, 0, 0)), fw.localDayNumber(local(2026, 9, 15, 23, 59)), 'the same calendar day');
+});
+
+test('firstWeekDay counts calendar days across a DST change (node spawned under TZ=America/New_York)', () => {
+  // The host zone may never cross a transition, so the module runs in a child
+  // pinned to New York, where 2026-03-08 has 23 hours and 2026-11-01 has 25.
+  const loader = pathToFileURL(path.join(root, 'tests', 'ts-loader.mjs')).href;
+  const module = pathToFileURL(path.join(root, 'src', 'lib', 'firstWeek.ts')).href;
+  const script = `
+    import { register } from 'node:module';
+    register(${JSON.stringify(loader)});
+    const fw = await import(${JSON.stringify(module)});
+    const local = (y, m, d, hh, mm = 0) => new Date(y, m - 1, d, hh, mm).getTime();
+    process.stdout.write(JSON.stringify({
+      zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      springOffsets: [new Date(2026, 2, 8, 1).getTimezoneOffset(), new Date(2026, 2, 9, 1).getTimezoneOffset()],
+      afterSpringForward: fw.firstWeekDay(local(2026, 3, 8, 10), local(2026, 3, 9, 10)),
+      intoSpringForward: fw.firstWeekDay(local(2026, 3, 7, 23, 30), local(2026, 3, 8, 8)),
+      afterFallBack: fw.firstWeekDay(local(2026, 11, 1, 10), local(2026, 11, 2, 10)),
+      weekAcrossSpring: fw.firstWeekDay(local(2026, 3, 5, 12), local(2026, 3, 11, 12)),
+      clampedAcrossSpring: fw.firstWeekDay(local(2026, 3, 5, 12), local(2026, 3, 12, 12)),
+      sameDay: fw.firstWeekDay(local(2026, 3, 8, 0, 30), local(2026, 3, 8, 23, 30)),
+    }));
+  `;
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, env: { ...process.env, TZ: 'America/New_York' }, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const out = JSON.parse(run.stdout);
+  assert.equal(out.zone, 'America/New_York', 'the child honours TZ');
+  assert.deepEqual(out.springOffsets, [300, 240], 'the clocks moved on 2026-03-08');
+  assert.equal(out.afterSpringForward, 2, 'the day after a 23 h local day is day 2, not day 1');
+  assert.equal(out.intoSpringForward, 2, 'the morning after a late sign-up is day 2 even when that morning came an hour early');
+  assert.equal(out.afterFallBack, 2, 'the day after a 25 h local day is day 2');
+  assert.equal(out.weekAcrossSpring, 7);
+  assert.equal(out.clampedAcrossSpring, 7, 'clamped, never 8');
+  assert.equal(out.sameDay, 1);
 });
 
 test('the window closes on day 8', () => {
@@ -380,9 +417,9 @@ test('the copy is the spec copy, verbatim', () => {
   assert.equal(s.starter.emptyBody, 'Add your own exercises.');
   assert.equal(s.starter.unavailable, 'The starter session isn’t available right now. Start empty instead.');
   assert.equal(s.starter.loading, 'Checking the starter session');
-  assert.equal(s.starter.label(28), 'Start the starter session, about 28 minutes');
-  assert.equal(s.starter.emptyLabel, 'Start an empty workout');
+  assert.equal(s.starter.logDescription, 'Your first session is filled in. Adjust what you actually did.');
   assert.equal(s.starter.closeLabel, 'Close your first session');
+  assert.ok(!('label' in s.starter) && !('emptyLabel' in s.starter), 'the starter links carry no name override: the visible text is the name');
 });
 
 /* ------------------------------------------------------------ source pins */
@@ -405,6 +442,7 @@ test('Feed mounts the card once, right after the story tray and before the compo
 test('the card reads only the getStartedCard kill switch and never a Wave F flag or route', () => {
   const card = read('src/pages/FirstWeekCard.tsx');
   assert.match(card, /features\?\.getStartedCard === false/);
+  assert.match(card, /capabilities\.isPending \|\| capabilities\.data\?\.features\?\.getStartedCard === false/, 'an unanswered switch renders nothing, never a skeleton that then vanishes');
   assert.doesNotMatch(card, /useFeature\(['"]getStartedCard/);
   assert.doesNotMatch(card, /useFeature\(/);
   assert.doesNotMatch(card, /liveVideoEnabled|useLiveEnabled|livestreamRelay|features\.live\b/, 'the card never reads the Live gates');
@@ -439,10 +477,21 @@ test('WorkoutLogs seeds the form from ?starter=1 and deletes the param; Discover
   assert.match(logs, /starterLogSeed\(/);
   assert.match(logs, /pickStarterTemplate\(/);
   assert.match(logs, /queryKey: \['workouts', 'premade'\]/);
+  assert.equal(fw.STARTER_SEED_KEY, 'starter');
+  assert.match(logs, /key: STARTER_SEED_KEY/, 'the starter seed is keyed by the shared constant');
+  assert.match(logs, /seedKey === STARTER_SEED_KEY\s*\?\s*firstWeekStrings\.starter\.logDescription/, 'the starter gets its own description, never "Based on Start here."');
   const discover = read('src/pages/Discover.tsx');
   assert.match(discover, /useSearchParams/);
   assert.match(discover, /get\(['"]tab['"]\)/);
   assert.match(discover, /isTabKey\(urlTab\)/);
+});
+
+test('dismissing moves focus off the card before it leaves, and Undo brings it back', () => {
+  const card = read('src/pages/FirstWeekCard.tsx');
+  assert.match(card, /focusAfter\(event\.currentTarget\.closest\('\[role="region"\]'\)\);\s*writeDismissed\(/, 'focus moves first, while the card is still in the DOM');
+  assert.match(card, /getElementById\('main'\)/, 'the shell’s main landmark is the fallback');
+  assert.match(card, /restoreFocus\.current = true;/);
+  assert.match(card, /\[data-testid="first-week-dismiss"\]'\)\?\.focus\(\)/);
 });
 
 test('the new test ids and labels exist and no existing ones were renamed', () => {
