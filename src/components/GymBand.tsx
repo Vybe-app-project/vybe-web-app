@@ -222,13 +222,16 @@ function NoGymBody({ Heading, action }: { Heading: 'h1' | 'h2' | 'p'; action?: R
         </p>
         <Heading className="type-display gym-band-title text-band">{NO_GYM_COPY.title}</Heading>
         <p className="gym-band-body-copy">{NO_GYM_COPY.body}</p>
-        <div className="gym-band-actions">
-          {action ?? (
-            <ButtonLink to={NO_GYM_COPY.href} variant="primary">
-              {NO_GYM_COPY.action}
-            </ButtonLink>
-          )}
-        </div>
+        {/* `null` means the page already offers the way to a gym (the Gyms search); `undefined` takes the default link. */}
+        {action === null ? null : (
+          <div className="gym-band-actions">
+            {action ?? (
+              <ButtonLink to={NO_GYM_COPY.href} variant="primary">
+                {NO_GYM_COPY.action}
+              </ButtonLink>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -324,6 +327,7 @@ export function GymBand({
       ref={ref}
       className={cx('gym-band dark', className)}
       data-variant={variant}
+      data-empty={!loading && variant === 'full' && !gym ? 'true' : undefined}
       data-collapsed={collapsed ? 'true' : 'false'}
       data-loading={loading ? 'true' : undefined}
       aria-label={variant === 'full' ? (gym ? `${gym.name}, your gym` : NO_GYM_COPY.kicker) : title}
