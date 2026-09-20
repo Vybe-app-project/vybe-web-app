@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { commentTotal, likeTotal, tokenizeContent } from '../lib/feedLogic';
+import { communityPath, isObjectId } from '../lib/gyms';
 import {
   compactNumber,
   displayName,
@@ -40,7 +41,9 @@ import {
   Flag,
   Heart,
   Link as LinkIcon,
+  MapPin,
   MessageCircle,
+  Play,
   Send,
   ShareUp,
   Shield,
@@ -52,6 +55,86 @@ import { useReportModal } from './Report';
 import { WorkoutSummaryCard } from './WorkoutSummaryCard';
 import { hasWorkoutSummary } from '../lib/workoutSummary';
 import { RecapSummaryCard, hasRecapSummary } from './RecapSummaryCard';
+
+/* ------------------------------------------------------------------ */
+/* The viewer's gym                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `GET /users/me` carries `homeGym` as either a bare community id or an
+ * OpenStreetMap place (`{ osmId, name }`); the key is absent when never set.
+ * A place names itself; a community needs the details call, read under the
+ * same key the gym page uses (`['community', id]`) so the two share one cache
+ * entry and the shell's own read is never duplicated.
+ */
+export type ViewerGym = {
+  id: string;
+  kind: 'community' | 'place';
+  /** Empty while a community's details are still loading; callers fall back. */
+  name: string;
+};
+
+type HomeGymField = {
+  community?: string | { _id?: string; name?: string } | null;
+  place?: { osmId?: string; name?: string } | null;
+} | null;
+
+const homeGymOf = (user: unknown): HomeGymField => {
+  const field = user && typeof user === 'object' ? (user as { homeGym?: unknown }).homeGym : undefined;
+  return field && typeof field === 'object' ? (field as HomeGymField) : null;
+};
+
+const communityIdOf = (home: HomeGymField): string => {
+  const c = home?.community;
+  if (typeof c === 'string') return c;
+  return c && typeof c === 'object' && typeof c._id === 'string' ? c._id : '';
+};
+
+export function useViewerGym(): ViewerGym | null {
+  const home = useAuth((s) => homeGymOf(s.user));
+  const communityId = communityIdOf(home);
+  const detail = useQuery({
+    queryKey: ['community', communityId],
+    enabled: isObjectId(communityId),
+    staleTime: 5 * 60_000,
+    retry: false,
+    queryFn: async () => {
+      const { data } = await api.get(`/gyms/community/${communityId}`);
+      return (data?.data || data?.gymCommunity || data) as { _id?: string; name?: string };
+    },
+  });
+  if (communityId) {
+    const populated = home?.community && typeof home.community === 'object' ? home.community.name : undefined;
+    return { id: communityId, kind: 'community', name: (detail.data?.name || populated || '').trim() };
+  }
+  const place = home?.place;
+  if (place?.osmId && place.name?.trim()) return { id: place.osmId, kind: 'place', name: place.name.trim() };
+  return null;
+}
+
+/** Where a gym row links: the community page, or nowhere for a bare place. */
+export const viewerGymHref = (gym: ViewerGym | null): string | null => (gym?.kind === 'community' ? communityPath(gym.id) : null);
+
+/** The gym a member has set, named — or null when the data cannot name it. */
+export function homeGymLabel(user: unknown, viewer: ViewerGym | null): string | null {
+  const home = homeGymOf(user);
+  if (!home) return null;
+  const c = home.community;
+  if (c && typeof c === 'object' && c.name?.trim()) return c.name.trim();
+  const id = communityIdOf(home);
+  if (id && viewer?.kind === 'community' && viewer.id === id && viewer.name) return viewer.name;
+  if (home.place?.name?.trim()) return home.place.name.trim();
+  return null;
+}
+
+/** The gym an author shares with the viewer, or null. Only ever the viewer's own gym name. */
+export function sharedGymLabel(author: unknown, viewer: ViewerGym | null): string | null {
+  if (!viewer || !viewer.name) return null;
+  const home = homeGymOf(author);
+  if (!home) return null;
+  if (viewer.kind === 'community') return communityIdOf(home) === viewer.id ? viewer.name : null;
+  return home.place?.osmId === viewer.id ? viewer.name : null;
+}
 
 /* ------------------------------------------------------------------ */
 /* Hidden authors (client-side mute)                                   */
@@ -162,6 +245,48 @@ function mediaAlt(post: Post, index: number, total: number): string {
 const GRID_PREVIEW = 4;
 
 /**
+ * A video in a card: the poster frame with one centred play control. The
+ * browser's own controls appear only once the clip has been started, so the
+ * feed reads as pictures until someone asks for a player.
+ */
+function FeedVideo({ media, label }: { media: PostMedia; label: string }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [started, setStarted] = useState(false);
+  const start = () => {
+    setStarted(true);
+    void ref.current?.play().catch(() => {
+      // Autoplay refused: the native controls are showing now, so a second tap plays.
+    });
+  };
+  return (
+    <span className="relative block h-full w-full">
+      <video
+        ref={ref}
+        src={videoSrc(media)}
+        poster={media.thumbnail ? mediaUrl(media.thumbnail) : undefined}
+        controls={started}
+        playsInline
+        preload="metadata"
+        onPlay={() => setStarted(true)}
+        className="relative z-[2] h-full w-full bg-surface-3 object-cover"
+      />
+      {!started ? (
+        <button
+          type="button"
+          onClick={start}
+          aria-label={label}
+          className="absolute inset-0 z-[3] grid place-items-center focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-focus"
+        >
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-scrim text-[var(--navy-50)] shadow-2">
+            <Play size={26} filled aria-hidden="true" />
+          </span>
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+/**
  * Card media. The feed shows up to four tiles with a "+N" button on the last
  * one; the detail page (`expanded`) lays out every item. `onOpen` makes tiles
  * open the lightbox at that index (detail page) and always powers "+N".
@@ -171,11 +296,14 @@ export function PostMediaGrid({
   className,
   expanded = false,
   onOpen,
+  bleed = false,
 }: {
   post: Post;
   className?: string;
   expanded?: boolean;
   onOpen?: (index: number) => void;
+  /** Feed items: edge to edge on phones (to the gutter), square corners at the viewport edge, a reserved ratio. */
+  bleed?: boolean;
 }) {
   const medias = post.medias || [];
   if (!medias.length) return null;
@@ -187,7 +315,8 @@ export function PostMediaGrid({
   return (
     <div
       className={cx(
-        'grid gap-0.5 overflow-hidden rounded-md bg-surface-2',
+        'grid gap-0.5 overflow-hidden bg-surface-2',
+        bleed ? '-mx-gutter rounded-none sm:mx-0 sm:rounded-md' : 'rounded-md',
         count === 1 ? 'grid-cols-1' : 'grid-cols-2',
         className,
       )}
@@ -204,21 +333,17 @@ export function PostMediaGrid({
 
         const media =
           m.type === 'video' ? (
-            <video
-              src={videoSrc(m)}
-              poster={m.thumbnail ? mediaUrl(m.thumbnail) : undefined}
-              controls
-              playsInline
-              preload="metadata"
-              className="relative z-[2] h-full w-full bg-surface-3 object-cover"
-            />
+            <FeedVideo media={m} label={`Play video${count > 1 ? ` ${i + 1} of ${count}` : ''} by ${displayName(post.author)}`} />
           ) : (
             <img
               src={src}
               alt={alt}
               loading="lazy"
               decoding="async"
-              className={cx('w-full object-cover', count === 1 && !ratio ? 'h-auto max-h-[36rem]' : 'h-full')}
+              className={cx(
+                'w-full',
+                count === 1 && !ratio ? (bleed ? 'h-full object-contain' : 'h-auto max-h-[36rem] object-cover') : 'h-full object-cover',
+              )}
             />
           );
 
@@ -229,6 +354,8 @@ export function PostMediaGrid({
               'relative min-w-0 bg-surface-2',
               tall && 'row-span-2 h-full',
               count > 1 && !tall && 'aspect-square',
+              // A single photo of unknown size reserves 4:5 so the feed never shifts as it decodes.
+              count === 1 && !ratio && bleed && 'aspect-[4/5]',
             )}
             style={count === 1 && ratio ? { aspectRatio: ratio } : undefined}
           >
@@ -453,11 +580,14 @@ export function PostContent({
   hashtags,
   className,
   clamp = false,
+  lead,
 }: {
   text?: string;
   hashtags?: string[];
   className?: string;
   clamp?: boolean;
+  /** Rendered at the head of the caption: the author's bold username. */
+  lead?: ReactNode;
 }) {
   const body = (text || '').trim();
   const ref = useRef<HTMLParagraphElement>(null);
@@ -489,8 +619,9 @@ export function PostContent({
     <div className={className}>
       <p
         ref={ref}
-        className={cx('prose-measure whitespace-pre-wrap break-words text-base text-text-1', clamped && 'line-clamp-6')}
+        className={cx('prose-measure whitespace-pre-wrap break-words text-sm leading-relaxed text-text-1', clamped && 'line-clamp-6')}
       >
+        {lead ? <>{lead} </> : null}
         {tokens.map((t, i) =>
           t.kind === 'hashtag' ? (
             <HashtagLink key={i} tag={t.tag}>
@@ -565,8 +696,8 @@ function ActionButton({
       aria-label={typeof count === 'number' ? `${label} (${count})` : label}
       title={label}
       className={cx(
-        'relative z-[2] inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-sm px-2.5 text-sm font-semibold transition-colors dur-1',
-        active ? activeClass : 'text-text-2 hover:bg-surface-2 hover:text-text-1',
+        'relative z-[2] inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-sm px-2 text-sm font-semibold transition-colors dur-1',
+        active ? activeClass : 'text-text-1 hover:text-text-2',
         'disabled:opacity-100',
         className,
       )}
@@ -600,6 +731,12 @@ export type PostCardProps = {
   /** Called after the post was deleted, so a page hosting it can leave. */
   onDeleted?: () => void;
   footer?: ReactNode;
+  /**
+   * `item` (feeds, profile lists): a full-width post under a hairline, media
+   * bleeding to the gutter on phones — nothing boxed on a white page.
+   * `card` (the detail page): the tonal card.
+   */
+  surface?: 'card' | 'item';
 };
 
 function authorHandle(author?: PublicUser | null): string {
@@ -616,6 +753,7 @@ export default function PostCard({
   onComment,
   onDeleted,
   footer,
+  surface = 'card',
 }: PostCardProps) {
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
@@ -740,6 +878,9 @@ export default function PostCard({
   });
 
   const author = post.author;
+  const viewerGym = useViewerGym();
+  // The author's gym, only when it is the viewer's too: the one gym this client can name.
+  const gymLine = sharedGymLabel(author, viewerGym);
   const authorId = author?._id;
   const isOwn = !!me && !!authorId && String(authorId) === String(me._id);
   const authorHref = !authorId ? null : isOwn ? '/profile' : `/u/${authorId}`;
@@ -839,36 +980,46 @@ export default function PostCard({
   ];
 
   const detailHref = `/p/${post._id}`;
-  const avatarEl = <Avatar src={author?.avatar} name={name} size="md" />;
-  /* Name + handle as one block: two lines ≈ 44 px, so the author link is a full-size target. */
+  const item = surface === 'item';
+  const avatarEl = <Avatar src={author?.avatar} name={name} size={32} seed={authorId} />;
+  const username = author?.username || name;
+  /* One row: bold username, badges, the shared gym, then the time — the Instagram header. */
   const identity = (
-    <>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="truncate text-md font-semibold text-text-1">{name}</span>
-        {author?.isIdentityVerified ? <BadgeCheck size={18} className="shrink-0 text-brand" aria-label="Verified" role="img" /> : null}
-        {author?.isCoach || author?.isTrainer ? (
-          <Badge tone="brand" size="sm">
-            Coach
-          </Badge>
-        ) : null}
-      </span>
-      <span className="block truncate text-xs text-text-2">{author?.username ? `@${author.username}` : ' '}</span>
-    </>
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+      <span className="truncate font-semibold text-text-1">{username}</span>
+      {author?.isIdentityVerified ? <BadgeCheck size={16} className="shrink-0 text-brand" aria-label="Verified" role="img" /> : null}
+      {author?.isCoach || author?.isTrainer ? (
+        <Badge tone="brand" size="sm">
+          Coach
+        </Badge>
+      ) : null}
+      {gymLine ? (
+        <span className="inline-flex min-w-0 items-center gap-1 text-text-2">
+          <span aria-hidden="true" className="text-text-3">·</span>
+          <MapPin size={13} className="shrink-0 text-text-3" aria-hidden="true" />
+          <span className="truncate">{gymLine}</span>
+        </span>
+      ) : null}
+      <span aria-hidden="true" className="text-text-3">·</span>
+      <time dateTime={post.createdAt} className="tabular text-text-3">
+        {timeAgo(post.createdAt)}
+      </time>
+    </span>
   );
   // Screen readers read the two lines as one run ("Vybe Test User@vybetester"); a separator fixes the name.
   const identityLabel = author?.username && author.username !== name ? `${name}, @${author.username}` : name;
+  const usernameLead = authorHref ? (
+    <Link to={authorHref} viewTransition className="relative z-[2] font-semibold text-text-1 hover:underline">
+      {username}
+    </Link>
+  ) : (
+    <span className="font-semibold text-text-1">{username}</span>
+  );
 
-  return (
-    <Card
-      role="article"
-      aria-label={`Post by ${name}`}
-      to={linkToDetail ? detailHref : undefined}
-      linkLabel={linkToDetail ? `Open post by ${name}` : undefined}
-      interactive={linkToDetail}
-      className="overflow-hidden"
-    >
+  const body = (
+    <>
       {/* header */}
-      <div className="flex items-start gap-3">
+      <div className="flex items-center gap-3">
         {authorHref ? (
           <Link to={authorHref} viewTransition aria-label={name} className="relative z-[2] -m-0.5 shrink-0 rounded-full p-0.5">
             {avatarEl}
@@ -882,21 +1033,16 @@ export default function PostCard({
             to={authorHref}
             viewTransition
             aria-label={identityLabel}
-            className="relative z-[2] flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-xs [&:hover_span:first-child_span:first-child]:underline"
+            className="relative z-[2] flex min-h-11 min-w-0 flex-1 items-center rounded-xs [&:hover_span:first-child_span:first-child]:underline"
           >
             {identity}
           </Link>
         ) : (
-          <div className="flex min-h-11 min-w-0 flex-1 flex-col justify-center">{identity}</div>
+          <div className="flex min-h-11 min-w-0 flex-1 items-center">{identity}</div>
         )}
 
-        <div className="flex shrink-0 items-start gap-1">
-          <time dateTime={post.createdAt} className="tabular pt-2.5 text-xs text-text-3">
-            {timeAgo(post.createdAt)}
-          </time>
-          <div className="relative z-[2] -mr-3 -mt-1.5">
-            <Menu items={menuItems} label={`More options for ${name}’s post`} />
-          </div>
+        <div className="relative z-[2] -mr-2 shrink-0">
+          <Menu items={menuItems} label={`More options for ${name}’s post`} />
         </div>
       </div>
 
@@ -904,7 +1050,7 @@ export default function PostCard({
         <Link
           to={`/communities?community=${encodeURIComponent(post.community._id)}`}
           viewTransition
-          className="relative z-[2] mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-xs text-xs font-semibold text-brand-text underline-offset-2 hover:underline"
+          className="relative z-[2] mt-1 inline-flex max-w-full items-center gap-1.5 rounded-xs text-xs font-semibold text-brand-text underline-offset-2 hover:underline"
           aria-label={`Posted in ${post.community.name || 'a community'} — open community`}
         >
           <Users size={14} className="shrink-0" />
@@ -912,25 +1058,23 @@ export default function PostCard({
         </Link>
       ) : null}
 
-      {/* media first, then the workout card, then text */}
-      <PostMediaGrid post={post} className="mt-3" expanded={expandMedia} onOpen={setLightbox} />
+      {/* media, then a shared workout or recap, then the icon row, counts and caption */}
+      <PostMediaGrid post={post} className="mt-3" expanded={expandMedia} onOpen={setLightbox} bleed={item} />
       {hasWorkoutSummary(post.workoutSummary) ? <WorkoutSummaryCard summary={post.workoutSummary} className="mt-3" /> : null}
       {hasRecapSummary(post.recapSummary) ? <RecapSummaryCard summary={post.recapSummary} className="mt-3" to={isOwn ? `/recaps/${post.recapSummary.recapId}` : null} /> : null}
-      <PostContent text={post.content} hashtags={post.hashtags} className="mt-3" clamp={!expandMedia} />
 
-      {/* action bar */}
-      <div className="-mx-1 mt-2 flex items-center gap-0.5 border-t border-line pt-2">
+      {/* icon row: like · comment · share, save on the right */}
+      <div className="-mx-2 mt-1 flex items-center">
         <ActionButton
           label={liked ? 'Unlike' : 'Like'}
           pressed={liked}
           active={liked}
-          activeClass="text-danger hover:bg-danger-soft"
+          activeClass="text-danger"
           onClick={toggleLike}
           disabled={likeMutation.isPending}
-          count={likes}
           icon={
             <span className={cx('inline-flex', heart.className)}>
-              <Heart size={22} filled={liked} />
+              <Heart size={24} filled={liked} />
             </span>
           }
         />
@@ -938,25 +1082,41 @@ export default function PostCard({
           label={hideComposer ? 'Comment' : showComment ? 'Hide comment box' : 'Comment'}
           pressed={hideComposer ? undefined : showComment}
           onClick={comment}
-          count={commentCount}
-          icon={<MessageCircle size={22} />}
+          icon={<MessageCircle size={24} />}
         />
-        <ActionButton label="Share" onClick={() => void sharePost(post, toast)} icon={<ShareUp size={22} />} />
+        <ActionButton label="Share" onClick={() => void sharePost(post, toast)} icon={<ShareUp size={24} />} />
         <ActionButton
           label={bookmarked ? 'Remove from saved' : 'Save'}
           pressed={bookmarked}
           active={bookmarked}
-          activeClass="text-brand-text hover:bg-brand-soft"
+          activeClass="text-text-1"
           onClick={toggleSave}
           disabled={bookmarkMutation.isPending}
           className="ml-auto"
           icon={
             <span className={cx('inline-flex', save.className)}>
-              <Bookmark size={22} filled={bookmarked} />
+              <Bookmark size={24} filled={bookmarked} />
             </span>
           }
         />
       </div>
+
+      {likes > 0 ? (
+        <p className="tabular text-sm font-semibold text-text-1" aria-live="polite">
+          <span key={likes} className="motion-count inline-block">
+            {compactNumber(likes)}
+          </span>{' '}
+          {likes === 1 ? 'like' : 'likes'}
+        </p>
+      ) : null}
+
+      <PostContent text={post.content} hashtags={post.hashtags} className="mt-1" clamp={!expandMedia} lead={usernameLead} />
+
+      {linkToDetail && commentCount > 0 && freshComments.length === 0 ? (
+        <Link to={`${detailHref}#comments`} viewTransition className="relative z-[2] mt-1 inline-block text-sm text-text-2 hover:underline">
+          View all {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
+        </Link>
+      ) : null}
 
       {showComment && !hideComposer ? (
         <form
@@ -1042,6 +1202,35 @@ export default function PostCard({
       />
 
       {reportModal}
+    </>
+  );
+
+  if (item) {
+    return (
+      <article aria-label={`Post by ${name}`} className="relative border-b border-line pb-4 pt-3 first:pt-0 last:border-b-0">
+        {linkToDetail ? (
+          <Link
+            to={detailHref}
+            viewTransition
+            aria-label={`Open post by ${name}`}
+            className="absolute inset-0 z-[1] rounded-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          />
+        ) : null}
+        {body}
+      </article>
+    );
+  }
+
+  return (
+    <Card
+      role="article"
+      aria-label={`Post by ${name}`}
+      to={linkToDetail ? detailHref : undefined}
+      linkLabel={linkToDetail ? `Open post by ${name}` : undefined}
+      interactive={linkToDetail}
+      className="overflow-hidden"
+    >
+      {body}
     </Card>
   );
 }

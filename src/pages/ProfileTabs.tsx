@@ -5,6 +5,7 @@ import { compactNumber as compactStat, timeAgo, type Post } from '../lib/hooks';
 import {
   Badge,
   Card,
+  CardGrid,
   CardMedia,
   EmptyState,
   ErrorState,
@@ -119,6 +120,7 @@ export function ProfilePosts({ userId, isOwn = false, name }: PanelProps) {
   if (!data?.length)
     return isOwn ? (
       <EmptyState
+        family="social"
         title="No posts yet"
         message="Share a session, a PR or a meal and it shows up here for people who follow you."
         action={{ label: 'Create a post', to: '/?compose=1' }}
@@ -133,9 +135,9 @@ export function ProfilePosts({ userId, isOwn = false, name }: PanelProps) {
     );
 
   return (
-    <div className="space-y-4">
+    <div>
       {data.map((post) => (
-        <PostCard key={post._id} post={post} invalidate={[['user-posts', userId], ['feed']]} />
+        <PostCard key={post._id} post={post} invalidate={[['user-posts', userId], ['feed']]} surface="item" />
       ))}
     </div>
   );
@@ -178,7 +180,7 @@ export function ProfileSaved() {
   if (!data?.length)
     return (
       <EmptyState
-        icon={<Bookmark size={26} />}
+        family="social"
         title="Nothing saved yet"
         message="Tap the bookmark on any post to keep it here for later. Only you can see this list."
         action={{ label: 'Back to your feed', to: '/' }}
@@ -186,9 +188,9 @@ export function ProfileSaved() {
     );
 
   return (
-    <div className="space-y-4" aria-label="Saved posts">
+    <div aria-label="Saved posts">
       {data.map((post) => (
-        <PostCard key={post._id} post={post} invalidate={[['bookmarks'], ['feed']]} />
+        <PostCard key={post._id} post={post} invalidate={[['bookmarks'], ['feed']]} surface="item" />
       ))}
     </div>
   );
@@ -250,7 +252,7 @@ export function WorkoutTile({ workout }: { workout: WorkoutItem }) {
 
 function TileSkeleton({ count = 4 }: { count?: number }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2" aria-busy="true">
+    <CardGrid min="18rem" className="gap-3" aria-busy="true">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="card flex gap-3 p-3">
           <Skeleton className="h-16 w-16 shrink-0 rounded-md" />
@@ -261,7 +263,7 @@ function TileSkeleton({ count = 4 }: { count?: number }) {
           </div>
         </div>
       ))}
-    </div>
+    </CardGrid>
   );
 }
 
@@ -292,6 +294,7 @@ export function ProfileWorkouts({ userId, isOwn = false, name }: PanelProps) {
   if (!data?.length)
     return isOwn ? (
       <EmptyState
+        family="train"
         title="No workouts yet"
         message="Build your first workout, or log a session you just finished and it lands here."
         action={{ label: 'New workout', to: '/workouts?log=1', icon: <Dumbbell size={18} /> }}
@@ -307,11 +310,11 @@ export function ProfileWorkouts({ userId, isOwn = false, name }: PanelProps) {
     );
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <CardGrid min="18rem" className="gap-3">
       {data.map((w) => (
         <WorkoutTile key={w._id} workout={w} />
       ))}
-    </div>
+    </CardGrid>
   );
 }
 
@@ -404,6 +407,7 @@ export function ProfileMeals({ userId, isOwn = false, name }: PanelProps) {
   if (!data?.length)
     return isOwn ? (
       <EmptyState
+        family="fuel"
         title="No meals yet"
         message="Log what you eat and your nutrition history builds up here, macros included."
         action={{ label: 'Log a meal', to: '/meals?log=1', icon: <Utensils size={18} /> }}
@@ -419,10 +423,10 @@ export function ProfileMeals({ userId, isOwn = false, name }: PanelProps) {
     );
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <CardGrid min="18rem" className="gap-3">
       {data.map((m) => (
         <MealTile key={m._id} meal={m} />
       ))}
-    </div>
+    </CardGrid>
   );
 }

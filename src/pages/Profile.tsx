@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, fieldErrorsOf, mediaUrl } from '../lib/api';
 import { summarize } from '../lib/achievements';
@@ -28,23 +28,28 @@ import {
   Input,
   Modal,
   PageHeader,
-  PairFigure,
-  Section,
+  SegmentedControl,
   Skeleton,
   Spinner,
   StatStrip,
-  Tabs,
   Textarea,
   cx,
   useToast,
 } from './ui';
-import { Award, Calendar, Camera, ChevronRight, Edit, MapPin, Settings as SettingsIcon, ShareUp, Users } from './icons';
+import { Award, Calendar, Camera, ChevronRight, MapPin, Settings as SettingsIcon, ShareUp, Users } from './icons';
 import { UserBadges } from './UserRow';
+import { homeGymLabel, useViewerGym, viewerGymHref, type ViewerGym } from './PostCard';
 import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileSaved, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
 import { HighlightsRow } from './StoryTray';
 
-/** Profile pages read best at post width; the shell owns the gutter. */
-export const PAGE = 'mx-auto w-full max-w-[52rem] space-y-6';
+/** The shell owns the width; profile pages fill it and split in two from `xl`. */
+export const PAGE = 'w-full space-y-section';
+
+/** Identity, stats and shortcuts left; the tabs and their content right, once there is room for both. */
+export const PROFILE_GRID = 'grid gap-section xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] xl:items-start';
+
+/** Stat values step up to `--text-stat` once the strip has the room (a container query, not a viewport guess). */
+export const STAT_STRIP_CLASS = 'border-0 bg-transparent shadow-none divide-x-0 @md:[&_.type-stat]:text-stat';
 
 const joinedLabel = (iso?: string) => {
   if (!iso) return null;
@@ -53,23 +58,38 @@ const joinedLabel = (iso?: string) => {
   return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 };
 
-/** Cover strip: the user's photo, or a quiet surface with the pair mark. */
+/** A member's own cover photo, when they have one. No generated art: the header is the avatar's. */
 export function ProfileCover({ src }: { src?: string }) {
-  if (src) {
-    return (
-      <div className="h-28 w-full overflow-hidden bg-surface-2 sm:h-36">
-        <img src={mediaUrl(src)} alt="" className="h-full w-full object-cover" />
-      </div>
-    );
-  }
+  if (!src) return null;
   return (
-    <div className="relative h-28 w-full overflow-hidden bg-surface-2 sm:h-36" aria-hidden="true">
-      <PairFigure
-        size={200}
-        className="absolute -bottom-14 -right-4 text-line-strong opacity-60 sm:-bottom-16 sm:left-1/2 sm:right-auto sm:-translate-x-1/2"
-      />
+    <div className="aspect-[3/1] w-full overflow-hidden rounded-lg bg-surface-2 sm:aspect-[4/1]">
+      <img src={mediaUrl(src)} alt="" className="h-full w-full object-cover" decoding="async" />
     </div>
   );
+}
+
+/** The gym row under the handle: pin + name, a link when there is a gym page to open. */
+export function GymRow({ label, href }: { label: string | null; href: string | null }) {
+  if (!label) return null;
+  const inner = (
+    <>
+      <MapPin size={14} className="shrink-0 text-text-3" aria-hidden="true" />
+      <span className="truncate">{label}</span>
+    </>
+  );
+  const cls = 'mt-1 inline-flex min-h-8 max-w-full items-center gap-1.5 text-sm font-medium text-text-1';
+  return href ? (
+    <Link to={href} viewTransition className={cx(cls, 'rounded-xs hover:underline')}>
+      {inner}
+    </Link>
+  ) : (
+    <p className={cls}>{inner}</p>
+  );
+}
+
+/** Own gym: the viewer's home gym as the shell resolves it. */
+function ownGym(gym: ViewerGym | null): { label: string | null; href: string | null } {
+  return { label: gym?.name || null, href: viewerGymHref(gym) };
 }
 
 /** Entry points to pages that live under the profile: Achievements, Progress photos, Friends. */
@@ -93,7 +113,7 @@ function ShortcutCard({
   return (
     <Card to={to} linkLabel={label} padded={false} className="relative flex min-h-24 flex-col justify-between gap-3 p-3 sm:p-4">
       <div className="flex items-start justify-between gap-2">
-        <span className="relative grid h-9 w-9 place-items-center rounded-sm bg-brand-soft text-brand-text">
+        <span className="relative grid h-9 w-9 place-items-center rounded-sm bg-surface-2 text-text-1">
           {icon}
           {badge ? <CountBadge value={badge} className="absolute -right-1.5 -top-1.5" /> : null}
         </span>
@@ -153,46 +173,68 @@ function ProfileShortcuts() {
   const pendingCount = pending.data?.length || 0;
 
   return (
-    <Section title="Keep going" description="Progress, photos and the people you train with.">
-      <div className="grid grid-cols-3 gap-3">
-        <ShortcutCard
-          to="/achievements"
-          icon={<Award size={20} />}
-          label="Achievements"
-          loading={achievements.isLoading}
-          value={achievements.isError ? null : achievements.data?.earned}
-          hint={
-            !achievements.data
-              ? undefined
-              : autoAward
-                ? achievements.data.newAwards
-                  ? `${achievements.data.newAwards} new`
-                  : `of ${achievements.data.total} earned`
-                : achievements.data.claimable
-                  ? `${achievements.data.claimable} to claim`
-                  : `of ${achievements.data.total} earned`
-          }
-          badge={achievements.data ? (autoAward ? achievements.data.newAwards : achievements.data.claimable) : 0}
-        />
-        <ShortcutCard
-          to="/health/photos"
-          icon={<Camera size={20} />}
-          label="Progress photos"
-          loading={photos.isLoading}
-          value={photos.isError ? null : photos.data?.count}
-          hint={photos.isError ? undefined : photoHint}
-        />
-        <ShortcutCard
-          to="/friends"
-          icon={<Users size={20} />}
-          label="Friends"
-          loading={friends.isLoading}
-          value={friends.isError ? null : friends.data?.length}
-          hint={pendingCount ? `${pendingCount} waiting` : 'Train together'}
-          badge={pendingCount}
-        />
+    <section aria-label="Keep going" className="grid grid-cols-3 gap-3">
+      <ShortcutCard
+        to="/achievements"
+        icon={<Award size={20} />}
+        label="Achievements"
+        loading={achievements.isLoading}
+        value={achievements.isError ? null : achievements.data?.earned}
+        hint={
+          !achievements.data
+            ? undefined
+            : autoAward
+              ? achievements.data.newAwards
+                ? `${achievements.data.newAwards} new`
+                : `of ${achievements.data.total} earned`
+              : achievements.data.claimable
+                ? `${achievements.data.claimable} to claim`
+                : `of ${achievements.data.total} earned`
+        }
+        badge={achievements.data ? (autoAward ? achievements.data.newAwards : achievements.data.claimable) : 0}
+      />
+      <ShortcutCard
+        to="/health/photos"
+        icon={<Camera size={20} />}
+        label="Progress photos"
+        loading={photos.isLoading}
+        value={photos.isError ? null : photos.data?.count}
+        hint={photos.isError ? undefined : photoHint}
+      />
+      <ShortcutCard
+        to="/friends"
+        icon={<Users size={20} />}
+        label="Friends"
+        loading={friends.isLoading}
+        value={friends.isError ? null : friends.data?.length}
+        hint={pendingCount ? `${pendingCount} waiting` : 'Train together'}
+        badge={pendingCount}
+      />
+    </section>
+  );
+}
+
+/** The header skeleton: avatar left, three stats right, then two text lines. */
+export function ProfileHeaderSkeleton() {
+  return (
+    <div aria-hidden="true">
+      <div className="flex items-center gap-5 sm:gap-8">
+        <Skeleton className="h-20 w-20 shrink-0 rounded-full sm:h-24 sm:w-24" />
+        <div className="grid flex-1 grid-cols-3 gap-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex flex-col items-center gap-1.5">
+              <Skeleton className="h-6 w-10" />
+              <Skeleton className="h-3 w-14" />
+            </div>
+          ))}
+        </div>
       </div>
-    </Section>
+      <div className="mt-4 space-y-2">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-4 w-64 max-w-full" />
+      </div>
+      <Skeleton className="mt-4 h-11 w-full rounded-sm" />
+    </div>
   );
 }
 
@@ -203,6 +245,9 @@ export default function Profile() {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [params, setParams] = useSearchParams();
+  const gym = useViewerGym();
+  const rhythm = useMyAchievements(summarize);
+  const weeksKept = rhythm.data?.weeksKept?.progress ?? 0;
 
   const tabParam = params.get('tab');
   const tab: ProfileTabKey = isProfileTab(tabParam) ? tabParam : 'posts';
@@ -340,6 +385,12 @@ export default function Profile() {
     saveProfile.mutate();
   }
 
+  /*
+   * The hub band: the member's gym as context and the weeks they have kept
+   * their rhythm as the one figure — omitted at zero, when the next step
+   * takes its place. No action on the band: the action colour is reserved
+   * for Follow on other people's profiles.
+   */
   const header = (
     <PageHeader
       title="Profile"
@@ -349,6 +400,17 @@ export default function Profile() {
           Settings
         </ButtonLink>
       }
+      band={{
+        variant: 'hub',
+        context: gym ? 'Training at {gym}' : undefined,
+        figure: weeksKept,
+        figureLabel: weeksKept === 1 ? 'week kept' : 'weeks kept',
+        children: !weeksKept && rhythm.isSuccess ? (
+          <Link to="/workouts" viewTransition className="inline-flex min-h-11 items-center text-sm font-semibold text-band-ink hover:underline">
+            Log a session this week to start your rhythm
+          </Link>
+        ) : undefined,
+      }}
     />
   );
 
@@ -356,24 +418,12 @@ export default function Profile() {
     return (
       <div className={PAGE} aria-busy="true">
         {header}
-        <Card padded={false} className="overflow-hidden">
-          <Skeleton className="h-28 w-full rounded-none sm:h-36" />
-          <div className="px-4 pb-4 sm:px-5 sm:pb-5">
-            <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <Skeleton className="h-24 w-24 rounded-full ring-4 ring-surface-1" />
-              <div className="flex gap-2">
-                <Skeleton className="h-11 w-32 rounded-sm" />
-                <Skeleton className="h-11 w-24 rounded-sm" />
-              </div>
-            </div>
-            <div className="mt-4 space-y-2">
-              <Skeleton className="h-6 w-48" />
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-4 w-72 max-w-full" />
-            </div>
+        <div className={PROFILE_GRID}>
+          <div className="space-y-section">
+            <ProfileHeaderSkeleton />
+            <Skeleton className="h-16 w-full rounded-lg" />
           </div>
-        </Card>
-        <Skeleton className="h-16 w-full rounded-lg" />
+        </div>
       </div>
     );
   }
@@ -394,99 +444,98 @@ export default function Profile() {
 
   const avatarBusy = uploadingAvatar || saveAvatar.isPending;
   const joined = joinedLabel(me.createdAt);
+  const gymRow = ownGym(gym);
+  const gymLabel = gymRow.label ?? homeGymLabel(me, gym);
 
   return (
     <div className={PAGE}>
       {header}
 
-      <Card padded={false} className="overflow-hidden">
-        <ProfileCover src={me.coverPicture} />
-        <div className="px-4 pb-4 sm:px-5 sm:pb-5">
-          {/* Stacked under `sm` so the avatar and actions never collide at 390 px. */}
-          <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="relative z-[1] w-fit">
-              <Avatar src={me.avatar} name={displayName(me)} size={96} className="bg-surface-1 ring-4 ring-surface-1" />
-              <input
-                ref={fileRef}
-                type="file"
-                accept={ACCEPTED_IMAGE_TYPES.join(',')}
-                hidden
-                onChange={(e) => onAvatarPicked(e.target.files)}
+      <div className={PROFILE_GRID}>
+        <div className="space-y-section">
+          <ProfileCover src={me.coverPicture} />
+
+          {/* The Instagram header: avatar left, three stats right, then name, gym and bio. */}
+          <section aria-label="About you" className="@container">
+            <div className="flex items-center gap-5 sm:gap-8">
+              <div className="relative shrink-0">
+                <Avatar src={me.avatar} name={displayName(me)} size={88} seed={me._id} className="ring-1 ring-line" />
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept={ACCEPTED_IMAGE_TYPES.join(',')}
+                  hidden
+                  onChange={(e) => onAvatarPicked(e.target.files)}
+                />
+                <IconButton
+                  label={avatarBusy ? 'Uploading photo' : 'Change profile photo'}
+                  variant="secondary"
+                  size={40}
+                  onClick={() => fileRef.current?.click()}
+                  disabled={avatarBusy}
+                  aria-busy={avatarBusy || undefined}
+                  className="absolute -bottom-1 -right-1 rounded-full shadow-2"
+                >
+                  {avatarBusy ? <Spinner size={18} /> : <Camera size={18} />}
+                </IconButton>
+              </div>
+
+              <StatStrip
+                aria-label="Profile stats"
+                className={cx('flex-1', STAT_STRIP_CLASS)}
+                items={[
+                  { label: 'posts', value: postCount(me), onClick: () => setTab('posts') },
+                  { label: 'followers', value: followerCount(me), to: '/profile/followers' },
+                  { label: 'following', value: followingCount(me), to: '/profile/following' },
+                ]}
               />
-              <IconButton
-                label={avatarBusy ? 'Uploading photo' : 'Change profile photo'}
-                variant="secondary"
-                size={44}
-                onClick={() => fileRef.current?.click()}
-                disabled={avatarBusy}
-                aria-busy={avatarBusy || undefined}
-                className="absolute -bottom-1 -right-1 rounded-full shadow-2"
-              >
-                {avatarBusy ? <Spinner size={18} /> : <Camera size={20} />}
-              </IconButton>
             </div>
 
-            <div className="flex flex-wrap gap-2 sm:pb-1">
-              <Button variant="secondary" icon={<Edit size={18} />} onClick={openEditor}>
+            <div className="mt-4 min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h2 className="text-md font-semibold text-text-1">{displayName(me)}</h2>
+                <UserBadges user={me} />
+              </div>
+              <p className="text-sm text-text-2">@{me.username}</p>
+              <GymRow label={gymLabel} href={gymRow.href} />
+              {me.bio ? <p className="prose-measure mt-2 whitespace-pre-wrap text-sm leading-relaxed text-text-1">{me.bio}</p> : null}
+              <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-text-3">
+                <Calendar size={14} aria-hidden="true" />
+                {joined ? `Joined ${joined}` : 'Joined recently'}
+              </p>
+            </div>
+
+            {/* Tonal, full width: the action colour is not spent on your own profile. */}
+            <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+              <Button variant="secondary" block className="border-transparent bg-surface-3" onClick={openEditor}>
                 Edit profile
               </Button>
-              <Button variant="secondary" icon={<ShareUp size={18} />} onClick={shareProfile}>
-                Share
-              </Button>
+              <IconButton label="Share profile" variant="secondary" className="border-transparent bg-surface-3" onClick={shareProfile}>
+                <ShareUp size={20} />
+              </IconButton>
             </div>
-          </div>
+          </section>
 
-          <div className="mt-4">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h2 className="type-heading text-xl text-text-1">{displayName(me)}</h2>
-              <UserBadges user={me} />
-            </div>
-            <p className="text-sm text-text-2">@{me.username}</p>
-            {me.bio ? <p className="prose-measure mt-3 whitespace-pre-wrap text-base text-text-1">{me.bio}</p> : null}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-2">
-              {me.location ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <MapPin size={14} className="text-text-3" aria-hidden="true" />
-                  {me.location}
-                </span>
-              ) : null}
-              <span className="inline-flex items-center gap-1.5">
-                <Calendar size={14} className="text-text-3" aria-hidden="true" />
-                {joined ? `Joined ${joined}` : 'Joined recently'}
-              </span>
-            </div>
-          </div>
+          <HighlightsRow userId={me._id} isOwn author={me} />
+
+          <ProfileShortcuts />
         </div>
-      </Card>
 
-      <HighlightsRow userId={me._id} isOwn author={me} />
-
-      <StatStrip
-        aria-label="Profile stats"
-        items={[
-          { label: 'Posts', value: postCount(me), onClick: () => setTab('posts') },
-          { label: 'Followers', value: followerCount(me), to: '/profile/followers' },
-          { label: 'Following', value: followingCount(me), to: '/profile/following' },
-          { label: 'Workouts', value: me.stats?.workouts || 0, onClick: () => setTab('workouts'), tone: 'brand' },
-        ]}
-      />
-
-      <ProfileShortcuts />
-
-      <section className="space-y-4" aria-label="Your activity">
-        <Tabs
-          aria-label="Profile content"
-          tabs={PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
-          value={tab}
-          onChange={setTab}
-        />
-        <div className={cx('anim-fade-in')} key={tab}>
-          {tab === 'posts' && <ProfilePosts userId={me._id} isOwn />}
-          {tab === 'workouts' && <ProfileWorkouts userId={me._id} isOwn />}
-          {tab === 'meals' && <ProfileMeals userId={me._id} isOwn />}
-          {tab === 'saved' && <ProfileSaved />}
-        </div>
-      </section>
+        <section className="space-y-4" aria-label="Your activity">
+          <SegmentedControl
+            aria-label="Profile content"
+            tabs={PROFILE_TABS.map((t) => ({ key: t.key, label: t.label, icon: t.icon }))}
+            value={tab}
+            onChange={setTab}
+          />
+          <div className={cx('anim-fade-in')} key={tab}>
+            {tab === 'posts' && <ProfilePosts userId={me._id} isOwn />}
+            {tab === 'workouts' && <ProfileWorkouts userId={me._id} isOwn />}
+            {tab === 'meals' && <ProfileMeals userId={me._id} isOwn />}
+            {tab === 'saved' && <ProfileSaved />}
+          </div>
+        </section>
+      </div>
 
       <Modal
         open={editing}

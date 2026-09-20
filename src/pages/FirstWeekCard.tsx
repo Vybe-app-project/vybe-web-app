@@ -146,7 +146,7 @@ export function FirstWeekCardView({
 }: FirstWeekCardViewProps) {
   const titleId = useId();
   return (
-    <Card data-testid="first-week-card" role="region" aria-labelledby={titleId}>
+    <Card container data-testid="first-week-card" role="region" aria-labelledby={titleId}>
       <div className="flex items-start gap-3">
         <div aria-hidden="true" className="shrink-0">
           <Ring value={progress.done} max={progress.total} size={48} stroke={5} color="brand" />
@@ -188,7 +188,7 @@ export function FirstWeekCardView({
 
       {state === 'ready' ? (
         <>
-          <ul className="mt-3 -mx-3 space-y-1" aria-label={strings.card.title}>
+          <ul className="mt-3 -mx-3 grid gap-1 @lg:grid-cols-2" aria-label={strings.card.title}>
             {rows.map((row) => {
               const testId = `first-week-row-${row.key}`;
               const cls = cx(ROW_CLASS, row.isToday ? 'bg-brand-soft hover:bg-brand-soft' : 'hover:bg-surface-2');
