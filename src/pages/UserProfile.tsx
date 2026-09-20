@@ -342,7 +342,7 @@ export default function UserProfile() {
                   </Badge>
                 ) : null}
               </div>
-              <p className="text-sm text-text-2">@{user.username}</p>
+              <p className="truncate text-sm text-text-2" title={`@${user.username}`}>@{user.username}</p>
               <GymRow label={gymLabel} href={gymHref} />
               {user.bio ? <p className="prose-measure mt-2 whitespace-pre-wrap text-sm leading-relaxed text-text-1">{user.bio}</p> : null}
               {user.fields?.length ? (
