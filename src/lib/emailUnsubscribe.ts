@@ -153,3 +153,16 @@ export const canRetryUnsubscribe = (failure: UnsubscribeFailure): boolean => fai
 export const EMAIL_PREFERENCES_PATH = '/settings#email';
 export const manageEmailPreferencesPath = (signedIn: boolean): string =>
   signedIn ? EMAIL_PREFERENCES_PATH : `/login?next=${encodeURIComponent(EMAIL_PREFERENCES_PATH)}`;
+
+/**
+ * The confirm question, in the web's own words, once the read-only preview
+ * (GET /api/email/unsubscribe/:token, D-62) has said which kind the link is
+ * for. Unknown or missing kind: the generic question. The API's own sentences
+ * say "e-mail"; the product says "email", so they are never shown.
+ */
+export function unsubscribeConfirmQuestion(kind: string | null | undefined): string {
+  if (kind === 'all') return 'Stop all Vybe email? Sign-in codes and account notices still arrive.';
+  const label = unsubscribeKindLabel(kind);
+  if (label) return `Stop ${label}? Your other choices stay as they are.`;
+  return 'Stop these emails from Vybe? Sign-in codes and account notices still arrive.';
+}

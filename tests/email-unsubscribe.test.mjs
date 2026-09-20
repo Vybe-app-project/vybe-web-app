@@ -134,10 +134,12 @@ test('the landing is a public route that POSTs the pinned static endpoint once, 
   const page = read('src/pages/EmailUnsubscribe.tsx');
   // The web page posts the token in the body; the GET form consumes on a tapped link and is the mail client's.
   assert.match(page, /api\.post\('\/email\/unsubscribe', \{ token \}\)/);
-  assert.doesNotMatch(page, /api\.get\('\/email\/unsubscribe/);
-  assert.doesNotMatch(page, /\/email\/unsubscribe\/\$\{/, 'never the token in the path (that route is RFC 8058 one-click)');
+  // The read-only preview (D-62) is the only GET; the consuming POST /:token (RFC 8058) is never called from the web.
+  assert.match(page, /api\.get\(`\/email\/unsubscribe\/\$\{encodeURIComponent\(token\)\}`\)/);
+  assert.doesNotMatch(page, /api\.post\(`\/email\/unsubscribe\//, 'the consuming POST /:token route is the mail client\'s');
   assert.match(page, /attempted\.current === token/, 'a single-use token is posted at most once');
-  assert.doesNotMatch(page, /useEffect/, 'nothing is posted on mount: the person confirms first (a scanner or prefetch spends nothing)');
+  assert.doesNotMatch(page, /useEffect\(\(\) => \{[\s\S]{0,400}api\.post/, 'nothing is posted on mount: the person confirms first (a scanner or prefetch spends nothing)');
+  assert.match(page, /previewed: true/);
   assert.match(page, /status: 'confirm'/);
   assert.match(page, /Yes, unsubscribe/);
   assert.match(page, /isUnsubscribeToken\(token\)/, 'a malformed token never reaches the API');
@@ -157,4 +159,13 @@ test('the landing is a public route that POSTs the pinned static endpoint once, 
   for (const route of ['POST /api/email/unsubscribe', 'GET /api/notifications/settings', 'PUT /api/notifications/settings', 'GET /api/users/email-preferences', 'PUT /api/users/email-preferences']) {
     assert.ok(pinned.has(route), `contracts/backend-routes.json must pin ${route}`);
   }
+});
+
+test('the confirm question names the kind in the web\'s words and never shows the API\'s hyphenated sentence', async () => {
+  const lib = await import('../src/lib/emailUnsubscribe.ts');
+  assert.equal(lib.unsubscribeConfirmQuestion('weeklyRecap'), `Stop ${lib.unsubscribeKindLabel('weeklyRecap')}? Your other choices stay as they are.`);
+  assert.equal(lib.unsubscribeConfirmQuestion('all'), 'Stop all Vybe email? Sign-in codes and account notices still arrive.');
+  assert.equal(lib.unsubscribeConfirmQuestion(null), 'Stop these emails from Vybe? Sign-in codes and account notices still arrive.');
+  assert.equal(lib.unsubscribeConfirmQuestion('somethingNew'), 'Stop these emails from Vybe? Sign-in codes and account notices still arrive.');
+  for (const kind of [...lib.UNSUBSCRIBE_KINDS, null]) assert.doesNotMatch(lib.unsubscribeConfirmQuestion(kind), /e-mail/i);
 });

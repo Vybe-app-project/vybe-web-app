@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { PublicShell } from '../components/PublicShell';
 import { api } from '../lib/api';
@@ -12,6 +12,7 @@ import {
   unsubscribeFailureMessage,
   unsubscribeSuccessMessage,
   type UnsubscribeFailure,
+  unsubscribeConfirmQuestion,
 } from '../lib/emailUnsubscribe';
 import { Button, ButtonLink, Spinner } from './ui';
 import { ArrowLeft, CheckCircle, Mail } from './icons';
@@ -21,15 +22,15 @@ import { ArrowLeft, CheckCircle, Mail } from './icons';
  * with /unsubscribe?token=<token> and the older /email/unsubscribe forms as
  * aliases. No account is needed; the token is the credential. The page asks
  * for one confirmation and only then POSTs the token to /api/email/unsubscribe,
- * so a link scanner or a prefetch that loads this page spends nothing; the
- * API's GET form is the mail client's own one-click path and is never called
- * here. Rendered in the public shell so it is CSP-safe and works signed out;
+ * so a link scanner or a prefetch that loads this page spends nothing. The
+ * read-only GET (D-62) only names the kind for the question and reports a
+ * spent link early; the consuming one-click POST /:token is the mail client's. Rendered in the public shell so it is CSP-safe and works signed out;
  * a signed-in member is offered the Settings email card.
  */
 
 export type UnsubscribeState =
   | { status: 'invalid' }
-  | { status: 'confirm' }
+  | { status: 'confirm'; kind: string | null; previewed: boolean }
   | { status: 'working' }
   | { status: 'done'; kind: string | null; message: string }
   | { status: 'failed'; failure: UnsubscribeFailure };
@@ -81,8 +82,8 @@ export function UnsubscribeOutcome({
     return (
       <div className="space-y-4">
         <div>
-          <h2 className="type-heading text-lg text-text-1">Stop these emails from Vybe?</h2>
-          <p className="mt-1 text-sm text-text-2">This link turns off the emails it came with. Sign-in codes and account notices still arrive. Nothing changes until you confirm.</p>
+          <h2 className="type-heading text-lg text-text-1">{unsubscribeConfirmQuestion(state.kind)}</h2>
+          <p className="mt-1 text-sm text-text-2">Nothing changes until you confirm.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" onClick={onConfirm} data-testid="unsubscribe-confirm">
@@ -167,7 +168,7 @@ export default function EmailUnsubscribe() {
   const token = readUnsubscribeToken({ param: param ?? null, search });
   const user = useAuth((s) => s.user);
   const loading = useAuth((s) => s.loading);
-  const [state, setState] = useState<UnsubscribeState>(() => (isUnsubscribeToken(token) ? { status: 'confirm' } : { status: 'invalid' }));
+  const [state, setState] = useState<UnsubscribeState>(() => (isUnsubscribeToken(token) ? { status: 'confirm', kind: null, previewed: false } : { status: 'invalid' }));
   // The token is single-use: a StrictMode double effect or a re-render must not spend it twice.
   const attempted = useRef<string | null>(null);
 
@@ -182,6 +183,27 @@ export default function EmailUnsubscribe() {
       setState({ status: 'failed', failure: classifyUnsubscribeFailure(e, { online: navigator.onLine }) });
     }
   }
+
+  // The read-only preview (GET, D-62) names the kind so the question can be
+  // specific, and a spent or unknown token is reported before anyone confirms.
+  // It consumes nothing; a failed preview just leaves the generic question.
+  const previewed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isUnsubscribeToken(token) || previewed.current === token) return;
+    previewed.current = token;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get(`/email/unsubscribe/${encodeURIComponent(token)}`);
+        const body = (data && typeof data === 'object' ? data : {}) as { kind?: unknown };
+        if (!cancelled) setState((s) => (s.status === 'confirm' ? { status: 'confirm', kind: typeof body.kind === 'string' ? body.kind : null, previewed: true } : s));
+      } catch (e) {
+        const failure = classifyUnsubscribeFailure(e, { online: navigator.onLine });
+        if (!cancelled && (failure.kind === 'used-or-expired' || failure.kind === 'invalid-link')) setState({ status: 'failed', failure });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
 
   // Nothing is posted until the person confirms; the guard keeps a double click
   // or a re-render from spending the single-use token twice.
