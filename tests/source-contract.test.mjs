@@ -362,7 +362,8 @@ test('badges, report labels, handoff and session-freshness contracts', () => {
 
   // The phone Home header's Search shortcut is the magnifier, not the Explore compass.
   const layout = read('src/components/Layout.tsx');
-  assert.match(layout, /<IconButton to="\/search" label="Search"[^>]*>\s*<SearchIcon size=\{22\} \/>/);
+  // Gym First (P2): the thin top-bar register sets 24 px icons.
+  assert.match(layout, /<IconButton to="\/search" label="Search"[^>]*>\s*<SearchIcon size=\{24\} \/>/);
   assert.match(layout, /pattern: '\/u\/:id\/:kind'/);
   assert.match(layout, /pattern: '\/profile\/:kind'/);
 

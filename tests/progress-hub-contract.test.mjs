@@ -37,13 +37,14 @@ test('the route and its entry points are registered, and every one hides behind 
   assert.ok(progressIndex > 0 && progressIndex < paramIndex, 'ROUTES lists /workouts/progress before /workouts/:workoutId');
   assert.match(layout, /\{ pattern: '\/workouts\/progress', title: 'Progress', tab: 'workouts', nav: '\/workouts\/progress', hub: 'train' \}/);
   assert.match(layout, /\{ to: '\/workouts\/progress', label: 'Progress' \}/, 'HUBS.train');
-  assert.match(layout, /\{ to: '\/workouts\/progress', label: 'Progress', Icon: TrendingUp \}/, 'SIDEBAR Train');
+  // Gym First (P2): the sidebar is six flat hubs; Progress lives only in the Train hub's tabs.
+  assert.match(layout, /\{ to: '\/workouts', label: 'Train', Icon: Dumbbell, hub: 'train' \}/, 'SIDEBAR Train hub');
   assert.match(layout, /const PROGRESS_PATH = '\/workouts\/progress';/);
   // The hub is visible with the flag off, like the app (GET /workouts/records/summary is not gated): no nav or tab filter.
   assert.doesNotMatch(layout, /progressionEnabled/);
-  assert.match(layout, /\{ to: '\/workouts\/progress', label: 'Progress', Icon: TrendingUp \}/);
+  assert.doesNotMatch(layout, /\{ to: '\/workouts\/progress', label: 'Progress', Icon: TrendingUp \}/, 'no sub-page rows in the flat sidebar');
   // The Live gating this sits beside is untouched.
-  assert.match(layout, /liveEnabled \? g\.items : g\.items\.filter\(\(i\) => i\.to !== LIVE_PATH\)/);
+  assert.match(layout, /\.filter\(\(t\) => liveEnabled \|\| t\.to !== LIVE_PATH\)/, 'Live is gated where it is listed: the Explore hub tabs');
   assert.match(layout, /import \{ useLiveEnabled \} from '\.\.\/lib\/capabilities';/);
   assert.equal(count(layout, /useLiveEnabled\(\)\.enabled/g), 2);
   // WorkoutLogs: the button and the invalidation.
