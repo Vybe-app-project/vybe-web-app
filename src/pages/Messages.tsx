@@ -1197,7 +1197,7 @@ function MediaLightbox({ items, index, onClose, onIndex }: { items: MessageMedia
   const url = mediaUrl(item.uri);
   return (
     <Modal open onClose={onClose} title={many ? `${item.type === 'video' ? 'Video' : 'Photo'} ${index + 1} of ${items.length}` : item.type === 'video' ? 'Video' : 'Photo'} size="xl" presentation="dialog" bodyClassName="px-0 pb-0 sm:px-0">
-      <div className="relative flex min-h-[40dvh] items-center justify-center bg-[#08111b]">
+      <div className="relative flex min-h-[40dvh] items-center justify-center bg-surface-2">
         {item.type === 'video' ? (
           <video src={url} controls autoPlay playsInline className="max-h-[75dvh] w-full object-contain" />
         ) : (
@@ -2733,7 +2733,7 @@ export default function Messages() {
           {threadPane}
         </div>
       ) : (
-        <div ref={pane.ref} style={pane.style} className="flex min-h-[24rem] gap-4 lg:gap-6">
+        <div ref={pane.ref} style={pane.style} className="flex min-h-[24rem] gap-gutter">
           <aside aria-label="Conversation list" className="card flex w-72 shrink-0 flex-col overflow-hidden lg:w-[22.5rem]">
             <RoomList rooms={rooms} meId={meId} activeId={roomId && !isDraft ? roomId : null} compact={false} typing={typing} onNewMessage={() => setPickerOpen(true)} onOpenWith={openWith} />
           </aside>
