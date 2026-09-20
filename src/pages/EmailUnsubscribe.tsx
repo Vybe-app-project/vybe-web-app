@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { PublicShell } from '../components/PublicShell';
 import { api } from '../lib/api';
@@ -17,18 +17,19 @@ import { Button, ButtonLink, Spinner } from './ui';
 import { ArrowLeft, CheckCircle, Mail } from './icons';
 
 /**
- * One-click email unsubscribe landing: /email/unsubscribe/<token> (the path a
- * mailer builds with resolveFrontendUrl) or /email/unsubscribe?token=<token>.
- * No account is needed; the token is the credential. The page POSTs it once
- * to /api/email/unsubscribe on mount (the API's GET form would also consume
- * it, so a link scanner that follows the mail link spends nothing here; only
- * a client that runs this page does). Rendered in the public shell so it is
- * CSP-safe and works signed out; a signed-in member is offered the Settings
- * email card.
+ * Email unsubscribe landing: /unsubscribe/<token> (the path a mailer builds),
+ * with /unsubscribe?token=<token> and the older /email/unsubscribe forms as
+ * aliases. No account is needed; the token is the credential. The page asks
+ * for one confirmation and only then POSTs the token to /api/email/unsubscribe,
+ * so a link scanner or a prefetch that loads this page spends nothing; the
+ * API's GET form is the mail client's own one-click path and is never called
+ * here. Rendered in the public shell so it is CSP-safe and works signed out;
+ * a signed-in member is offered the Settings email card.
  */
 
 export type UnsubscribeState =
   | { status: 'invalid' }
+  | { status: 'confirm' }
   | { status: 'working' }
   | { status: 'done'; kind: string | null; message: string }
   | { status: 'failed'; failure: UnsubscribeFailure };
@@ -56,10 +57,12 @@ export function UnsubscribeOutcome({
   state,
   signedIn,
   onRetry,
+  onConfirm,
 }: {
   state: UnsubscribeState;
   signedIn: boolean | null;
   onRetry?: () => void;
+  onConfirm?: () => void;
 }) {
   const manage =
     signedIn === null ? null : (
@@ -74,6 +77,24 @@ export function UnsubscribeOutcome({
     </Link>
   );
 
+  if (state.status === 'confirm') {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="type-heading text-lg text-text-1">Stop these emails from Vybe?</h2>
+          <p className="mt-1 text-sm text-text-2">This link turns off the emails it came with. Sign-in codes and account notices still arrive. Nothing changes until you confirm.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={onConfirm} data-testid="unsubscribe-confirm">
+            Yes, unsubscribe
+          </Button>
+          <ButtonLink to="/" variant="secondary">
+            Keep them
+          </ButtonLink>
+        </div>
+      </div>
+    );
+  }
   if (state.status === 'working') {
     return (
       <div className="rounded-md border border-line bg-surface-1 p-5">
@@ -146,7 +167,7 @@ export default function EmailUnsubscribe() {
   const token = readUnsubscribeToken({ param: param ?? null, search });
   const user = useAuth((s) => s.user);
   const loading = useAuth((s) => s.loading);
-  const [state, setState] = useState<UnsubscribeState>(() => (isUnsubscribeToken(token) ? { status: 'working' } : { status: 'invalid' }));
+  const [state, setState] = useState<UnsubscribeState>(() => (isUnsubscribeToken(token) ? { status: 'confirm' } : { status: 'invalid' }));
   // The token is single-use: a StrictMode double effect or a re-render must not spend it twice.
   const attempted = useRef<string | null>(null);
 
@@ -162,17 +183,17 @@ export default function EmailUnsubscribe() {
     }
   }
 
-  useEffect(() => {
+  // Nothing is posted until the person confirms; the guard keeps a double click
+  // or a re-render from spending the single-use token twice.
+  function confirm() {
     if (!isUnsubscribeToken(token) || attempted.current === token) return;
     attempted.current = token;
     void submit(token);
-    // submit only closes over setState; the token is the one input.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }
 
   return (
-    <PublicShell title="Email preferences" subtitle="One-click unsubscribe from a Vybe email.">
-      <UnsubscribeOutcome state={state} signedIn={loading ? null : !!user} onRetry={() => void submit(token)} />
+    <PublicShell title="Email preferences" subtitle="Unsubscribe from a Vybe email.">
+      <UnsubscribeOutcome state={state} signedIn={loading ? null : !!user} onConfirm={confirm} onRetry={() => void submit(token)} />
     </PublicShell>
   );
 }

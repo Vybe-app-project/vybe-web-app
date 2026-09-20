@@ -86,13 +86,14 @@ test('a rate-limited unsubscribe is told once: the page renders the 429 inline, 
   assert.equal(isInlineErrorSurface('/email/unsubscribe'), true);
   assert.equal(isInlineErrorSurface('https://api.vybeapp.fit/api/email/unsubscribe'), true);
   assert.equal(isInlineErrorSurface('/email/unsubscribe/sometoken'), true);
+  assert.equal(isInlineErrorSurface('/unsubscribe/sometoken'), true);
   assert.equal(isInlineErrorSurface('/email/preferences'), false);
   assert.equal(isInlineErrorSurface('/users/email-preferences'), false, 'the Settings card uses the shared toast');
 });
 
 test('a stale stored session leaves the public landing in place instead of copying the token into /login?next=', () => {
   const api = read('src/lib/api.ts');
-  assert.match(api, /const NO_SESSION_PATHS = \['\/email\/unsubscribe'\];/);
+  assert.match(api, /const NO_SESSION_PATHS = \['\/unsubscribe', '\/email\/unsubscribe'\];/);
   const fn = api.slice(api.indexOf('function onUnauthorized('), api.indexOf('export function installClientInterceptors'));
   assert.match(fn, /tokenStore\.clear\(\);/, 'the stale token is still dropped');
   assert.match(fn, /if \(pathIsUnder\(location\.pathname, NO_SESSION_PATHS\)\) return;/);
@@ -123,7 +124,7 @@ test('the landing is a public route that POSTs the pinned static endpoint once, 
   const guardedAdmin = app.indexOf('element={<RequireAdmin>');
   const guardedAuth = app.indexOf('<RequireAuth>');
   assert.ok(guardedAdmin > 0 && guardedAuth > 0);
-  for (const route of ['/email/unsubscribe/:token', '/email/unsubscribe']) {
+  for (const route of ['/unsubscribe/:token', '/unsubscribe', '/email/unsubscribe/:token', '/email/unsubscribe']) {
     const match = app.match(new RegExp(`path="${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" element=\\{<EmailUnsubscribe />\\}`));
     assert.ok(match, `${route} must be routed to EmailUnsubscribe`);
     assert.ok(match.index < guardedAdmin && match.index < guardedAuth, `${route} must be public (declared before RequireAdmin and RequireAuth)`);
@@ -135,7 +136,10 @@ test('the landing is a public route that POSTs the pinned static endpoint once, 
   assert.match(page, /api\.post\('\/email\/unsubscribe', \{ token \}\)/);
   assert.doesNotMatch(page, /api\.get\('\/email\/unsubscribe/);
   assert.doesNotMatch(page, /\/email\/unsubscribe\/\$\{/, 'never the token in the path (that route is RFC 8058 one-click)');
-  assert.match(page, /attempted\.current === token/, 'a single-use token is posted once per mount');
+  assert.match(page, /attempted\.current === token/, 'a single-use token is posted at most once');
+  assert.doesNotMatch(page, /useEffect/, 'nothing is posted on mount: the person confirms first (a scanner or prefetch spends nothing)');
+  assert.match(page, /status: 'confirm'/);
+  assert.match(page, /Yes, unsubscribe/);
   assert.match(page, /isUnsubscribeToken\(token\)/, 'a malformed token never reaches the API');
   assert.match(page, /<PublicShell title="Email preferences"/);
   assert.doesNotMatch(page, /e-mail/i, 'the product says email; the API\'s hyphenated sentences are never shown');

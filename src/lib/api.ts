@@ -161,7 +161,7 @@ const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'
  * into /login?next=, and re-POST it after sign-in. The token store is still
  * cleared, useAuth settles to signed out, and the page offers sign-in itself.
  */
-const NO_SESSION_PATHS = ['/email/unsubscribe'];
+const NO_SESSION_PATHS = ['/unsubscribe', '/email/unsubscribe'];
 
 const pathIsUnder = (pathname: string, paths: readonly string[]): boolean =>
   paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));

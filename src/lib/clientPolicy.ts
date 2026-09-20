@@ -119,6 +119,7 @@ const INLINE_ERROR_PREFIXES = [
   '/support/message',
   '/food/search',
   '/email/unsubscribe',
+  '/unsubscribe',
 ];
 
 export function isInlineErrorSurface(url: string | null | undefined): boolean {
