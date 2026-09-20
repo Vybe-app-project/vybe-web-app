@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLiveEnabled } from '../lib/capabilities';
+import { useFeature } from '../lib/capabilities';
 import type { PublicUser } from '../lib/hooks';
 import { getSocket } from '../lib/socket';
 import { UNREAD_COUNT_KEY, useLiveNotifications } from '../lib/notificationsLive';
@@ -62,6 +63,7 @@ import {
   Settings,
   Sparkles,
   Target,
+  TrendingUp,
   User,
   Users,
   Utensils,
@@ -120,6 +122,7 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/communities', title: 'Communities', tab: 'gyms', nav: '/communities', hub: 'gyms' },
   { pattern: '/workouts', title: 'Workouts', tab: 'workouts', nav: '/workouts', root: true, hub: 'train' },
   { pattern: '/workouts/logs', title: 'Workout log', tab: 'workouts', nav: '/workouts/logs', hub: 'train' },
+  { pattern: '/workouts/progress', title: 'Progress', tab: 'workouts', nav: '/workouts/progress', hub: 'train' },
   { pattern: '/challenges', title: 'Challenges', tab: 'workouts', nav: '/challenges', hub: 'train' },
   { pattern: '/achievements', title: 'Achievements', tab: 'workouts', nav: '/achievements', hub: 'train' },
   { pattern: '/workouts/:workoutId', title: 'Workout', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
@@ -145,6 +148,7 @@ export const HUBS: Record<HubKey, Array<{ to: string; label: string; badge?: 'ch
   train: [
     { to: '/workouts', label: 'Library' },
     { to: '/workouts/logs', label: 'Log' },
+    { to: '/workouts/progress', label: 'Progress' },
     { to: '/challenges', label: 'Challenges' },
     { to: '/achievements', label: 'Achievements' },
     { to: '/recaps', label: 'Recaps' },
@@ -201,6 +205,7 @@ const SIDEBAR: Array<{ label?: string; items: SidebarItem[] }> = [
     items: [
       { to: '/workouts', label: 'Workouts', Icon: Dumbbell },
       { to: '/workouts/logs', label: 'Log', Icon: ClipboardList },
+      { to: '/workouts/progress', label: 'Progress', Icon: TrendingUp },
       { to: '/challenges', label: 'Challenges', Icon: Zap },
       { to: '/achievements', label: 'Achievements', Icon: Award },
       { to: '/recaps', label: 'Recaps', Icon: CalendarDays },
@@ -237,6 +242,8 @@ const SIDEBAR: Array<{ label?: string; items: SidebarItem[] }> = [
 
 /** Destinations that only make sense when the server runs the feature. */
 const LIVE_PATH = '/live';
+/** The progression hub exists only while `features.progression` is on for the member (Wave F). */
+const PROGRESS_PATH = '/workouts/progress';
 
 /**
  * The Log action sheet. Targets carry a query flag the destination page reads
@@ -619,7 +626,7 @@ function SideLink({ item, active, badge }: { item: SidebarItem; active: boolean;
  * scrolled into view on every route change so the current section is never
  * below the fold.
  */
-function Sidebar({ meta, chats, notifications, liveEnabled }: { meta: RouteMeta; chats: string | number | null; notifications: string | number | null; liveEnabled: boolean }) {
+function Sidebar({ meta, chats, notifications, liveEnabled, progressionEnabled }: { meta: RouteMeta; chats: string | number | null; notifications: string | number | null; liveEnabled: boolean; progressionEnabled: boolean }) {
   const { user } = useAuth();
   const navRef = useRef<HTMLElement>(null);
   const edges = useScrollEdges(navRef, 'y');
@@ -627,8 +634,12 @@ function Sidebar({ meta, chats, notifications, liveEnabled }: { meta: RouteMeta;
     navRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [meta.nav]);
   const groups = useMemo(
-    () => SIDEBAR.map((g) => ({ ...g, items: liveEnabled ? g.items : g.items.filter((i) => i.to !== LIVE_PATH) })),
-    [liveEnabled],
+    () =>
+      SIDEBAR.map((g) => ({ ...g, items: liveEnabled ? g.items : g.items.filter((i) => i.to !== LIVE_PATH) })).map((g) => ({
+        ...g,
+        items: progressionEnabled ? g.items : g.items.filter((i) => i.to !== PROGRESS_PATH),
+      })),
+    [liveEnabled, progressionEnabled],
   );
   return (
     <aside className="vt-sidebar sticky top-0 hidden h-dvh w-[4.5rem] shrink-0 flex-col border-r border-line bg-surface-1 lg:flex xl:w-60">
@@ -789,16 +800,19 @@ function SectionTabs({
   chats,
   notifications,
   liveEnabled,
+  progressionEnabled,
 }: {
   hub: HubKey;
   pathname: string;
   chats: string | number | null;
   notifications: string | number | null;
   liveEnabled: boolean;
+  progressionEnabled: boolean;
 }) {
   const start = usePendingNavigation((s) => s.start);
   const tabs = HUBS[hub]
     .filter((t) => liveEnabled || t.to !== LIVE_PATH)
+    .filter((t) => progressionEnabled || t.to !== PROGRESS_PATH)
     .map((t) => ({
       key: t.to,
       label: t.label,
@@ -1055,6 +1069,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
   useEffect(() => preloadWhenIdle(TAB_ROOT_PATHS), []);
 
   const liveEnabled = useLiveEnabled().enabled;
+  const progressionEnabled = useFeature('progression');
 
   const unreadChats = useUnreadChats(!!user);
   const unreadNotifs = useUnreadNotifications(!!user);
@@ -1087,7 +1102,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
     <div className="min-h-dvh bg-bg text-text-1 lg:flex">
       <SkipLink />
       <NavProgress />
-      <Sidebar meta={navMeta} chats={chats} notifications={notifications} liveEnabled={liveEnabled} />
+      <Sidebar meta={navMeta} chats={chats} notifications={notifications} liveEnabled={liveEnabled} progressionEnabled={progressionEnabled} />
 
       <div className="min-w-0 flex-1 overflow-x-clip">
         {!shellChrome?.hideTopBar ? (
@@ -1097,7 +1112,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
           </>
         ) : null}
         <OfflineBanner />
-        {hub ? <SectionTabs hub={hub} pathname={shellPath} chats={chats} notifications={notifications} liveEnabled={liveEnabled} /> : null}
+        {hub ? <SectionTabs hub={hub} pathname={shellPath} chats={chats} notifications={notifications} liveEnabled={liveEnabled} progressionEnabled={progressionEnabled} /> : null}
 
         {/* Feed-width pages centre a 600 px column from tablets up (a 720 px
             4:5 photo was 900 px tall); the rail joins at lg. */}

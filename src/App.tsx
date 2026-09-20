@@ -56,6 +56,7 @@ const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
 const WorkoutDetail = lazyPage(null, () => import('./pages/WorkoutDetail'));
 const WorkoutPlanDetail = lazyPage(null, () => import('./pages/WorkoutPlanDetail'));
 const WorkoutLogs = lazyPage('/workouts/logs', () => import('./pages/WorkoutLogs'));
+const WorkoutProgress = lazyPage('/workouts/progress', () => import('./pages/WorkoutProgress'));
 const Meals = lazyPage('/meals', () => import('./pages/Meals'));
 const MealDetail = lazyPage(null, () => import('./pages/MealDetail'));
 const SharedMeal = lazyPage(null, () => import('./pages/SharedMeal'));
@@ -331,6 +332,7 @@ export default function App() {
 
               <Route path="workouts" element={<Workouts />} />
               <Route path="workouts/logs" element={<WorkoutLogs />} />
+              <Route path="workouts/progress" element={<WorkoutProgress />} />
               <Route path="workouts/plans/:planId" element={<WorkoutPlanDetail />} />
               <Route path="workouts/:workoutId" element={<WorkoutDetail />} />
               <Route path="meals" element={<Meals />} />

@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
@@ -14,6 +15,7 @@ import {
   subDays,
 } from 'date-fns';
 import { api, errMsg } from '../lib/api';
+import { useFeature } from '../lib/capabilities';
 import { formatSeconds } from '../lib/duration';
 import {
   Badge,
@@ -45,6 +47,8 @@ import {
   type MenuItem,
 } from './ui';
 import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, Zap } from './icons';
+import { TrendingUp } from './icons';
+import { ButtonLink } from './ui';
 import {
   CATEGORY_OPTIONS,
   ExerciseRows,
@@ -241,6 +245,7 @@ function LogModal({
     onSuccess: () => {
       toast.success(editing ? 'Session saved' : 'Session logged');
       qc.invalidateQueries({ queryKey: ['workout-logs'] });
+      qc.invalidateQueries({ queryKey: ['workout-progress'] });
       onClose();
     },
     onError: (e) => {
@@ -502,6 +507,9 @@ export default function WorkoutLogs() {
   const [pendingDelete, setPendingDelete] = useState<WorkoutLog | null>(null);
   const [metric, setMetric] = useState<Metric>('volume');
   const compact = useIsCompact();
+  // Wave F progression hub: the "View progress" entry point exists only while the flag is on for this member.
+  const progressionEnabled = useFeature('progression');
+  const { hash } = useLocation();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['workout-logs'],
@@ -638,6 +646,21 @@ export default function WorkoutLogs() {
     return out;
   }, [logs]);
 
+  // A calendar cell on the progress hub links to /workouts/logs#day-<yyyy-MM-dd>; land on that day once the list has rendered.
+  useEffect(() => {
+    const id = hash.replace(/^#/, '');
+    if (!/^day-\d{4}-\d{2}-\d{2}$/.test(id) || !groups.length) return;
+    const t = window.setTimeout(() => {
+      const heading = document.getElementById(id);
+      const section = heading?.closest('section') as HTMLElement | null;
+      if (!section) return;
+      section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      section.setAttribute('tabindex', '-1');
+      section.focus({ preventScroll: true });
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [hash, groups]);
+
   const delta = (now: number, before: number) => (before === 0 && now === 0 ? undefined : { value: now - before, label: 'vs last week' });
 
   return (
@@ -646,9 +669,16 @@ export default function WorkoutLogs() {
         title="Workout log"
         subtitle="Every session you have completed, with weekly volume."
         actions={
-          <Button variant="primary" icon={<Plus size={18} />} onClick={() => openNew()}>
-            Log session
-          </Button>
+          <>
+            {progressionEnabled ? (
+              <ButtonLink to="/workouts/progress" variant="secondary" icon={<TrendingUp size={18} />}>
+                View progress
+              </ButtonLink>
+            ) : null}
+            <Button variant="primary" icon={<Plus size={18} />} onClick={() => openNew()}>
+              Log session
+            </Button>
+          </>
         }
         mobileActions={
           <IconButton label="Log session" onClick={() => openNew()}>

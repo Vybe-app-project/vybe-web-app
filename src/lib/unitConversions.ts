@@ -67,3 +67,12 @@ export const goalRanges = (system: UnitSystem) =>
 /** US-style locales default to imperial; everything else to metric. */
 export const defaultUnitSystem = (locale: string | undefined): UnitSystem =>
   /^en-(US|LR|MM)$/i.test(locale ?? '') ? 'imperial' : 'metric';
+
+/* ------------------------------------------------------------------ distance (progression hub) */
+
+/** Distances on the wire are kilometres (workout records: longestDistanceKm, history distanceKm). */
+export const KM_PER_MI = 1.609344;
+
+export const kmToMi = (km: number) => round(km / KM_PER_MI, 1);
+export const miToKm = (mi: number) => round(mi * KM_PER_MI, 2);
+export const distanceUnit = (system: UnitSystem) => (system === 'imperial' ? 'mi' : 'km');

@@ -6,6 +6,7 @@ import { applyAccessibility } from '../lib/accessibility';
 import { HIDDEN_WORDS_MAX_CUSTOM, HIDDEN_WORDS_MAX_LENGTH, formatHiddenWords, parseHiddenWords, sameHiddenWords } from '../lib/hiddenWords';
 import { COMMENT_POLICIES, type AccessibilitySettings, type CommentPolicy, type PublicUser, type SettingsPatch } from '../lib/hooks';
 import { SettingsCard, ToggleRow } from './SettingsPieces';
+import WorkoutSettingsSection from './settings/WorkoutSettingsSection';
 import { Button, Select, Textarea, useToast, type SelectOption } from './ui';
 
 /**
@@ -29,8 +30,8 @@ import { Button, Select, Textarea, useToast, type SelectOption } from './ui';
 
 /* ------------------------------------------------------------------ data */
 
-/** The same ['me'] query the Account and Privacy cards share, seeded from the session. */
-function useAccount() {
+/** The same ['me'] query the Account and Privacy cards share, seeded from the session. Exported for settings/* cards. */
+export function useAccount() {
   const authUser = useAuth((s) => s.user);
   return useQuery({
     queryKey: ['me'],
@@ -52,12 +53,12 @@ type SaveVars = {
 };
 
 /** Server message for a per-key 400 ({ message, field }); null for anything else. */
-const settingsFieldError = (e: unknown, field: string): string | null => {
+export const settingsFieldError = (e: unknown, field: string): string | null => {
   const data = (e as { response?: { status?: number; data?: { message?: string; field?: string } } })?.response?.data;
   return data?.field === field && typeof data.message === 'string' ? data.message : null;
 };
 
-function useSettingsSave({ fallback, onError }: { fallback: string; onError?: (e: unknown) => void }) {
+export function useSettingsSave({ fallback, onError }: { fallback: string; onError?: (e: unknown) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const setUser = useAuth((s) => s.setUser);
@@ -323,6 +324,7 @@ export default function AccountPreferenceSections() {
     <>
       <CommentsSection />
       <AccessibilitySection />
+      <WorkoutSettingsSection />
     </>
   );
 }
