@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Card,
+  CardGrid,
   CardMedia,
   ConfirmDialog,
   EmptyState,
@@ -741,7 +742,7 @@ function TemplateCard({
 
 function CardSkeletons({ count = 6 }: { count?: number }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading templates">
+    <CardGrid min="20rem" aria-busy="true" aria-label="Loading templates">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="card space-y-3 p-4 sm:p-5">
           <Skeleton className="h-5 w-2/3" />
@@ -754,7 +755,7 @@ function CardSkeletons({ count = 6 }: { count?: number }) {
           </div>
         </div>
       ))}
-    </div>
+    </CardGrid>
   );
 }
 
@@ -865,7 +866,7 @@ export default function MealTemplates() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Meal templates"
         subtitle="Save the meals you eat often and log them in one tap."
@@ -918,6 +919,7 @@ export default function MealTemplates() {
             />
           ) : (
             <EmptyState
+              family="fuel"
               title={emptyCopy[tab].title}
               message={emptyCopy[tab].message}
               action={{ ...emptyCopy[tab].action, variant: 'primary' }}
@@ -926,7 +928,7 @@ export default function MealTemplates() {
           )}
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <CardGrid min="20rem">
           {list.map((template) => (
             <TemplateCard
               key={template._id}
@@ -939,7 +941,7 @@ export default function MealTemplates() {
               onDelete={(t) => setPendingDelete(t)}
             />
           ))}
-        </div>
+        </CardGrid>
       )}
 
       <TemplateModal
