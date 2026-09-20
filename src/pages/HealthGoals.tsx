@@ -31,8 +31,8 @@ import {
 import {
   Button,
   ButtonLink,
-  Callout,
   Card,
+  CardGrid,
   CardHeader,
   EmptyState,
   ErrorState,
@@ -42,7 +42,6 @@ import {
   Progress,
   Select,
   Skeleton,
-  StatGrid,
   StatTile,
   chartTheme,
   formatStat,
@@ -489,7 +488,7 @@ export default function HealthGoals() {
     .join(' ');
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Goals"
         subtitle="Calorie and macro targets estimated from the body stats you enter."
@@ -506,17 +505,17 @@ export default function HealthGoals() {
       />
 
       {goalsQuery.isLoading ? (
-        <StatGrid columns={4}>
+        <CardGrid min="clamp(8.5rem, 22%, 15rem)">
           {Array.from({ length: 4 }).map((_, i) => (
             <StatTile key={i} loading label="" value="" />
           ))}
-        </StatGrid>
+        </CardGrid>
       ) : goalsQuery.isError ? (
         <ErrorState error={goalsQuery.error} title="Could not load your goals" retry={() => goalsQuery.refetch()} />
       ) : hasTargets && goals ? (
         <div className="space-y-4">
-          <StatGrid columns={4}>
-            <StatTile label="Daily calorie goal" value={formatStat(Math.round(goals.dailyCalorieGoal ?? 0))} unit="kcal" tone="brand" icon={<Target size={18} />} hint={GOALS.find((g) => g.value === goals.goal)?.label ?? 'Your target'} />
+          <CardGrid min="clamp(8.5rem, 22%, 15rem)">
+            <StatTile label="Daily calorie goal" value={formatStat(Math.round(goals.dailyCalorieGoal ?? 0))} unit="kcal" icon={<Target size={18} />} hint={GOALS.find((g) => g.value === goals.goal)?.label ?? 'Your target'} />
             <StatTile label="Maintenance (TDEE)" value={formatStat(Math.round(goals.tdee ?? 0))} unit="kcal" icon={<Zap size={18} />} hint="Estimated daily burn" />
             <StatTile label="Resting (BMR)" value={formatStat(Math.round(goals.bmr ?? 0))} unit="kcal" icon={<Flame size={18} />} hint="Estimated burn at rest" />
             <StatTile
@@ -529,10 +528,10 @@ export default function HealthGoals() {
                   : 'Add one below'
               }
             />
-          </StatGrid>
-          <Card>
+          </CardGrid>
+          <Card container>
             <CardHeader title="Macro targets" subtitle="Daily grams that make up your calorie goal" />
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid gap-3 @sm:grid-cols-3">
               <MacroTarget label="Protein" grams={goals.macroGoals?.protein ?? 0} tone="protein" />
               <MacroTarget label="Carbs" grams={goals.macroGoals?.carbs ?? 0} tone="carbs" />
               <MacroTarget label="Fat" grams={goals.macroGoals?.fat ?? 0} tone="fat" />
@@ -559,7 +558,7 @@ export default function HealthGoals() {
           subtitle="What you’ve logged against today’s targets"
           action={
             summary ? (
-              <ButtonLink to="/meals?log=1" variant="secondary" icon={<Plate size={16} />}>
+              <ButtonLink to="/meals/log" variant="secondary" icon={<Plate size={16} />}>
                 Log meal
               </ButtonLink>
             ) : undefined
@@ -734,9 +733,9 @@ export default function HealthGoals() {
             />
           </div>
 
-          <Callout tone="info" title="Estimates, not medical advice">
-            Resting calories use the Mifflin-St Jeor equation from your weight, height, age and sex; maintenance scales that by activity level, and deficits or surpluses are capped at safe daily amounts. Treat the numbers as a starting point and adjust from what you see in your logs.
-          </Callout>
+          <p className="text-xs leading-relaxed text-text-3">
+            Estimates, not medical advice. Resting calories use the Mifflin-St Jeor equation from your weight, height, age and sex; maintenance scales that by activity level, and deficits or surpluses are capped at safe daily amounts. Treat the numbers as a starting point and adjust from what you see in your logs.
+          </p>
 
           {formAlert ? (
             <p role="alert" className="text-sm text-danger">

@@ -7,8 +7,8 @@ import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, uploadImage } from '../lib/hook
 import {
   Badge,
   Button,
-  Callout,
   Card,
+  CardGrid,
   CardHeader,
   ConfirmDialog,
   EmptyState,
@@ -20,7 +20,6 @@ import {
   Select,
   Skeleton,
   Spinner,
-  StatGrid,
   StatTile,
   Tabs,
   Textarea,
@@ -490,7 +489,7 @@ function ComparisonPanel() {
   const hasPair = Boolean(data?.first && data?.latest && data.first._id !== data.latest._id);
 
   return (
-    <Card>
+    <Card container>
       <CardHeader
         title="Before and after"
         subtitle="First check-in against the latest"
@@ -519,7 +518,7 @@ function ComparisonPanel() {
         <div className="space-y-4" aria-busy={isFetching || undefined}>
           <ComparisonSlider before={data.first} after={data.latest} />
 
-          <StatGrid columns={4}>
+          <div className="grid grid-cols-2 gap-3 @md:grid-cols-4">
             <StatTile label="Days between" value={formatStat(data.daysBetween ?? 0)} unit={data.daysBetween === 1 ? 'day' : 'days'} />
             <StatTile
               label="Weight change"
@@ -530,12 +529,12 @@ function ComparisonPanel() {
             />
             <StatTile label="First weight" value={data.first.weight != null ? formatStat(data.first.weight) : '—'} unit={data.first.weight != null ? 'kg' : undefined} hint={fmtDate(data.first.date)} />
             <StatTile label="Latest weight" value={data.latest.weight != null ? formatStat(data.latest.weight) : '—'} unit={data.latest.weight != null ? 'kg' : undefined} hint={fmtDate(data.latest.date)} />
-          </StatGrid>
+          </div>
 
           {changes ? (
             <div>
               <p className="type-label mb-2 text-text-2">Measurement changes in cm</p>
-              <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              <dl className="grid grid-cols-2 gap-2 @lg:grid-cols-5">
                 {MEASUREMENT_KEYS.map((key) => {
                   const raw = changes[key];
                   const valid = raw != null && Number.isFinite(Number(raw));
@@ -666,7 +665,7 @@ export default function ProgressPhotos() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Progress photos"
         subtitle={firstName ? `Proof of the work, ${firstName}. Track the change the scale misses.` : 'Proof of the work. Track the change the scale misses.'}
@@ -678,26 +677,29 @@ export default function ProgressPhotos() {
         }
       />
 
-      <StatGrid columns={3}>
-        <StatTile loading={isLoading} label="Check-ins" value={formatStat(photos.length)} icon={<Camera size={18} />} hint={filter ? `${humanize(filter)} angle only` : 'All angles'} />
-        <StatTile
-          loading={isLoading}
-          label="Latest weight"
-          value={latestWeight != null ? formatStat(latestWeight) : '—'}
-          unit={latestWeight != null ? 'kg' : undefined}
-          spark={compact ? undefined : weightSpark}
-          delta={weightDelta != null ? { value: `${signed(weightDelta)} kg`, direction: 'flat', label: 'since day one' } : undefined}
-          hint={latestWeight == null ? 'Add weight to a check-in' : undefined}
-        />
-        <StatTile
-          loading={isLoading}
-          label="Last check-in"
-          value={daysSince == null ? '—' : daysSince === 0 ? 'Today' : formatStat(daysSince)}
-          unit={daysSince == null || daysSince === 0 ? undefined : daysSince === 1 ? 'day ago' : 'days ago'}
-          icon={<Calendar size={18} />}
-          hint={photos[0] ? fmtDate(photos[0].date) : 'No check-ins yet'}
-        />
-      </StatGrid>
+      {photos.length > 0 ? (
+        <CardGrid min="clamp(8.5rem, 22%, 15rem)" aria-label="Check-in summary">
+          <StatTile label="Check-ins" value={formatStat(photos.length)} icon={<Camera size={18} />} hint={filter ? `${humanize(filter)} angle only` : 'All angles'} />
+          {latestWeight != null ? (
+            <StatTile
+              label="Latest weight"
+              value={formatStat(latestWeight)}
+              unit="kg"
+              spark={compact ? undefined : weightSpark}
+              delta={weightDelta != null ? { value: `${signed(weightDelta)} kg`, direction: 'flat', label: 'since day one' } : undefined}
+            />
+          ) : null}
+          {daysSince != null ? (
+            <StatTile
+              label="Last check-in"
+              value={daysSince === 0 ? 'Today' : formatStat(daysSince)}
+              unit={daysSince === 0 ? undefined : daysSince === 1 ? 'day ago' : 'days ago'}
+              icon={<Calendar size={18} />}
+              hint={photos[0] ? fmtDate(photos[0].date) : undefined}
+            />
+          ) : null}
+        </CardGrid>
+      ) : null}
 
       <Tabs
         variant="segmented"
@@ -724,7 +726,7 @@ export default function ProgressPhotos() {
           </div>
 
           {isLoading ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <CardGrid min="clamp(8.5rem, 22%, 14rem)" aria-busy="true" aria-label="Loading check-ins">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="card overflow-hidden">
                   <Skeleton className="aspect-[3/4] w-full rounded-none" />
@@ -734,13 +736,14 @@ export default function ProgressPhotos() {
                   </div>
                 </div>
               ))}
-            </div>
+            </CardGrid>
           ) : isError ? (
             <ErrorState error={error} title="Could not load your progress photos" retry={() => refetch()} />
           ) : photos.length === 0 ? (
             <Card padded={false}>
               <EmptyState
                 variant={filter ? 'no-results' : 'first-run'}
+                family={filter ? undefined : 'body'}
                 title={filter ? `No ${humanize(filter).toLowerCase()} photos yet` : 'No check-ins yet'}
                 message={filter ? 'Try another angle, or add a check-in from this one.' : 'Take your first check-in today: same spot, same light. Future you will want the baseline.'}
                 action={{ label: filter ? 'Add a check-in' : 'Add your first check-in', onClick: () => setUploadOpen(true), icon: <Camera size={18} /> }}
@@ -748,16 +751,16 @@ export default function ProgressPhotos() {
               />
             </Card>
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <CardGrid min="clamp(8.5rem, 22%, 14rem)">
               {photos.map((photo) => (
                 <PhotoCard key={photo._id} photo={photo} onEdit={() => setEditingId(photo._id)} onDelete={() => setPendingDelete(photo)} />
               ))}
-            </div>
+            </CardGrid>
           )}
         </section>
       )}
 
-      <Callout tone="info">Check-ins are listed only in your account. They never appear in your posts, feed or profile.</Callout>
+      <p className="text-xs leading-relaxed text-text-3">Check-ins are listed only in your account. They never appear in your posts, feed or profile.</p>
 
       <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
       <EditModal photoId={editingId} onClose={() => setEditingId(null)} />

@@ -12,6 +12,7 @@ import {
   Button,
   Callout,
   Card,
+  CardGrid,
   CardMedia,
   ConfirmDialog,
   EmptyState,
@@ -931,7 +932,7 @@ function SharedPlanModal({ token, onClose }: { token: string | null; onClose: ()
 
 function CardSkeletons({ count = 3 }: { count?: number }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading plans">
+    <CardGrid min="20rem" aria-busy="true" aria-label="Loading plans">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="card space-y-4 p-4 sm:p-5">
           <Skeleton className="h-5 w-2/3" />
@@ -947,7 +948,7 @@ function CardSkeletons({ count = 3 }: { count?: number }) {
           </div>
         </div>
       ))}
-    </div>
+    </CardGrid>
   );
 }
 
@@ -1106,7 +1107,7 @@ export default function WeeklyPlans() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Weekly plans"
         subtitle="Plan the week once, then log any day in one tap."
@@ -1227,6 +1228,7 @@ export default function WeeklyPlans() {
       ) : list.length === 0 ? (
         <Card padded={false}>
           <EmptyState
+            family="fuel"
             title={emptyCopy[tab].title}
             message={emptyCopy[tab].message}
             action={{ ...emptyCopy[tab].action, variant: 'primary' }}
@@ -1234,7 +1236,7 @@ export default function WeeklyPlans() {
           />
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <CardGrid min="20rem">
           {list.map((plan) => (
             <PlanCard
               key={plan._id}
@@ -1245,7 +1247,7 @@ export default function WeeklyPlans() {
               onDelete={(p) => setPendingDelete(p)}
             />
           ))}
-        </div>
+        </CardGrid>
       )}
 
       <PlanModal open={planModal.open} editing={planModal.editing} onClose={() => setPlanModal({ open: false, editing: null })} />

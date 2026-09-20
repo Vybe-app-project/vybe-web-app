@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Area,
@@ -17,12 +17,14 @@ import {
 } from 'recharts';
 import { format, isValid, parseISO, subDays } from 'date-fns';
 import { api, errMsg } from '../lib/api';
-import { displayWeight, formatWeight, useUnits, weightUnit } from '../lib/units';
+import { displayWeight, useUnits, weightUnit } from '../lib/units';
 import {
   Button,
-  Callout,
+  ButtonLink,
   Card,
+  CardGrid,
   CardHeader,
+  ChartEmpty,
   ConfirmDialog,
   DateField,
   EmptyState,
@@ -32,10 +34,9 @@ import {
   Modal,
   PageHeader,
   Section,
+  SegmentedControl,
   Skeleton,
-  StatGrid,
   StatTile,
-  Tabs,
   VIZ,
   chartTheme,
   formatStat,
@@ -161,6 +162,13 @@ const entryDateLabel = (value: string) => {
 
 const CHART_MARGIN = { top: 8, right: 8, bottom: 0, left: -12 };
 
+/**
+ * Body numbers are neutral (DP-005): the weight line and the "minutes" bars
+ * draw in the strong neutral ink, never in the action colour, so nothing on
+ * this page reads as blue-good / red-bad.
+ */
+const INK_STRONG = 'var(--primary-strong, var(--text-1))';
+
 /* -------------------------------------------------------------- entry form */
 
 function EntryModal({ open, entry, onClose }: { open: boolean; entry: DailyEntry | null; onClose: () => void }) {
@@ -285,9 +293,9 @@ function EntryModal({ open, entry, onClose }: { open: boolean; entry: DailyEntry
           />
         </div>
         {formError ? (
-          <Callout tone="danger" className="py-2.5">
+          <p role="alert" className="text-sm text-danger">
             {formError}
-          </Callout>
+          </p>
         ) : (
           <p className="text-xs text-text-3">Entries are manual. Vybe doesn’t read from Apple Health or Health Connect.</p>
         )}
@@ -327,6 +335,9 @@ function MacroBalance({ protein, carbs, fat }: { protein: number; carbs: number;
 }
 
 /* ------------------------------------------------------------------- page */
+
+/** A stat tile only once its metric has a datum: no wall of zeros on first run. */
+type TileSpec = { key: string; node: ReactNode };
 
 export default function Health() {
   const qc = useQueryClient();
@@ -498,118 +509,135 @@ export default function Health() {
   const animation = chartTheme.animationDuration;
   const chartAnim = { isAnimationActive: animation > 0, animationDuration: animation };
 
-  const logButton = (
-    <Button variant="primary" icon={<Plus size={18} />} onClick={openNewEntry}>
-      Log weight or steps
-    </Button>
-  );
+  // Body-hub figure: the latest weight when one exists, else the step average.
+  // Body and nutrition numbers are neutral throughout (DP-005): no tile tone,
+  // no red or green, and a weight delta is a fact, not a verdict.
+  const latestWeight = metrics?.weight != null ? displayWeight(metrics.weight, system) : null;
+  const avgSteps = Math.round(metrics?.averageDailySteps ?? 0);
+  const bandFigure = latestWeight ?? (avgSteps > 0 ? avgSteps : null);
+  const bandFigureLabel = latestWeight != null ? 'latest weight' : 'average daily steps';
+  const bandFigureUnit = latestWeight != null ? wUnit : undefined;
+
+  const tiles: TileSpec[] = [];
+  if (data) {
+    if ((data.fitnessScore ?? 0) > 0) {
+      tiles.push({ key: 'score', node: <StatTile label="Fitness score" value={formatStat(data.fitnessScore)} unit="/ 100" icon={<Activity size={18} />} hint="Logging consistency, not a medical score" /> });
+    }
+    if ((data.workoutStats.totalWorkouts ?? 0) > 0) {
+      tiles.push({
+        key: 'workouts',
+        node: (
+          <StatTile
+            label={`Workouts ${WINDOW_NOUN[timeWindow]}`}
+            value={formatStat(data.workoutStats.totalWorkouts)}
+            icon={<Dumbbell size={18} />}
+            spark={compact ? undefined : volumeSeries.map((v) => v.workouts)}
+            hint={`${formatStat(data.workoutStats.totalDuration ?? 0)} min in total`}
+          />
+        ),
+      });
+    }
+    if ((data.nutritionStats.totalCalories ?? 0) > 0) {
+      tiles.push({
+        key: 'kcal',
+        node: (
+          <StatTile
+            label="Calories eaten"
+            value={formatStat(Math.round(data.nutritionStats.totalCalories))}
+            unit="kcal"
+            icon={<Plate size={18} />}
+            spark={compact ? undefined : calorieSeries.map((c) => c.calories)}
+            hint={`${formatStat(data.nutritionStats.totalMeals ?? 0)} ${data.nutritionStats.totalMeals === 1 ? 'meal' : 'meals'} logged`}
+          />
+        ),
+      });
+    }
+    if (avgSteps > 0) {
+      tiles.push({
+        key: 'steps',
+        node: (
+          <StatTile
+            label="Average daily steps"
+            value={formatStat(avgSteps)}
+            icon={<Footprints size={18} />}
+            spark={compact ? undefined : stepsSpark}
+            hint={`${formatStat(metrics?.manualEntryDays ?? 0)} ${dayUnit(metrics?.manualEntryDays ?? 0)} logged`}
+          />
+        ),
+      });
+    }
+    if (latestWeight != null) {
+      tiles.push({
+        key: 'weight',
+        node: (
+          <StatTile
+            label="Weight"
+            value={formatStat(latestWeight)}
+            unit={wUnit}
+            icon={<Scale size={18} />}
+            spark={compact ? undefined : weightSpark}
+            delta={weightDelta != null ? { value: `${weightDelta > 0 ? '+' : ''}${formatStat(weightDelta)} ${wUnit}`, direction: 'flat', label: 'since first entry' } : undefined}
+            hint={metrics?.bmi != null ? `BMI ${formatStat(metrics.bmi)}` : undefined}
+          />
+        ),
+      });
+    }
+    if ((data.streaks.workout ?? 0) > 0) {
+      tiles.push({ key: 'streak-w', node: <StatTile label="Workout streak" value={formatStat(data.streaks.workout)} unit={dayUnit(data.streaks.workout)} icon={<Flame size={18} />} hint="Consecutive days with a session" /> });
+    }
+    if ((data.streaks.nutrition ?? 0) > 0) {
+      tiles.push({ key: 'streak-n', node: <StatTile label="Nutrition streak" value={formatStat(data.streaks.nutrition)} unit={dayUnit(data.streaks.nutrition)} icon={<Flame size={18} />} hint="Consecutive days with a meal logged" /> });
+    }
+    if ((data.streaks.longestStreak ?? 0) > 0) {
+      tiles.push({ key: 'streak-best', node: <StatTile label="Longest streak" value={formatStat(data.streaks.longestStreak)} unit={dayUnit(data.streaks.longestStreak)} icon={<Trophy size={18} />} hint="Your best run so far" /> });
+    }
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Health"
-        subtitle="Training, nutrition and body stats, built from what you log."
-        actions={logButton}
+        band={{
+          context: format(new Date(), 'EEEE d MMMM'),
+          figure: bandFigure,
+          figureUnit: bandFigureUnit,
+          figureLabel: bandFigureLabel,
+          action: (
+            <Button variant="primary" size="lg" icon={<Plus size={18} />} onClick={openNewEntry}>
+              Log weight or steps
+            </Button>
+          ),
+          children: overview.isLoading ? null : (
+            <div>
+              <p className="text-base font-semibold">Log a weight or your steps to start</p>
+              <p className="gym-band-body-copy">One entry a day is enough; the trend builds from there.</p>
+            </div>
+          ),
+        }}
         mobileActions={<IconButton label="Log weight or steps" onClick={openNewEntry}><Plus size={22} /></IconButton>}
       />
 
-      <Tabs
-        variant="segmented"
+      <SegmentedControl
+        fill={false}
         aria-label="Time window"
         tabs={WINDOWS.map((w) => ({ key: w.key, label: w.label }))}
         value={timeWindow}
         onChange={(k: string) => setTimeWindow(k as TimeWindow)}
-        className="max-w-sm"
       />
 
       {overview.isError ? (
         <ErrorState error={overview.error} title="Could not load your health summary" retry={() => overview.refetch()} />
-      ) : (
-        <>
-          <StatGrid columns={4}>
-            <StatTile
-              loading={overview.isLoading}
-              label="Fitness score"
-              value={formatStat(data?.fitnessScore ?? 0)}
-              unit="/ 100"
-              tone="brand"
-              icon={<Activity size={18} />}
-              hint="Logging consistency, not a medical score"
-            />
-            <StatTile
-              loading={overview.isLoading}
-              label={`Workouts ${WINDOW_NOUN[timeWindow]}`}
-              value={formatStat(data?.workoutStats.totalWorkouts ?? 0)}
-              icon={<Dumbbell size={18} />}
-              spark={compact ? undefined : volumeSeries.map((v) => v.workouts)}
-              hint={`${formatStat(data?.workoutStats.totalDuration ?? 0)} min in total`}
-            />
-            <StatTile
-              loading={overview.isLoading}
-              label="Calories eaten"
-              value={formatStat(Math.round(data?.nutritionStats.totalCalories ?? 0))}
-              unit="kcal"
-              icon={<Plate size={18} />}
-              spark={compact ? undefined : calorieSeries.map((c) => c.calories)}
-              hint={`${formatStat(data?.nutritionStats.totalMeals ?? 0)} ${data?.nutritionStats.totalMeals === 1 ? 'meal' : 'meals'} logged`}
-            />
-            <StatTile
-              loading={overview.isLoading}
-              label="Average daily steps"
-              value={formatStat(Math.round(metrics?.averageDailySteps ?? 0))}
-              icon={<Footprints size={18} />}
-              spark={compact ? undefined : stepsSpark}
-              hint={`${formatStat(metrics?.manualEntryDays ?? 0)} ${dayUnit(metrics?.manualEntryDays ?? 0)} logged`}
-            />
-          </StatGrid>
+      ) : tiles.length > 0 ? (
+        <CardGrid min="clamp(8.5rem, 22%, 15rem)" aria-label="Health summary">
+          {tiles.map((t) => (
+            <div key={t.key} className="min-w-0">
+              {t.node}
+            </div>
+          ))}
+        </CardGrid>
+      ) : null}
 
-          <StatGrid columns={4}>
-            <StatTile
-              loading={overview.isLoading}
-              label="Weight"
-              value={metrics?.weight != null ? formatStat(displayWeight(metrics.weight, system)) : '—'}
-              unit={metrics?.weight != null ? wUnit : undefined}
-              icon={<Scale size={18} />}
-              spark={compact ? undefined : weightSpark}
-              delta={weightDelta != null ? { value: `${weightDelta > 0 ? '+' : ''}${formatStat(weightDelta)} ${wUnit}`, direction: 'flat', label: 'since first entry' } : undefined}
-              hint={metrics?.bmi != null ? `BMI ${formatStat(metrics.bmi)}` : 'Log a weight to track it'}
-            />
-            <StatTile
-              loading={overview.isLoading}
-              label="Workout streak"
-              value={formatStat(data?.streaks.workout ?? 0)}
-              unit={dayUnit(data?.streaks.workout ?? 0)}
-              tone="accent"
-              icon={<Flame size={18} />}
-              hint="Consecutive days with a session"
-            />
-            <StatTile
-              loading={overview.isLoading}
-              label="Nutrition streak"
-              value={formatStat(data?.streaks.nutrition ?? 0)}
-              unit={dayUnit(data?.streaks.nutrition ?? 0)}
-              tone="accent"
-              icon={<Flame size={18} />}
-              hint="Consecutive days with a meal logged"
-            />
-            <StatTile
-              loading={overview.isLoading}
-              label="Longest streak"
-              value={formatStat(data?.streaks.longestStreak ?? 0)}
-              unit={dayUnit(data?.streaks.longestStreak ?? 0)}
-              icon={<Trophy size={18} />}
-              hint="Your best run so far"
-            />
-          </StatGrid>
-
-          <Callout tone="brand" title="Manual tracking">
-            Steps and weight are the numbers you enter here; nothing syncs from Apple Health or Health Connect. The fitness score
-            measures how consistently you log workouts, meals and daily stats over the selected period. It is not a medical assessment.
-          </Callout>
-        </>
-      )}
-
-      <div className="grid gap-4 lg:grid-cols-2">
+      <CardGrid min="22rem">
         <Card>
           <CardHeader title="Weight trend" subtitle={`Last ${ENTRY_HISTORY_DAYS} days of logged weight`} />
           {entries.isLoading ? (
@@ -617,13 +645,14 @@ export default function Health() {
           ) : entries.isError ? (
             <ErrorState error={entries.error} title="Could not load your weight history" retry={() => entries.refetch()} />
           ) : weightSeries.length < 2 ? (
-            <EmptyState
-              size="sm"
-              icon={<Scale size={24} />}
-              title="Log weight on two days to see a trend"
-              message="Each entry is a point on this line."
-              action={{ label: 'Log weight', onClick: openNewEntry, variant: 'secondary' }}
-            />
+            <>
+              <ChartEmpty height={168} label="Log weight on two days to see a trend" />
+              <div className="mt-3 flex justify-center">
+                <Button variant="quiet" size="sm" onClick={openNewEntry}>
+                  Log weight
+                </Button>
+              </div>
+            </>
           ) : (
             <div className="h-56 w-full">
               <ResponsiveContainer width="100%" height="100%">
@@ -632,7 +661,7 @@ export default function Health() {
                   <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
                   <YAxis {...chartTheme.axisProps} width={44} domain={['dataMin - 2', 'dataMax + 2']} />
                   <Tooltip {...chartTheme.tooltip} formatter={(v) => [`${formatStat(Number(v ?? 0))} ${wUnit}`, 'Weight']} />
-                  <Line type="monotone" dataKey="weight" stroke={VIZ.brand} strokeWidth={2} dot={{ r: 3, fill: VIZ.brand, strokeWidth: 0 }} activeDot={{ r: 5 }} {...chartAnim} />
+                  <Line type="monotone" dataKey="weight" stroke={INK_STRONG} strokeWidth={2} dot={{ r: 3, fill: INK_STRONG, strokeWidth: 0 }} activeDot={{ r: 5 }} {...chartAnim} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -646,13 +675,14 @@ export default function Health() {
           ) : nutrition.isError ? (
             <ErrorState error={nutrition.error} title="Could not load nutrition analytics" retry={() => nutrition.refetch()} />
           ) : calorieSeries.length === 0 ? (
-            <EmptyState
-              size="sm"
-              icon={<Plate size={24} />}
-              title="No meals logged yet"
-              message="Log a meal and your daily calories chart here."
-              action={{ label: 'Log meal', to: '/meals?log=1', variant: 'secondary' }}
-            />
+            <>
+              <ChartEmpty height={168} label="Log a meal and your daily calories chart here" />
+              <div className="mt-3 flex justify-center">
+                <ButtonLink to="/meals/log" variant="quiet" size="sm">
+                  Log meal
+                </ButtonLink>
+              </div>
+            </>
           ) : (
             <>
               <div className="h-56 w-full">
@@ -669,7 +699,7 @@ export default function Health() {
                     <YAxis {...chartTheme.axisProps} width={44} />
                     <Tooltip {...chartTheme.tooltip} formatter={(v) => [`${formatStat(Math.round(Number(v ?? 0)))} kcal`, 'Calories']} />
                     {calorieGoal > 0 ? (
-                      <ReferenceLine y={calorieGoal} stroke={VIZ.brand} strokeDasharray="4 4" ifOverflow="extendDomain" label={{ value: `Goal ${formatStat(calorieGoal)}`, position: 'insideTopRight', fill: VIZ.brand, fontSize: 11 }} />
+                      <ReferenceLine y={calorieGoal} {...chartTheme.goalLine} ifOverflow="extendDomain" label={{ value: `Goal ${formatStat(calorieGoal)}`, position: 'insideTopRight', fill: chartTheme.text, fontSize: 11 }} />
                     ) : null}
                     <Area type="monotone" dataKey="calories" stroke={VIZ.kcal} strokeWidth={2} fill="url(#healthCaloriesFill)" {...chartAnim} />
                   </AreaChart>
@@ -681,20 +711,12 @@ export default function Health() {
                   <span className="tabular font-semibold text-text-1">{nutritionInsights.loggedDays}</span> {dayUnit(nutritionInsights.loggedDays)} you logged
                   {calorieGoal > 0 ? (
                     <>
-                      , {nutritionInsights.avgPerLoggedDay <= calorieGoal ? (
-                        <>
-                          <span className="tabular font-semibold text-text-1">{formatStat(calorieGoal - nutritionInsights.avgPerLoggedDay)} kcal</span> under
-                        </>
-                      ) : (
-                        <>
-                          <span className="tabular font-semibold text-accent-text">{formatStat(nutritionInsights.avgPerLoggedDay - calorieGoal)} kcal</span> over
-                        </>
-                      )}{' '}
-                      your {formatStat(calorieGoal)} kcal goal.
+                      , <span className="tabular font-semibold text-text-1">{formatStat(Math.abs(calorieGoal - nutritionInsights.avgPerLoggedDay))} kcal</span>{' '}
+                      {nutritionInsights.avgPerLoggedDay <= calorieGoal ? 'under' : 'over'} your {formatStat(calorieGoal)} kcal goal.
                     </>
                   ) : (
                     <>
-                      . <a href="/health/goals" className="underline-offset-2 hover:underline">Set a calorie goal</a> to see the target line.
+                      . <Link to="/health/goals" viewTransition className="underline-offset-2 hover:underline">Set a calorie goal</Link> to see the target line.
                     </>
                   )}
                 </p>
@@ -703,13 +725,13 @@ export default function Health() {
             </>
           )}
         </Card>
-      </div>
+      </CardGrid>
 
       {nutrition.data && nutritionInsights && calorieSeries.length > 0 ? (
         <Section title="Nutrition" description={`Macros per day, meal types and the foods you log most ${WINDOW_NOUN[timeWindow]}.`}>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-            <Card>
-              <CardHeader title="Macros per day" subtitle="Grams of protein, carbs and fat, stacked" />
+          <CardGrid min="20rem">
+            <Card container>
+              <CardHeader title="Macros per day" subtitle="Grams of protein, carbs and fat, stacked" level={3} />
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={calorieSeries} margin={CHART_MARGIN} barGap={2}>
@@ -750,61 +772,60 @@ export default function Health() {
               </dl>
             </Card>
 
-            <div className="space-y-4">
-              <Card>
-                <CardHeader title="Meals by type" subtitle="How many, and the average size of each" />
-                {nutritionInsights.mealTypes.length === 0 ? (
-                  <p className="text-sm text-text-2">No meals in this window.</p>
-                ) : (
-                  <ul className="flex flex-wrap gap-2" aria-label="Meals by type">
-                    {nutritionInsights.mealTypes.map((m) => (
-                      <li key={m.type} className="rounded-md bg-surface-2 px-3 py-2">
-                        <p className="text-sm font-semibold text-text-1">
-                          {m.type.charAt(0).toUpperCase() + m.type.slice(1)} <span className="tabular text-text-2">× {formatStat(m.count)}</span>
-                        </p>
-                        <p className="tabular text-xs text-text-2">{formatStat(Math.round(m.avgCalories))} kcal each</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-              <Card>
-                <CardHeader title="Top foods" subtitle="What you logged most often" />
-                {nutritionInsights.topFoods.length === 0 ? (
-                  <p className="text-sm text-text-2">Log a few meals and your regulars show up here.</p>
-                ) : (
-                  <ol className="divide-y divide-line" aria-label="Top foods">
-                    {nutritionInsights.topFoods.map((food, i) => (
-                      <li key={food.name} className="flex items-center gap-3 py-2">
-                        <span className="type-stat w-5 text-sm text-text-3">{i + 1}</span>
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-1">{food.name}</span>
-                        <span className="tabular shrink-0 text-xs text-text-2">
-                          {formatStat(food.count)}× · {formatStat(Math.round(food.avgCalories))} kcal
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </Card>
-            </div>
-          </div>
+            <Card>
+              <CardHeader title="Meals by type" subtitle="How many, and the average size of each" level={3} />
+              {nutritionInsights.mealTypes.length === 0 ? (
+                <p className="text-sm text-text-2">No meals in this window.</p>
+              ) : (
+                <ul className="flex flex-wrap gap-2" aria-label="Meals by type">
+                  {nutritionInsights.mealTypes.map((m) => (
+                    <li key={m.type} className="rounded-md bg-surface-2 px-3 py-2">
+                      <p className="text-sm font-semibold text-text-1">
+                        {m.type.charAt(0).toUpperCase() + m.type.slice(1)} <span className="tabular text-text-2">× {formatStat(m.count)}</span>
+                      </p>
+                      <p className="tabular text-xs text-text-2">{formatStat(Math.round(m.avgCalories))} kcal each</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+            <Card>
+              <CardHeader title="Top foods" subtitle="What you logged most often" level={3} />
+              {nutritionInsights.topFoods.length === 0 ? (
+                <p className="text-sm text-text-2">Log a few meals and your regulars show up here.</p>
+              ) : (
+                <ol className="divide-y divide-line" aria-label="Top foods">
+                  {nutritionInsights.topFoods.map((food, i) => (
+                    <li key={food.name} className="flex items-center gap-3 py-2">
+                      <span className="type-stat w-5 text-sm text-text-3">{i + 1}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-1">{food.name}</span>
+                      <span className="tabular shrink-0 text-xs text-text-2">
+                        {formatStat(food.count)}× · {formatStat(Math.round(food.avgCalories))} kcal
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </Card>
+          </CardGrid>
         </Section>
       ) : null}
 
-      <Card>
+      <Card container>
         <CardHeader title="Workout volume" subtitle="Minutes trained and calories burned per session day" />
         {workouts.isLoading ? (
           <Skeleton className="h-56 w-full rounded-md" />
         ) : workouts.isError ? (
           <ErrorState error={workouts.error} title="Could not load workout analytics" retry={() => workouts.refetch()} />
         ) : volumeSeries.length === 0 ? (
-          <EmptyState
-            size="sm"
-            icon={<Dumbbell size={24} />}
-            title="No sessions logged yet"
-            message="Log a workout and your volume shows up here."
-            action={{ label: 'Log workout', to: '/workouts?log=1', variant: 'secondary' }}
-          />
+          <>
+            <ChartEmpty height={168} label="Log a workout and your volume shows up here" />
+            <div className="mt-3 flex justify-center">
+              <ButtonLink to="/workouts?log=1" variant="quiet" size="sm">
+                Log workout
+              </ButtonLink>
+            </div>
+          </>
         ) : (
           <>
             <div className="h-56 w-full">
@@ -820,21 +841,21 @@ export default function Health() {
                       name === 'duration' ? 'Duration' : 'Calories burned',
                     ]}
                   />
-                  <Bar dataKey="duration" fill={VIZ.brand} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
-                  <Bar dataKey="calories" fill={VIZ.accent} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
+                  <Bar dataKey="duration" fill={INK_STRONG} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
+                  <Bar dataKey="calories" fill={VIZ.alt} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs">
               <span className="inline-flex items-center gap-1.5 text-text-2">
-                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: VIZ.brand }} /> Minutes
+                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: INK_STRONG }} /> Minutes
               </span>
               <span className="inline-flex items-center gap-1.5 text-text-2">
-                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: VIZ.accent }} /> Calories burned
+                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: VIZ.alt }} /> Calories burned
               </span>
             </div>
             {workouts.data ? (
-              <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4">
+              <dl className="mt-4 grid gap-3 border-t border-line pt-4 @sm:grid-cols-3">
                 <div>
                   <dt className="type-label text-text-2">Best burn</dt>
                   <dd className="type-stat mt-1 text-xl text-text-1">
@@ -884,17 +905,21 @@ export default function Health() {
         ) : entries.isError ? (
           <ErrorState error={entries.error} title="Could not load your entries" retry={() => entries.refetch()} />
         ) : sortedEntries.length === 0 ? (
-          <EmptyState
-            title="No entries yet"
-            message="Log today’s steps or weight and it appears here, one line per day."
-            action={{ label: 'Log weight or steps', onClick: openNewEntry, icon: <Plus size={18} /> }}
-          />
+          <Card padded={false}>
+            <EmptyState
+              family="body"
+              title="No entries yet"
+              message="Log today’s steps or weight and it appears here, one line per day."
+              action={{ label: 'Log weight or steps', onClick: openNewEntry, icon: <Plus size={18} />, variant: 'secondary' }}
+            />
+          </Card>
         ) : (
-          <ul className="space-y-2">
+          <Card padded={false}>
+          <ul className="divide-y divide-line">
             {sortedEntries.map((entry) => {
               const dateLabel = entryDateLabel(entry.date);
               return (
-                <li key={entry.date} className="card flex items-center gap-3 p-3 pl-4">
+                <li key={entry.date} className="flex items-center gap-3 p-3 pl-4">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-text-1">{dateLabel}</p>
                     <div className="mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-2">
@@ -907,7 +932,7 @@ export default function Health() {
                       {entry.weightKg != null ? (
                         <span className="inline-flex items-center gap-1">
                           <Scale size={13} className="text-text-3" />
-                          <span className="tabular font-semibold text-text-1">{formatStat(entry.weightKg)}</span> kg
+                          <span className="tabular font-semibold text-text-1">{formatStat(displayWeight(entry.weightKg, system))}</span> {wUnit}
                         </span>
                       ) : null}
                       {entry.steps == null && entry.weightKg == null ? <span>No values recorded</span> : null}
@@ -931,8 +956,14 @@ export default function Health() {
               );
             })}
           </ul>
+          </Card>
         )}
       </Section>
+
+      <p className="text-xs leading-relaxed text-text-3">
+        Steps and weight are the numbers you enter here; nothing syncs from Apple Health or Health Connect. The fitness score measures how
+        consistently you log over the selected period, not your health.
+      </p>
 
       <EntryModal
         open={entryModal}

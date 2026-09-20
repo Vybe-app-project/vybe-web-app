@@ -6,10 +6,9 @@ import { api, errMsg } from '../lib/api';
 import { localDayParams, timeOfDay } from '../lib/timezone';
 import { displayVolume, mlToOz, useUnits, volumeUnit, type UnitSystem } from '../lib/units';
 import {
-  Badge,
   Button,
-  Callout,
   Card,
+  CardGrid,
   EmptyState,
   ErrorState,
   IconButton,
@@ -19,7 +18,6 @@ import {
   Ring,
   Section,
   Skeleton,
-  StatTile,
   Tabs,
   cx,
   formatStat,
@@ -99,6 +97,9 @@ const validate = (amount: number, unit: WaterUnit): string | null => {
 };
 
 const queryKey = ['water', 'today'];
+
+/** Progress is a neutral fill (DP-005): the strong ink, never the action colour and never success/danger. */
+const INK_STRONG = 'var(--primary-strong, var(--text-1))';
 
 /* -------------------------------------------------------------- log modal */
 
@@ -430,7 +431,6 @@ export default function Water() {
   const goalOz = goal.oz;
   const remaining = Math.max(0, goalOz - total);
   const reached = total >= goalOz && !isLoading;
-  const pct = Math.round(Math.min(1, total / goalOz) * 100);
   const lastLog = logs.find((l) => !l._id.startsWith('optimistic-')) ?? logs[0];
 
   const logButton = (
@@ -439,8 +439,10 @@ export default function Water() {
     </Button>
   );
 
+  const count = data?.count ?? 0;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Hydration"
         subtitle={isLoading ? 'Every glass counts toward your daily goal.' : `Every glass counts toward a ${vol(goalOz, system)} ${unit} daily goal.`}
@@ -459,7 +461,7 @@ export default function Water() {
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+      <CardGrid min="20rem">
         <Card className="flex flex-col items-center justify-center gap-4 text-center">
           {isLoading ? (
             <Skeleton className="h-[200px] w-[200px] rounded-full" />
@@ -467,112 +469,119 @@ export default function Water() {
             <ErrorState error={error} title="Could not load today’s hydration" retry={() => refetch()} />
           ) : (
             <>
-              <Ring value={total} max={goalOz} size={200} stroke={14} color={reached ? 'brand' : 'protein'} label={`Hydration ${vol(total, system)} of ${vol(goalOz, system)} ${unit}`}>
-                <Droplet size={22} className={cx(reached ? 'text-brand' : 'text-info')} />
+              <Ring value={total} max={goalOz} size={200} stroke={14} color={INK_STRONG} label={`Hydration ${vol(total, system)} of ${vol(goalOz, system)} ${unit}`}>
+                <Droplet size={22} className="text-text-2" />
                 <span className="mt-1 text-3xl">{vol(total, system)}</span>
                 <span className="text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">of {vol(goalOz, system)} {unit}</span>
               </Ring>
-              {reached ? (
-                <Badge tone="success" size="md">
-                  <CheckCircle size={14} /> Goal reached
-                </Badge>
-              ) : (
-                <p className="text-sm text-text-2">
-                  <span className="tabular font-semibold text-text-1">{vol(remaining, system)} {unit}</span> to go
-                </p>
-              )}
-              <button type="button" className="text-xs text-text-3 underline-offset-2 hover:underline" onClick={() => setGoalOpen(true)}>
+              <p className="text-sm text-text-2">
+                {reached ? (
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-text-1">
+                    <CheckCircle size={16} /> Goal reached
+                  </span>
+                ) : (
+                  <>
+                    <span className="tabular font-semibold text-text-1">{vol(remaining, system)} {unit}</span> to go
+                  </>
+                )}
+                {count > 0 ? (
+                  <span className="tabular">
+                    {' · '}
+                    {formatStat(count)} {count === 1 ? 'log' : 'logs'}
+                    {lastLog ? `, last at ${timeOfDay(lastLog.timestamp)}` : ''}
+                  </span>
+                ) : null}
+              </p>
+              <button type="button" className="min-h-11 text-xs text-text-3 underline-offset-2 hover:underline" onClick={() => setGoalOpen(true)}>
                 {GOAL_SOURCE_COPY[goal.source]}
               </button>
             </>
           )}
         </Card>
 
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
-            <StatTile loading={isLoading} label="Today" value={formatStat(pct)} unit="%" tone={reached ? 'brand' : 'neutral'} hint="of your daily goal" />
-            <StatTile loading={isLoading} label="Logs" value={formatStat(data?.count ?? 0)} hint={data?.count ? `${data.count === 1 ? 'entry' : 'entries'} so far today` : 'None yet today'} />
-            <StatTile
-              loading={isLoading}
-              label="Last drink"
-              value={timeOfDay(lastLog?.timestamp) || '—'}
-              hint={lastLog ? `${formatStat(lastLog.amount)} ${lastLog.unit}` : 'Nothing logged yet'}
-            />
+        <Card container className="flex flex-col justify-center">
+          <p className="type-label mb-3 text-text-2">Quick add</p>
+          <div className="grid grid-cols-2 gap-2 @md:grid-cols-4">
+            {QUICK_ADDS.map((quick) => (
+              <Button
+                key={quick.label}
+                variant="secondary"
+                className="h-auto flex-col gap-0 py-2.5"
+                disabled={logWater.isPending || isLoading || isError}
+                onClick={() => logWater.mutate({ amount: quick.amount, unit: quick.unit })}
+                aria-label={`Log ${quick.label.toLowerCase()}, ${quick.detail}`}
+              >
+                <span className="text-sm font-semibold">{quick.label}</span>
+                <span className="text-xs font-medium text-text-2">{quick.detail}</span>
+              </Button>
+            ))}
           </div>
-
-          <Card>
-            <p className="type-label mb-3 text-text-2">Quick add</p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {QUICK_ADDS.map((quick) => (
-                <Button
-                  key={quick.label}
-                  variant="secondary"
-                  className="h-auto flex-col gap-0 py-2.5"
-                  disabled={logWater.isPending || isLoading || isError}
-                  onClick={() => logWater.mutate({ amount: quick.amount, unit: quick.unit })}
-                  aria-label={`Log ${quick.label.toLowerCase()}, ${quick.detail}`}
-                >
-                  <span className="text-sm font-semibold">{quick.label}</span>
-                  <span className="text-xs font-medium text-text-2">{quick.detail}</span>
-                </Button>
-              ))}
-            </div>
-            <Button variant="ghost" className="mt-2 w-full sm:w-auto" icon={<Plus size={16} />} onClick={() => setLogOpen(true)}>
-              Custom amount
-            </Button>
-          </Card>
-        </div>
-      </div>
+          <Button variant="quiet" className="mt-2 w-full @md:w-auto" icon={<Plus size={16} />} onClick={() => setLogOpen(true)}>
+            Custom amount
+          </Button>
+        </Card>
+      </CardGrid>
 
       <Section title="Today’s logs" description={`Newest first. Totals are shown in ${system === 'imperial' ? 'ounces' : 'millilitres'}; change units in Settings.`}>
         {isLoading ? (
-          <div className="space-y-2">
+          <div className="card divide-y divide-line">
             {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full rounded-lg" />
+              <div key={i} className="flex items-center gap-3 p-3 pl-4">
+                <Skeleton className="h-10 w-10 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-1/4" />
+                  <Skeleton className="h-3 w-1/3" />
+                </div>
+              </div>
             ))}
           </div>
         ) : isError ? null : logs.length === 0 ? (
-          <EmptyState
-            title="Nothing logged yet today"
-            message="Tap a quick add or log a custom amount to record your first drink of the day."
-            action={{ label: 'Log water', onClick: () => setLogOpen(true), icon: <Droplet size={18} /> }}
-          />
+          <Card padded={false}>
+            <EmptyState
+              family="body"
+              title="Nothing logged yet today"
+              message="Tap a quick add or log a custom amount to record your first drink of the day."
+              action={{ label: 'Log water', onClick: () => setLogOpen(true), icon: <Droplet size={18} />, variant: 'secondary' }}
+            />
+          </Card>
         ) : (
-          <ul className="space-y-2">
-            {logs.map((log) => {
-              const ts = parseISO(log.timestamp);
-              const pending = log._id.startsWith('optimistic-');
-              const oz = roundOz(toOunces(log.amount, log.unit));
-              return (
-                <li key={log._id} className={cx('card flex items-center gap-3 p-3 pl-4 transition-opacity dur-2', pending && 'opacity-60')} aria-busy={pending || undefined}>
-                  <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-info-soft text-info">
-                    <Droplet size={18} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="type-stat text-lg text-text-1">
-                      {formatStat(log.amount)}
-                      <span className="ml-1 text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">{log.unit}</span>
-                    </p>
-                    <p className="text-xs text-text-2">
-                      <time dateTime={isValid(ts) ? ts.toISOString() : undefined} className="tabular">
-                        {timeOfDay(ts) || 'Just now'}
-                      </time>
-                      {log.unit !== unit ? <span className="ml-2 tabular text-text-3">{vol(oz, system)} {unit}</span> : null}
-                    </p>
-                  </div>
-                  <IconButton label={`Remove ${formatStat(log.amount)} ${log.unit} log`} variant="danger" disabled={pending || removeLog.isPending} onClick={() => removeLog.mutate(log)}>
-                    <Trash size={18} />
-                  </IconButton>
-                </li>
-              );
-            })}
-          </ul>
+          <Card padded={false}>
+            <ul className="divide-y divide-line">
+              {logs.map((log) => {
+                const ts = parseISO(log.timestamp);
+                const pending = log._id.startsWith('optimistic-');
+                const oz = roundOz(toOunces(log.amount, log.unit));
+                return (
+                  <li key={log._id} className={cx('flex items-center gap-3 p-3 pl-4 transition-opacity dur-2', pending && 'opacity-60')} aria-busy={pending || undefined}>
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface-2 text-text-2">
+                      <Droplet size={18} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="type-stat text-lg text-text-1">
+                        {formatStat(log.amount)}
+                        <span className="ml-1 text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">{log.unit}</span>
+                      </p>
+                      <p className="text-xs text-text-2">
+                        <time dateTime={isValid(ts) ? ts.toISOString() : undefined} className="tabular">
+                          {timeOfDay(ts) || 'Just now'}
+                        </time>
+                        {log.unit !== unit ? <span className="ml-2 tabular text-text-3">{vol(oz, system)} {unit}</span> : null}
+                      </p>
+                    </div>
+                    <IconButton label={`Remove ${formatStat(log.amount)} ${log.unit} log`} variant="danger" disabled={pending || removeLog.isPending} onClick={() => removeLog.mutate(log)}>
+                      <Trash size={18} />
+                    </IconButton>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
         )}
       </Section>
 
-      <Callout tone="info">
+      <p className="text-xs leading-relaxed text-text-3">
         Hydration is tracked from what you log here. The {vol(goalOz, system)} {unit} goal is a general guideline, not personal medical advice.
-      </Callout>
+      </p>
 
       <LogWaterModal open={logOpen} onClose={() => setLogOpen(false)} onSubmit={(payload) => logWater.mutateAsync(payload)} pending={logWater.isPending} defaultUnit={system === 'imperial' ? 'oz' : 'ml'} />
       <GoalModal open={goalOpen} goal={goal} system={system} onClose={() => setGoalOpen(false)} />
