@@ -486,7 +486,7 @@ test('dark surfaces step >=1.2:1 apart, tertiary text stays >=4.5:1 on the light
   };
   const dark = css.slice(css.indexOf('.dark {'), css.indexOf('@theme inline'));
   const [, bg, s1, s2, s3] = dark.match(/--bg: (#[0-9a-f]{6}); --surface-1: (#[0-9a-f]{6}); --surface-2: (#[0-9a-f]{6}); --surface-3: (#[0-9a-f]{6});/);
-  assert.equal(bg, '#04101b', 'the page background is unchanged');
+  assert.equal(bg, '#000000', 'the dark page background is Instagram black (P8 palette)');
   for (const [a, b] of [[bg, s1], [s1, s2], [s2, s3]]) assert.ok(ratio(a, b) >= 1.2, `dark step ${a}→${b}: ${ratio(a, b).toFixed(3)}`);
   const text3 = dark.match(/--text-3: (#[0-9a-f]{6});/)[1];
   assert.ok(ratio(text3, s3) >= 4.5, `dark text-3 on surface-3: ${ratio(text3, s3).toFixed(2)}`);

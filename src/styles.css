@@ -3,13 +3,17 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ------------------------------------------------------------------ *
- * Vybe "Deep Water" design tokens.
+ * Vybe design tokens — Instagram palette on the Gym First layout.
  *
- * One mint (#00D4AA, the shipped mobile brand) for action and progress,
- * deep navy surfaces, a warm ember reserved for effort (PRs, streaks),
- * and a mint-tinted off-white light theme. Components consume ONLY the
- * semantic tokens below; primitives exist so the semantic sets can be
- * re-tuned without touching components.
+ * Instagram's neutrals (page white / page black, #fafafa / #efefef steps,
+ * #dbdbdb hairlines), Instagram blue for the one action on a screen and for
+ * links, and the yellow→pink→purple gradient for story rings and the rare
+ * highlight. The Vybe mint survives ONLY as `--mark` (the logo) and inside
+ * the gym band's navy cover art; a warm ember stays reserved for effort.
+ * Where an Instagram value misses WCAG AA the nearest passing neighbour is
+ * used and the ratio is noted beside it. Components consume ONLY the
+ * semantic tokens below; primitives exist so the sets can be re-tuned
+ * without touching components. docs/DESIGN.md › Palette has the table.
  * ------------------------------------------------------------------ */
 
 /* Size-adjusted local fallback so text does not reflow when Archivo arrives. */
@@ -24,42 +28,59 @@
 
 :root {
   color-scheme: light;
-  accent-color: #00b08e;
+  accent-color: #0077d9;
 
-  /* primitives */
+  /* primitives. Mint and navy stay for the mark and the band's cover art only;
+     the Instagram set feeds the semantic tokens below. */
   --mint-50: #e6fff8; --mint-100: #c2ffee; --mint-200: #8df7dc; --mint-300: #4defc8; --mint-400: #1de5b6;
   --mint-500: #00d4aa; --mint-600: #00b08e; --mint-700: #008a71; --mint-800: #036554; --mint-900: #044a3f;
   --navy-50: #f6f9f8; --navy-100: #eef3f1; --navy-200: #dce5e1; --navy-300: #b9c9c4; --navy-400: #8aa0a9;
   --navy-500: #5b7683; --navy-600: #3e5866; --navy-700: #243c4c; --navy-800: #0c2436; --navy-900: #071a2a; --navy-950: #04101b;
   --ember-300: #ffb38a; --ember-500: #ff7a45; --ember-700: #c94f22;
   --sky-500: #4fb3ff; --sand-500: #f5b841; --lilac-500: #b48cff; --rose-500: #ed4956;
+  --ig-blue: #0095f6; --ig-link: #00376b; --ig-yellow: #f9ce34; --ig-pink: #ee2a7b; --ig-purple: #6228d7;
 
-  /* semantic — light */
-  --bg: #f6f9f8; --surface-1: #ffffff; --surface-2: #eef3f1; --surface-3: #e3ece8;
-  --line: #dce5e1; --line-strong: #b9c9c4; --control-border: #7a909a;
-  /* text-3 is the quietest text that still has to be read (hints, timestamps,
-     placeholders). 4.5:1 on every surface it sits on -- #7a909a was 3.3:1 on
-     white and failed WCAG AA on 79 elements in an axe sweep. Borders keep the
-     lighter --control-border, which only needs 3:1 as a UI component. */
-  --text-1: #0b1e2b; --text-2: #4b6470; --text-3: #526b78;
-  --brand: #00b08e; --brand-hover: #008a71; --on-brand: #04101b; --brand-soft: #d7f7ee; --brand-text: #036554;
+  /* semantic — light (Instagram light) */
+  --bg: #ffffff; --surface-1: #ffffff; --surface-2: #fafafa; --surface-3: #efefef;
+  /* control-border: Instagram's #a8a8a8 is 2.28:1 on the #fafafa field; a border
+     is the only thing that outlines a field on white, so it needs 3:1 as a UI
+     component -- #919191 is 3.02:1 on surface-2 and 3.15:1 on white. */
+  --line: #dbdbdb; --line-strong: #c7c7c7; --control-border: #919191;
+  /* Body text must read at 4.5:1 on every surface, including surface-3 (#efefef).
+     Instagram's #737373 secondary is 4.12:1 there and its #8e8e8e tertiary is
+     2.85:1, so both step to the nearest passing greys: #666666 (4.99:1 on
+     surface-3, 5.74:1 on white) and #6c6c6c (4.57:1 / 5.25:1). */
+  --text-1: #000000; --text-2: #666666; --text-3: #6c6c6c;
+  /* brand is the action colour. Instagram blue #0095f6 is 3.17:1 under a white
+     label, so the fill is #0077d9 (4.53:1 with white, 3.51:1 on the navy band)
+     and the true Instagram blue is the hover/active fill. brand-text is
+     Instagram's link blue (11.9:1 on white, 10.6:1 on brand-soft). */
+  --brand: #0077d9; --brand-hover: #0095f6; --on-brand: #ffffff; --brand-soft: #e7f3ff; --brand-text: #00376b;
   --accent: #ff7a45; --accent-soft: #ffe7da; --accent-text: #a63e15;
-  --success: #00b08e; --warning: #d89a1e; --danger: #ed4956; --info: #2b8fe6;
-  --success-soft: #d7f7ee; --warning-soft: #fbeccb; --danger-soft: #fde0e3; --info-soft: #dbeafe;
+  /* success left the mint family: #137a3f is 5.41:1 on white and 4.76:1 on its soft. */
+  --success: #137a3f; --warning: #d89a1e; --danger: #ed4956; --info: #2b8fe6;
+  --success-soft: #e3f5e8; --warning-soft: #fbeccb; --danger-soft: #fde0e3; --info-soft: #dbeafe;
   /* danger-text is the readable red for text on danger-soft: --danger (#ed4956)
      is a fill colour and only reaches 2.98:1 on #fde0e3 (axe, admin sweep
      2026-09-18). #b3261e is 5.28:1 on the soft and 6.54:1 on white. */
   --warning-text: #7a5200; --info-text: #1d4f8a; --danger-text: #b3261e;
-  --focus: #00b08e; --scrim: rgba(11, 30, 43, 0.55);
+  --focus: #0077d9; --scrim: rgba(0, 0, 0, 0.6);
+  /* the Vybe mint, for the logo mark and the gym band ONLY (Brand.tsx, .gym-band) */
+  --mark: #00b08e; --mark-on-navy: #00d4aa;
+  /* Instagram's story gradient: story rings (.story-ring) and the rare highlight (.ig-gradient-text) */
+  --ig-gradient: linear-gradient(45deg, #f9ce34 0%, #ee2a7b 50%, #6228d7 100%);
+  --story-ring: var(--ig-gradient);
   /* data-viz — fixed in both themes; plain vars so charts can read them from JS */
   --viz-kcal: var(--brand); --viz-protein: #4fb3ff; --viz-carbs: #f5b841; --viz-fat: #ff7a45; --viz-alt: #b48cff;
   /* Level-1 cards are tonal in light (surface-1 on bg + shadow-1, no line);
-     dark rebinds this to the hairline because a shadow cannot lift navy off navy. */
+     dark rebinds this to the hairline because a shadow cannot lift a dark
+     surface off a darker one. On page white the card and the page are the same
+     colour, so shadow-1 carries a 5% ring: nearly flat, still an edge. */
   --card-border-light: transparent;
-  --shadow-1: 0 1px 2px rgba(11, 30, 43, 0.06), 0 2px 6px -2px rgba(11, 30, 43, 0.08);
-  --shadow-2: 0 8px 24px -12px rgba(11, 30, 43, 0.16);
-  --shadow-3: 0 24px 48px -16px rgba(11, 30, 43, 0.22);
-  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b6470' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 8px 24px -12px rgba(0, 0, 0, 0.14);
+  --shadow-3: 0 24px 48px -16px rgba(0, 0, 0, 0.2);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 
   /* shell metrics */
   --nav-h: 56px;
@@ -77,10 +98,14 @@
   --content-max: min(90rem, 100% - 2 * var(--gutter));
 
   /* gym band (GymBand.tsx). Dark in both themes: the band is scoped .dark and
-     reads the semantic set, these are the few values that are band-only. */
+     reads the semantic set, these are the few values that are band-only. The
+     band stays navy on the Instagram neutrals: --band-bg is what the cover
+     fades to in the collapsed bar, and the pin, the live dot and the cover art
+     keep the mint through --mark-on-navy / --cover-art. */
   --band-h-full: clamp(248px, 30vw + 120px, 360px);
   --band-h-hub: clamp(132px, 12vw + 84px, 196px);
   --band-bar-h: 56px;
+  --band-bg: var(--navy-900);
   --band-ink: #fff;
   --band-ink-2: rgba(255, 255, 255, 0.8);
   --band-ink-3: rgba(255, 255, 255, 0.6);
@@ -98,41 +123,52 @@
 
   /* generated identity: five gradient pairs picked by hashing the id/handle,
      one ink each. The dark stop lands at 60% so the centred initials sit on
-     the deep end (white >= 8.5:1 at the glyph); sand/ember takes the dark ink. */
-  --identity-1: linear-gradient(135deg, var(--mint-600), var(--navy-700) 60%);
+     the deep end (white >= 8.5:1 at the glyph); sand/ember takes the dark ink.
+     Pair 1 was mint/navy; it is Instagram pink/navy now so avatars stop
+     carrying the old brand colour. */
+  --identity-1: linear-gradient(135deg, var(--ig-pink), var(--navy-700) 60%);
   --identity-2: linear-gradient(135deg, var(--lilac-500), var(--navy-700) 60%);
   --identity-3: linear-gradient(135deg, var(--sky-500), var(--navy-700) 60%);
   --identity-4: linear-gradient(135deg, var(--sand-500) 20%, var(--ember-700));
   --identity-5: linear-gradient(135deg, var(--navy-500), var(--navy-800) 60%);
-  --identity-1-ink: #fff; --identity-2-ink: #fff; --identity-3-ink: #fff; --identity-4-ink: var(--on-brand); --identity-5-ink: #fff;
+  --identity-1-ink: #fff; --identity-2-ink: #fff; --identity-3-ink: #fff; --identity-4-ink: var(--navy-950); --identity-5-ink: #fff;
 
   /* radius, motion — declared here as plain custom properties so they are
-     always emitted (the @theme copies below only feed Tailwind utilities) */
-  --radius-xs: 6px; --radius-sm: 10px; --radius-md: 14px; --radius-lg: 20px; --radius-xl: 28px;
+     always emitted (the @theme copies below only feed Tailwind utilities).
+     Controls sit at 8 px, Instagram's button and field radius. */
+  --radius-xs: 6px; --radius-sm: 8px; --radius-md: 14px; --radius-lg: 20px; --radius-xl: 28px;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-in: cubic-bezier(0.4, 0, 1, 1); --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --duration-1: 120ms; --duration-2: 200ms; --duration-3: 320ms; --duration-4: 480ms;
 }
 
 .dark {
   color-scheme: dark;
-  accent-color: #00d4aa;
-  /* Depth: every level is >=1.2:1 lighter than the one below it (bg→1 1.22,
-     1→2 1.23, 2→3 1.22). The previous ramp (#071a2a/#0c2436/#143247) was
-     ~1.09:1 per step, which is why dark read as one flat navy. */
-  --bg: #04101b; --surface-1: #0d2538; --surface-2: #16354b; --surface-3: #1e435b;
-  --line: rgba(255, 255, 255, 0.08); --line-strong: rgba(255, 255, 255, 0.16); --control-border: #66838f; /* 3.17:1 on surface-2 */
-  --text-1: #f2f7f5; --text-2: #b1c3cc; --text-3: #9ab0bc; /* 4.63:1 on surface-3, 5.66:1 on surface-2; #869eab fell to 3.73:1 on the re-stepped surface-3 */
-  --brand: #00d4aa; --brand-hover: #1de5b6; --on-brand: #04101b; --brand-soft: rgba(0, 212, 170, 0.14); --brand-text: #4defc8;
+  accent-color: #0077d9;
+  /* Instagram dark: page black. Depth keeps the >=1.2:1 rule per level (bg→1
+     1.21, 1→2 1.21, 2→3 1.21). Instagram's own #121212 is 1.12:1 over black,
+     so each level is the nearest grey that clears the step. */
+  --bg: #000000; --surface-1: #1a1a1a; --surface-2: #2a2a2a; --surface-3: #373737;
+  /* Hairlines are white-alpha so one value reads on all four levels (Instagram's
+     #262626 assumes everything sits on black). control-border: #555555 is
+     1.93:1 on the surface-2 field; #737373 is 3.03:1. */
+  --line: rgba(255, 255, 255, 0.1); --line-strong: rgba(255, 255, 255, 0.18); --control-border: #737373;
+  /* text-2 is Instagram's #a8a8a8 (5.01:1 on surface-3); its #8e8e8e tertiary is 3.63:1 there, #a0a0a0 is 4.5:1. */
+  --text-1: #f5f5f5; --text-2: #a8a8a8; --text-3: #a0a0a0;
+  /* Same action blue as light so the band's CTA (always dark-scoped) matches the
+     page's: 4.53:1 under white, 4.64:1 on black, 3.17:1 on surface-2 as UI.
+     Instagram blue is the hover and the focus ring (6.63:1 on black). */
+  --brand: #0077d9; --brand-hover: #0095f6; --on-brand: #ffffff; --brand-soft: rgba(0, 149, 246, 0.16); --brand-text: #e0f1ff;
   --accent: #ff7a45; --accent-soft: rgba(255, 122, 69, 0.16); --accent-text: #ffb38a;
-  --success: #1de5b6; --warning: #f5b841; --danger: #ff6b7a; --info: #4fb3ff;
-  --success-soft: rgba(29, 229, 182, 0.14); --warning-soft: rgba(245, 184, 65, 0.16); --danger-soft: rgba(255, 107, 122, 0.16); --info-soft: rgba(79, 179, 255, 0.16);
-  --warning-text: #f5b841; --info-text: #4fb3ff; --danger-text: #ff8a96; /* 5.7:1 on danger-soft over surface-2 */
-  --focus: #1de5b6; --scrim: rgba(0, 0, 0, 0.6);
+  --success: #3ddc84; --warning: #f5b841; --danger: #ff6b7a; --info: #4fb3ff;
+  --success-soft: rgba(61, 220, 132, 0.14); --warning-soft: rgba(245, 184, 65, 0.16); --danger-soft: rgba(255, 107, 122, 0.16); --info-soft: rgba(79, 179, 255, 0.16);
+  --warning-text: #f5b841; --info-text: #4fb3ff; --danger-text: #ff8a96; /* 9.3:1 on danger-soft over surface-2 */
+  --focus: #0095f6; --scrim: rgba(0, 0, 0, 0.7);
+  --mark: #00d4aa;
   --card-border-light: var(--line);
   --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 8px 24px -12px rgba(0, 0, 0, 0.7);
   --shadow-3: 0 24px 48px -16px rgba(0, 0, 0, 0.8);
-  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a9bcc6' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a8a8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 @theme inline {
@@ -146,6 +182,8 @@
   --color-success-soft: var(--success-soft); --color-warning-soft: var(--warning-soft); --color-danger-soft: var(--danger-soft); --color-info-soft: var(--info-soft);
   --color-warning-text: var(--warning-text); --color-info-text: var(--info-text); --color-danger-text: var(--danger-text);
   --color-focus: var(--focus); --color-scrim: var(--scrim);
+  /* the mark's mint (text-mark / bg-mark / border-mark); never for actions */
+  --color-mark: var(--mark); --color-mark-on-navy: var(--mark-on-navy);
   /* data-viz (fixed, both themes) */
   --color-viz-kcal: var(--brand); --color-viz-protein: #4fb3ff; --color-viz-carbs: #f5b841; --color-viz-fat: #ff7a45; --color-viz-alt: #b48cff;
 
@@ -177,8 +215,8 @@
   --container-content: var(--content-max);
   --color-band-ink: var(--band-ink); --color-band-ink-2: var(--band-ink-2); --color-band-ink-3: var(--band-ink-3); --color-band-chip: var(--band-chip);
 
-  /* radius by role: chips 6 · controls 10 · inner media 14 · cards 20 · sheets 28 */
-  --radius-xs: 6px; --radius-sm: 10px; --radius-md: 14px; --radius-lg: 20px; --radius-xl: 28px; --radius-2xl: 32px; --radius-3xl: 40px;
+  /* radius by role: chips 6 · controls 8 · inner media 14 · cards 20 · sheets 28 */
+  --radius-xs: 6px; --radius-sm: 8px; --radius-md: 14px; --radius-lg: 20px; --radius-xl: 28px; --radius-2xl: 32px; --radius-3xl: 40px;
   --shadow-1: var(--shadow-1); --shadow-2: var(--shadow-2); --shadow-3: var(--shadow-3);
 
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-in: cubic-bezier(0.4, 0, 1, 1); --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -285,6 +323,23 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
   transition: background-color var(--duration-1) var(--ease-out), border-color var(--duration-1) var(--ease-out), transform var(--duration-1) var(--ease-out);
   &:hover { background: var(--surface-2); }
   &:active { transform: scale(0.995); }
+}
+
+/* Instagram register. Feed items are separated by a hairline, not boxed: on
+   page white a card and the page are one colour, so the rule does the work. */
+@utility feed-rule { border-bottom: 1px solid var(--line); }
+/* Story ring: the classic construction — a 2 px gradient ring, a 2 px gap in the
+   surface colour, then the circular avatar. Wrap the <Avatar>/<img> in it. */
+@utility story-ring {
+  display: inline-grid; place-items: center;
+  padding: 4px; border-radius: 9999px;
+  background: var(--story-ring);
+  & > * { border-radius: 9999px; box-shadow: 0 0 0 2px var(--surface-1); }
+}
+@utility ig-gradient-text {
+  background: var(--ig-gradient);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
 }
 
 @utility btn {
@@ -473,7 +528,7 @@ input[type='range'] { accent-color: var(--brand); }
   min-height: var(--band-h);
   display: flex;
   flex-direction: column;
-  background: var(--surface-1);
+  background: var(--band-bg);
   color: var(--band-ink);
   view-transition-name: gym-band;
 }
@@ -547,14 +602,14 @@ input[type='range'] { accent-color: var(--brand); }
   display: flex; align-items: center; gap: 6px;
   font-size: var(--text-xs); line-height: 1.25rem; font-weight: 600; color: var(--band-ink-2);
 }
-.gym-band-kicker svg { flex: none; color: var(--mint-300); }
+.gym-band-kicker svg { flex: none; color: var(--mark-on-navy); }
 .gym-band-kicker-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gym-band-title { margin-top: 2px; color: var(--band-ink); font-variation-settings: 'wdth' 108; letter-spacing: -0.025em; overflow-wrap: anywhere; }
 .gym-band-meta { margin-top: 6px; font-size: var(--text-sm); color: var(--band-ink-2); }
 .gym-band-meta b { color: var(--band-ink); font-weight: 700; }
 .gym-band-context { margin-top: 4px; font-size: var(--text-sm); color: var(--band-ink-2); }
 .gym-band-context-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 600; color: var(--band-ink); border-radius: var(--radius-xs); }
-.gym-band-context-link svg { color: var(--mint-300); }
+.gym-band-context-link svg { color: var(--mark-on-navy); }
 .gym-band-context-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .gym-band-body-copy { margin-top: 8px; max-width: 34ch; font-size: var(--text-base); line-height: 1.45; color: var(--band-ink-2); }
 
@@ -563,7 +618,7 @@ input[type='range'] { accent-color: var(--brand); }
 .gym-band-stack .ring-bg { --tw-ring-color: var(--navy-800); }
 .gym-band-now-label { color: var(--band-ink-2); }
 .gym-band-live { display: inline-flex; align-items: center; gap: 6px; }
-.gym-band-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--mint-400); box-shadow: 0 0 0 3px color-mix(in oklab, var(--mint-400) 25%, transparent); }
+.gym-band-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--mark-on-navy); box-shadow: 0 0 0 3px color-mix(in oklab, var(--mark-on-navy) 25%, transparent); }
 
 .gym-band-map {
   display: block; border-radius: var(--radius-md); overflow: hidden;
