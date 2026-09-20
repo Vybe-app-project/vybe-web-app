@@ -6,6 +6,7 @@ import { ButtonLink, Callout, EmptyState, ErrorState, PageHeader, SearchField, T
 import { Award } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
+import { SuggestionList } from './SuggestionRow';
 
 type TabKey = 'recommended' | 'trending' | 'people' | 'coaches';
 
@@ -168,13 +169,29 @@ export default function Discover() {
               enterKeyHint="search"
               onChange={(e) => setPeopleQuery(e.target.value)}
             />
-            <PeopleList
-              queryKey="discover-people"
-              audience="people"
-              search={peopleSearch}
-              emptyTitle="No one to show yet"
-              emptyMessage="People appear here as they join Vybe. Try searching by name or username."
-            />
+            {peopleSearch ? (
+              <PeopleList
+                queryKey="discover-people"
+                audience="people"
+                search={peopleSearch}
+                emptyTitle="No one to show yet"
+                emptyMessage="People appear here as they join Vybe. Try searching by name or username."
+              />
+            ) : (
+              /* No query: people to follow with the reason next to every name (GET /searching/suggest). */
+              <SuggestionList
+                limit={10}
+                heading="For you"
+                emptyState={
+                  <EmptyState
+                    variant="first-run"
+                    size="sm"
+                    title="No one to show yet"
+                    message="People appear here as they join Vybe. Try searching by name or username."
+                  />
+                }
+              />
+            )}
           </div>
         ) : null}
 

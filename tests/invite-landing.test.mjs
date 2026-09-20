@@ -394,9 +394,16 @@ test('the preview body: first name, kind, lines, the app link on a phone, store 
   assert.ok(!iosOnly.includes('in testing'));
 
   // A signed-in member: the same preview, the note, no account links, nothing redeemed.
+  // With invites on (the default here) the note names both ways and the web button follows it.
   const signedIn = mount(h(InvitePreviewBody, { preview: preview(), code: CODE, signedIn: true, handheld: true, copyState: 'copied' }));
-  assert.ok(signedIn.includes('You are signed in; open the app to use this code'));
+  assert.ok(signedIn.includes('You are signed in. Use this code here or in the app.'));
+  assert.ok(signedIn.includes('data-testid="invite-use-web"') && signedIn.includes('Use this code on the web'));
+  assert.ok(!signedIn.includes('open the app to use this code'), 'the two instructions never disagree');
   assert.ok(!signedIn.includes('invite-register') && !signedIn.includes('href="/login"'));
+  // With invites off the app is the only way, so the older note stays and no web button is offered.
+  const signedInOff = mount(h(InvitePreviewBody, { preview: preview(), code: CODE, signedIn: true, handheld: true, invitesEnabled: false, copyState: null }));
+  assert.ok(signedInOff.includes('You are signed in; open the app to use this code'));
+  assert.ok(!signedInOff.includes('invite-use-web'));
   assert.ok(signedIn.includes('Code copied'));
   assert.ok(signedIn.includes('vybe://open?type=invite'));
   assert.ok(signedIn.includes(SHOWN));

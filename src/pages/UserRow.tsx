@@ -155,7 +155,7 @@ export function UserBadges({ user, compact = false }: { user: PublicUser; compac
 /** Text link with a 44 px-tall hit area (pseudo-element, no visual change). */
 export const ROW_LINK = 'relative truncate text-md font-semibold text-text-1 hover:underline before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[""]';
 
-export default function UserRow({ user, trailing }: { user: PublicUser; trailing?: React.ReactNode }) {
+export default function UserRow({ user, trailing, below }: { user: PublicUser; trailing?: React.ReactNode; below?: React.ReactNode }) {
   const me = useAuth((s) => s.user);
   const isMe = !!me && String(me._id) === String(user._id);
   const href = isMe ? '/profile' : `/u/${user._id}`;
@@ -184,6 +184,7 @@ export default function UserRow({ user, trailing }: { user: PublicUser; trailing
             </span>
           ) : null}
         </div>
+        {below}
         {(user.isCoach || user.isTrainer) && user.fields?.length ? (
           <ul className="mt-1.5 flex flex-wrap gap-1" aria-label="Coaching specialties">
             {user.fields.slice(0, 4).map((f) => (

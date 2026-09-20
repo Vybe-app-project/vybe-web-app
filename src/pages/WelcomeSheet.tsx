@@ -5,10 +5,12 @@ import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { WELCOME_PARAM } from '../lib/authRedirect';
 import { takeWelcomePending } from '../lib/authDrafts';
+import { readPendingInvite } from '../lib/pendingInvite';
 import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, displayName, uploadImage, type PublicUser } from '../lib/hooks';
 import { Avatar, Button, ButtonLink, Modal, Spinner, useToast } from './ui';
 import { Camera, Compass } from './icons';
 import UserRow, { UserRowSkeleton } from './UserRow';
+import WelcomeInviteSection from './WelcomeInvite';
 
 const SUGGESTION_COUNT = 5;
 
@@ -30,6 +32,8 @@ export default function WelcomeSheet() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // The invite code that came along from /join/<code> through sign-up, offered here first.
+  const [pendingInvite, setPendingInvite] = useState<string | null>(null);
   const { pathname } = useLocation();
   // The page the sheet opened on. The sheet lives beside <Layout/> for every
   // signed-in route, so a link inside it (a person's name or avatar, "See
@@ -53,6 +57,10 @@ export default function WelcomeSheet() {
   useEffect(() => {
     if (open && openedOn.current !== null && pathname !== openedOn.current) setOpen(false);
   }, [open, pathname]);
+
+  useEffect(() => {
+    if (open) setPendingInvite(readPendingInvite(sessionStorage));
+  }, [open]);
 
   const people = useQuery({
     queryKey: ['welcome-people'],
@@ -144,6 +152,8 @@ export default function WelcomeSheet() {
             </Button>
           </div>
         </section>
+
+        {pendingInvite ? <WelcomeInviteSection code={pendingInvite} onDone={() => setPendingInvite(null)} /> : null}
 
         <section aria-labelledby="welcome-people-heading">
           <div className="flex items-baseline justify-between gap-2">

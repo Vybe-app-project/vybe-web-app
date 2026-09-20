@@ -80,6 +80,7 @@ import {
   Users,
   Zap,
 } from '../components/icons';
+import { ContextualInviteButton } from './InviteLinkSheet';
 
 /* ------------------------------------------------------------------ types */
 
@@ -1084,6 +1085,10 @@ function ChallengeDetailModal({
         challenge && !detail.isLoading ? (
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap gap-2">
+              {/* Wave F: a contextual invite link (behind features.invites; POST /invites) for a participant or the creator of an open, public, scored challenge. */}
+              {(joined || isOwner) && !legacy && !archived && challenge.isPublic !== false ? (
+                <ContextualInviteButton kind="challenge" targetId={challenge._id} targetName={challenge.title} />
+              ) : null}
               {isOwner && !archived ? (
                 <>
                   <Button variant="secondary" onClick={() => onEdit(challenge)} icon={<Edit size={16} />}>
