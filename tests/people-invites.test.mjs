@@ -241,6 +241,40 @@ test('the pending invite survives in the tab as { code, at }, expires after 30 d
   assert.equal(pending.readPendingInvite({ getItem: () => { throw new Error('blocked'); }, setItem() {}, removeItem() {} }), null);
 });
 
+test('Have a code? starts from ?invite= first, then the kept code, then empty; a code is shown formatted and anything else as written', () => {
+  const now = Date.parse('2026-09-20T12:00:00Z');
+  const storage = fakeStorage();
+  pending.rememberPendingInvite(storage, 'AAAABBBB', now);
+  assert.equal(pending.initialInviteValue('?invite=7K2MQ9RX', storage, now), 'VYBE-7K2M-Q9RX', 'the landing’s explicit code wins over the one kept since sign-up');
+  assert.equal(pending.initialInviteValue('?invite=vybe-7k2m-q9rx', storage, now), 'VYBE-7K2M-Q9RX');
+  assert.equal(pending.initialInviteValue('', storage, now), 'VYBE-AAAA-BBBB', 'no URL code: the kept one');
+  assert.equal(pending.initialInviteValue('?invite=', storage, now), 'VYBE-AAAA-BBBB', 'an empty parameter is no code');
+  assert.equal(pending.initialInviteValue('?invite=%20%20', storage, now), 'VYBE-AAAA-BBBB');
+  assert.equal(pending.initialInviteValue('?invite=nope', storage, now), 'nope', 'a mistyped URL value is shown as written, so it can be seen before Use code');
+  assert.equal(pending.initialInviteValue('', storage, now + 31 * 24 * 60 * 60 * 1000), '', 'an expired kept code is nothing');
+  assert.equal(pending.initialInviteValue('', null, now), '');
+  assert.equal(pending.initialInviteValue('?invite=7K2MQ9RX', null, now), 'VYBE-7K2M-Q9RX', 'no storage still reads the URL');
+});
+
+/* ------------------------------------------------------------------ focus after "Not interested" */
+
+test('focusAfterDismiss: the row that takes the place, the heading after the last row, the main region when the list empties', () => {
+  assert.deepEqual(people.focusAfterDismiss(0, 3), { kind: 'row', index: 1 });
+  assert.deepEqual(people.focusAfterDismiss(1, 3), { kind: 'row', index: 2 });
+  assert.deepEqual(people.focusAfterDismiss(2, 3), { kind: 'heading' }, 'the last row: nothing takes its place, the heading stays');
+  assert.deepEqual(people.focusAfterDismiss(0, 1), { kind: 'main' }, 'the only row: the section unmounts into its empty state, heading included');
+  assert.deepEqual(people.focusAfterDismiss(-1, 3), { kind: 'heading' }, 'a row not in the list moves nothing away');
+  assert.deepEqual(people.focusAfterDismiss(5, 3), { kind: 'heading' });
+  assert.deepEqual(people.focusAfterDismiss(0, 0), { kind: 'heading' });
+});
+
+test('the landing’s signed-in note while invites are on names both ways and reads as plain sentences', () => {
+  assert.equal(redeem.SIGNED_IN_WEB_NOTE, 'You are signed in. Use this code here or in the app.');
+  assert.doesNotMatch(redeem.SIGNED_IN_WEB_NOTE, /!|e-mail/);
+  assert.doesNotMatch(redeem.SIGNED_IN_WEB_NOTE, BANNED);
+  assert.notEqual(redeem.SIGNED_IN_WEB_NOTE, 'You are signed in; open the app to use this code', 'the flag-off note (lib/invites SIGNED_IN_NOTE) is a different sentence');
+});
+
 /* ------------------------------------------------------------------ my invites */
 
 const contractBody = (over = {}) => ({
@@ -421,7 +455,19 @@ test('the suggestion rows: Discover and Friends render the list, the row posts t
   assert.doesNotMatch(row, /searchKey/, 'never a searchKey from the lists: it disables the cold-start fill');
   assert.match(row, /const id = String\(row\._id\);/);
   assert.match(row, /api\.post\(`\/searching\/exclude\/\$\{id\}`\)/);
-  assert.match(row, /setTimeout\(\(\) => \{\s*pending\.current\.delete\(id\);\s*exclude\(id\);\s*\}, UNDO_WINDOW_MS\)/, 'the write waits for the undo window');
+  assert.match(
+    row,
+    /setTimeout\(\(\) => \{\s*const entry = pending\.current\.get\(id\);\s*pending\.current\.delete\(id\);\s*if \(entry\) toast\.dismiss\(entry\.toastId\);\s*exclude\(id\);\s*\}, UNDO_WINDOW_MS\)/,
+    'the write waits for the undo window, and Undo leaves the screen the moment it stops working',
+  );
+  // Focus is moved on purpose when the row (and the menu trigger that had focus) unmounts.
+  assert.match(row, /focusAfterDismiss\(rows\.findIndex\(\(u\) => String\(u\._id\) === String\(row\._id\)\), rows\.length\)/);
+  assert.match(row, /querySelector<HTMLElement>\('\[aria-haspopup="menu"\]'\)/, 'the next row\u2019s overflow trigger');
+  assert.match(row, /document\.getElementById\('main'\) : headingRef\.current/, 'else the heading, or the main region when the list empties');
+  assert.match(row, /<h2 id=\{headingId\} ref=\{headingRef\} tabIndex=\{-1\}/, 'the heading can take focus');
+  assert.match(row, /<ul ref=\{listRef\} className="space-y-2">/);
+  assert.match(row, /dismiss\(row\);\s*target\?\.focus\(\{ preventScroll: true \}\);/, 'the cache update first, then focus, in the same tick');
+  assert.match(row, /<SuggestionRow row=\{row\} onDismiss=\{onDismiss\} \/>/);
   assert.match(row, /clearTimeout\(entry\.timer\);\s*pending\.current\.delete\(id\);\s*entry\.restore\(\);/, 'Undo cancels the write and puts the row back');
   assert.match(row, /for \(const \[id, entry\] of pending\.current\) \{\s*clearTimeout\(entry\.timer\);\s*toast\.dismiss\(entry\.toastId\);\s*exclude\(id\);/, 'unmount flushes the pending writes');
   assert.match(row, /aria-label=\{WHY_THIS_SUGGESTION\}/);
@@ -461,6 +507,8 @@ test('the invite surfaces hide behind features.invites, treat 404 FEATURE_DISABL
   assert.match(friendsSection, /queryKey: \['capabilities'\]/, 'a mid-session flip refreshes the flags');
   assert.match(friendsSection, /<SettingsCard id="invites" title=\{INVITE_TITLE\} description=\{HONEST\}>/);
   assert.match(friendsSection, /copyInviteCode\(shown, document\.getElementById\(codeElementId\)\)/, 'Copy code through the landing’s helper');
+  assert.match(friendsSection, /aria-label=\{`Copy link for \$\{name\}`\}/, 'the visible "Copy link" opens the accessible name (label in name)');
+  assert.doesNotMatch(friendsSection, /Copy the invite link/);
   assert.match(friendsSection, /navigator\.share\(\{ title: SHARE_TITLE, text: shareText\(url\), url \}\)/);
   assert.match(friendsSection, /confirmLabel=\{NEW_LINK_CONFIRM\}\s*cancelLabel=\{KEEP_LINK\}/);
   assert.match(read('src/lib/inviteFriends.ts'), /parseApiError\(e\)\.code === 'FEATURE_DISABLED'/);
@@ -475,7 +523,13 @@ test('the invite surfaces hide behind features.invites, treat 404 FEATURE_DISABL
   assert.match(codeSection, /if \(\(status === 404 && errorCode !== 'FEATURE_DISABLED'\) \|\| status === 410\) throw e;/, 'a dead code is final before the write');
   assert.match(codeSection, /clearPendingInvite\(sessionStorage\)/);
   assert.match(codeSection, /if \(clearsPendingInvite\(code\)\) clearPendingInvite\(sessionStorage\);/);
-  assert.match(codeSection, /readPendingInvite\(sessionStorage\) \?\? new URLSearchParams\(location\.search\)\.get\('invite'\)/);
+  assert.match(codeSection, /useState\(\(\) => initialInviteValue\(location\.search, sessionStorage\)\)/, 'the URL code wins over the kept one (the pure rule is tested above)');
+  assert.doesNotMatch(codeSection, /readPendingInvite/, 'no second read that could put the kept code first');
+  // The #invite-code deep link: the card takes its own scroll and focus once the flag has let it mount.
+  assert.match(codeSection, /if \(location\.hash !== '#invite-code'\) return;/);
+  assert.match(codeSection, /const card = document\.getElementById\('invite-code'\);\s*if \(!card \|\| card\.contains\(document\.activeElement\)\) return;/, 'a field already in use is left alone');
+  assert.match(codeSection, /card\.scrollIntoView\(\{ block: 'start', behavior: 'smooth' \}\);\s*card\.setAttribute\('tabindex', '-1'\);\s*card\.focus\(\{ preventScroll: true \}\);/, 'the same move the page handler makes');
+  assert.match(read('src/pages/Settings.tsx'), /card\.scrollIntoView\(/, 'the page handler stays for every other card (pinned by tests/source-contract.test.mjs)');
   assert.match(codeSection, /<SettingsCard id="invite-code" title=\{HAVE_CODE\}/);
   assert.match(codeSection, /export function useRedeemInvite\(\)/);
 
@@ -549,9 +603,9 @@ test('the code travels through sign-up in the tab and is offered once on the wel
   assert.match(invite, /clearPendingInvite\(sessionStorage\);\s*onDone\?\.\(\);/, 'a dead code is dropped quietly');
 
   const landing = read('src/pages/JoinInvite.tsx');
-  assert.match(landing, /import \{ USE_ON_WEB, settingsInvitePath \} from '\.\.\/lib\/inviteRedeem';/);
+  assert.match(landing, /import \{ SIGNED_IN_WEB_NOTE, USE_ON_WEB, settingsInvitePath \} from '\.\.\/lib\/inviteRedeem';/);
   assert.match(landing, /\{invitesEnabled \? \(\s*<ButtonLink to=\{settingsInvitePath\(code\)\} variant="secondary" data-testid="invite-use-web">/);
-  assert.match(landing, /<Callout tone="info">\{SIGNED_IN_NOTE\}<\/Callout>/, 'the pinned note stays');
+  assert.match(landing, /<Callout tone="info">\{invitesEnabled \? SIGNED_IN_WEB_NOTE : SIGNED_IN_NOTE\}<\/Callout>/, 'the note agrees with the button beneath it; the flag-off note is unchanged');
   assert.equal((landing.match(/\bapi\.(get|post|put|patch|delete)\(/g) || []).length, 1, 'the landing still makes one API call');
   assert.doesNotMatch(landing, /api\.post\(/, 'nothing is redeemed on the landing');
 });

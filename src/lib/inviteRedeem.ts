@@ -186,6 +186,8 @@ export const CODE_HINT = 'Eight letters and numbers, for example VYBE-7K2M-Q9RX.
 export const CODE_PLACEHOLDER = 'VYBE-XXXX-XXXX';
 export const REDEEMED_TITLE = 'Invite used';
 export const USE_ON_WEB = 'Use this code on the web';
+/** The landing's note for a signed-in member while invites are on: the web field and the app are both ways in (lib/invites SIGNED_IN_NOTE serves the flag-off path). */
+export const SIGNED_IN_WEB_NOTE = 'You are signed in. Use this code here or in the app.';
 /** Where the landing sends a signed-in member: Settings > Have a code? with the field prefilled. */
 export const settingsInvitePath = (code: string): string => `/settings?invite=${encodeURIComponent(code)}#invite-code`;
 

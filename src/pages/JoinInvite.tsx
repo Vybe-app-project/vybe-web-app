@@ -33,7 +33,7 @@ import {
   type InviteFailure,
   type InvitePreview,
 } from '../lib/invites';
-import { USE_ON_WEB, settingsInvitePath } from '../lib/inviteRedeem';
+import { SIGNED_IN_WEB_NOTE, USE_ON_WEB, settingsInvitePath } from '../lib/inviteRedeem';
 import { appDeepLink, isHandheld } from '../lib/shareLinks';
 import { useFeature } from '../lib/capabilities';
 import { Avatar, Badge, Button, ButtonLink, Callout, Spinner, buttonClass } from './ui';
@@ -149,10 +149,10 @@ function StoreLinks({ storeUrls }: { storeUrls: InvitePreview['storeUrls'] }) {
  * The ways into an account with the code kept: sign-up on the web with
  * ?invite=<CODE> in the URL, or sign-in that bounces back here. `signedIn`
  * is null while the session is still being restored, so the row waits rather
- * than flipping mid-read; a signed-in member reads the note instead, since
- * the code is used in the app and nothing is redeemed on this page. While
- * the invites flag is on, the note is followed by the way to Settings ›
- * Have a code?, where the web redeems it.
+ * than flipping mid-read; a signed-in member reads a note instead, since
+ * nothing is redeemed on this page. While the invites flag is off the note
+ * points at the app; while it is on, the note names both ways and is
+ * followed by the way to Settings › Have a code?, where the web redeems it.
  */
 function AccountRow({
   code,
@@ -171,7 +171,7 @@ function AccountRow({
   if (signedIn) {
     return (
       <div className="space-y-3">
-        <Callout tone="info">{SIGNED_IN_NOTE}</Callout>
+        <Callout tone="info">{invitesEnabled ? SIGNED_IN_WEB_NOTE : SIGNED_IN_NOTE}</Callout>
         {invitesEnabled ? (
           <ButtonLink to={settingsInvitePath(code)} variant="secondary" data-testid="invite-use-web">
             {USE_ON_WEB}

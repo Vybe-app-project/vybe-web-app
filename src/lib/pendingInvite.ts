@@ -12,7 +12,7 @@
  * 30-day rule mirrors the phone's store and is kept for parity.
  */
 import type { StorageLike } from './authDrafts';
-import { normaliseInviteCode } from './invites';
+import { formatInviteCode, normaliseInviteCode } from './invites';
 
 export const PENDING_INVITE_KEY = 'vybe.pendingInvite';
 export const PENDING_INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -61,4 +61,18 @@ export function clearPendingInvite(storage: StorageLike | null | undefined): voi
   } catch {
     // Nothing to clear.
   }
+}
+
+/**
+ * What Settings › Have a code? starts with. An explicit ?invite= in the URL
+ * (the landing's "Use this code on the web") is the member's present intent
+ * and wins over a code kept since sign-up in this tab; a stale kept code must
+ * never be the one redeemed, since the API allows one redemption per account.
+ * A code is shown as VYBE-XXXX-XXXX; anything else as written, so a mistyped
+ * value is visible before Use code.
+ */
+export function initialInviteValue(search: string, storage: StorageLike | null | undefined, now = Date.now()): string {
+  const fromUrl = (new URLSearchParams(search).get('invite') ?? '').trim() || null;
+  const initial = fromUrl ?? readPendingInvite(storage, now) ?? '';
+  return formatInviteCode(initial) ?? initial;
 }

@@ -88,3 +88,21 @@ export const FRIENDS_SUGGESTIONS_EMPTY_BODY = 'Suggestions appear here as people
 
 export const dismissLabel = (name: string): string => `Not interested in ${name}; hide this suggestion`;
 export const hiddenCopy = (name: string): string => `${name} hidden`;
+
+/** Where keyboard focus goes after "Not interested" removes a row. */
+export type DismissFocus = { kind: 'row'; index: number } | { kind: 'heading' } | { kind: 'main' };
+
+/**
+ * The row at `index` of `count` is about to leave the list, and with it the
+ * menu trigger that had focus. Focus goes to the row that takes its place
+ * (the next one, by its index before the removal), to the list heading when
+ * it was the last row, or to the page's main region when the list empties
+ * with it (the section unmounts into its empty state, heading included). A
+ * row that is not in the list leaves focus at the heading.
+ */
+export function focusAfterDismiss(index: number, count: number): DismissFocus {
+  if (index < 0 || index >= count) return { kind: 'heading' };
+  if (count <= 1) return { kind: 'main' };
+  if (index + 1 < count) return { kind: 'row', index: index + 1 };
+  return { kind: 'heading' };
+}

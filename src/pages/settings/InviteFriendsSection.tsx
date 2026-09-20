@@ -247,7 +247,7 @@ export function InviteFriendsCard({
                       variant="secondary"
                       size="sm"
                       icon={<LinkIcon size={14} />}
-                      aria-label={`Copy the invite link for ${name}`}
+                      aria-label={`Copy link for ${name}`}
                       onClick={() => onCopyContextualLink?.(invite)}
                     >
                       {COPY_LINK}

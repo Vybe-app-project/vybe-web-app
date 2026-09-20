@@ -112,7 +112,7 @@ test('the Invite friends card: the #invites region, the code as VYBE-XXXX-XXXX, 
   assert.match(contextual, /<h3[^>]*id="invites-contextual-title"[^>]*>Your gym and challenge links<\/h3>/);
   assert.match(contextual, /Iron Works/);
   assert.match(contextual, /VYBE-ABCD-EFGH/);
-  assert.match(contextual, /aria-label="Copy the invite link for Iron Works"/);
+  assert.match(contextual, /<button[^>]*aria-label="Copy link for Iron Works"[^>]*>[\s\S]*?Copy link<\/span><\/button>/, 'the visible label opens the accessible name (WCAG 2.5.3)');
 
   const withSwitch = card({ settings: { showAvatar: true } }, { onToggleAvatar: noop });
   assert.match(withSwitch, /<button[^>]*role="switch"[^>]*aria-checked="true"[^>]*aria-label="Show my photo on the invite page"/);

@@ -10,6 +10,7 @@ import {
   UNDO,
   UNDO_WINDOW_MS,
   WHY_THIS_SUGGESTION,
+  focusAfterDismiss,
   hiddenCopy,
   parseSuggestions,
   reasonChips,
@@ -89,8 +90,10 @@ type Pending = { timer: ReturnType<typeof setTimeout>; toastId: number; restore:
  * "Not interested": the row leaves every suggestion list at once and an Undo
  * toast stands for six seconds; only then is POST /searching/exclude/:id sent
  * (the API has no un-exclude, so Undo can only be honest while the write has
- * not happened). Leaving the page inside the window sends the pending writes
- * immediately, so a navigation never loses a dismissal.
+ * not happened). The toast leaves with the write: it pauses its own timer
+ * under a pointer or focus, and would otherwise stand with an Undo that no
+ * longer does anything. Leaving the page inside the window sends the pending
+ * writes immediately, so a navigation never loses a dismissal.
  */
 export function useDismissSuggestion() {
   const qc = useQueryClient();
@@ -139,7 +142,9 @@ export function useDismissSuggestion() {
         }
       };
       const timer = setTimeout(() => {
+        const entry = pending.current.get(id);
         pending.current.delete(id);
+        if (entry) toast.dismiss(entry.toastId);
         exclude(id);
       }, UNDO_WINDOW_MS);
       const toastId = toast.info(hiddenCopy(displayName(row)), {
@@ -166,11 +171,28 @@ export function SuggestionList({ limit, heading = FOR_YOU, emptyState }: { limit
   const suggestions = useSuggestions(limit);
   const dismiss = useDismissSuggestion();
   const headingId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const rows = suggestions.data ?? [];
+
+  // "Not interested" unmounts the row, its menu and the trigger that opened
+  // it, which would leave keyboard focus on the document body (the Undo toast
+  // is never focused). Focus is moved on purpose (lib/peopleSuggestions
+  // focusAfterDismiss): to the overflow trigger of the row that takes the
+  // removed one's place, to the heading when it was the last row, or to the
+  // page's main region when the list empties into its empty state.
+  const onDismiss = (row: PeopleSuggestion) => {
+    const where = focusAfterDismiss(rows.findIndex((u) => String(u._id) === String(row._id)), rows.length);
+    const nextTrigger = where.kind === 'row' ? listRef.current?.children.item(where.index)?.querySelector<HTMLElement>('[aria-haspopup="menu"]') : null;
+    const target = nextTrigger ?? (where.kind === 'main' ? document.getElementById('main') : headingRef.current);
+    dismiss(row);
+    target?.focus({ preventScroll: true });
+  };
+
   if (suggestions.isSuccess && rows.length === 0) return <>{emptyState ?? null}</>;
   return (
     <section aria-labelledby={headingId} className="space-y-2">
-      <h2 id={headingId} className="type-label text-text-2">
+      <h2 id={headingId} ref={headingRef} tabIndex={-1} className="type-label text-text-2">
         {heading}
       </h2>
       {suggestions.isLoading ? (
@@ -182,10 +204,10 @@ export function SuggestionList({ limit, heading = FOR_YOU, emptyState }: { limit
       ) : suggestions.isError ? (
         <ErrorState title={SUGGESTIONS_ERROR} error={suggestions.error} retry={() => void suggestions.refetch()} />
       ) : (
-        <ul className="space-y-2">
+        <ul ref={listRef} className="space-y-2">
           {rows.map((row) => (
             <li key={row._id}>
-              <SuggestionRow row={row} onDismiss={dismiss} />
+              <SuggestionRow row={row} onDismiss={onDismiss} />
             </li>
           ))}
         </ul>

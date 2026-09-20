@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useFeature } from '../../lib/capabilities';
-import { formatInviteCode, normaliseInviteCode, parseInvitePreview, type InvitePreview } from '../../lib/invites';
+import { normaliseInviteCode, parseInvitePreview, type InvitePreview } from '../../lib/invites';
 import { isFeatureDisabledError, type MyInvites } from '../../lib/inviteFriends';
 import {
   CODE_DESCRIPTION,
@@ -24,7 +24,7 @@ import {
   redeemOutcomeCopy,
   redeemRequestId,
 } from '../../lib/inviteRedeem';
-import { clearPendingInvite, readPendingInvite } from '../../lib/pendingInvite';
+import { clearPendingInvite, initialInviteValue } from '../../lib/pendingInvite';
 import { Button, Callout, Input } from '../ui';
 import { SettingsCard } from '../SettingsPieces';
 import { INVITES_ME_KEY } from './InviteFriendsSection';
@@ -181,13 +181,9 @@ function InviteCodeLoaded() {
   const location = useLocation();
   const qc = useQueryClient();
   const redeem = useRedeemInvite();
-  // Prefilled from the code kept since sign-up, or from ?invite= (the landing's
-  // "Use this code on the web"); shown as VYBE-XXXX-XXXX when it is a code and
-  // as written otherwise, so a mistyped value is visible before Use code.
-  const [value, setValue] = useState(() => {
-    const initial = readPendingInvite(sessionStorage) ?? new URLSearchParams(location.search).get('invite') ?? '';
-    return formatInviteCode(initial) ?? initial;
-  });
+  // Prefilled from ?invite= (the landing's "Use this code on the web") first,
+  // else from the code kept since sign-up (lib/pendingInvite initialInviteValue).
+  const [value, setValue] = useState(() => initialInviteValue(location.search, sessionStorage));
   const [hidden, setHidden] = useState(false);
 
   const failure = redeem.isError ? describeRedeemError(redeem.error) : null;
@@ -198,6 +194,25 @@ function InviteCodeLoaded() {
       void qc.invalidateQueries({ queryKey: ['capabilities'] });
     }
   }, [disabled, qc]);
+
+  // The landing sends a member to /settings?invite=…#invite-code. The page's
+  // hash handler (Settings.tsx) looks for the card 60 ms after the hash
+  // changes, but this card mounts only once /capabilities has answered, so on
+  // a hard load, a reload or an expired flag cache there is no card yet when
+  // it looks. Once mounted, the card takes the scroll and focus itself; when
+  // the page handler got there first, or a field inside is already in use,
+  // nothing moves.
+  useEffect(() => {
+    if (location.hash !== '#invite-code') return;
+    const t = window.setTimeout(() => {
+      const card = document.getElementById('invite-code');
+      if (!card || card.contains(document.activeElement)) return;
+      card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      card.setAttribute('tabindex', '-1');
+      card.focus({ preventScroll: true });
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [location.hash]);
 
   if (hidden) return null;
 
