@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useFeature } from '../../lib/capabilities';
@@ -23,6 +23,8 @@ import {
   parseRedeemBody,
   redeemOutcomeCopy,
   redeemRequestId,
+  redeemRefusalInviter,
+  type RedeemActor,
 } from '../../lib/inviteRedeem';
 import { clearPendingInvite, initialInviteValue } from '../../lib/pendingInvite';
 import { Button, Callout, Input } from '../ui';
@@ -122,6 +124,7 @@ export function InviteCodeForm({
   busy = false,
   error = null,
   result = null,
+  usedBy = null,
   inputId = 'invite-code-field',
 }: {
   value: string;
@@ -130,6 +133,8 @@ export function InviteCodeForm({
   busy?: boolean;
   error?: string | null;
   result?: string[] | null;
+  /** The inviter a 409 "already used" refusal named; their profile stays reachable. */
+  usedBy?: RedeemActor | null;
   inputId?: string;
 }) {
   return (
@@ -158,6 +163,15 @@ export function InviteCodeForm({
           className="tabular uppercase"
           onChange={(e) => onChange(e.target.value)}
         />
+        {usedBy && error ? (
+          <p className="text-sm text-text-2" data-testid="invite-used-by">
+            This invite came from{' '}
+            <Link to={`/u/${usedBy._id}`} className="font-semibold text-brand-text underline-offset-2 hover:underline">
+              {actorName(usedBy) ?? 'the person who sent it'}
+            </Link>
+            . Their profile is still yours to open.
+          </p>
+        ) : null}
         {result && result.length ? (
           <div role="status" aria-live="polite">
             <Callout tone="success" title={REDEEMED_TITLE}>
@@ -230,6 +244,7 @@ function InviteCodeLoaded() {
       busy={redeem.isPending}
       error={failure && !disabled ? failure.message : null}
       result={redeem.data?.sentences ?? null}
+      usedBy={failure?.code === 'INVITE_ALREADY_USED' ? redeemRefusalInviter(redeem.error) : null}
     />
   );
 }

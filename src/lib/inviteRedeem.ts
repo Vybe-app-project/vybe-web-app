@@ -42,20 +42,36 @@ const isRecord = (value: unknown): value is Record<string, unknown> => !!value &
 const oneOf = <T extends readonly string[]>(list: T, value: unknown): value is T[number] => typeof value === 'string' && (list as readonly string[]).includes(value);
 
 /** The redeem answer into one shape, or null when a field is outside the contract (the caller shows the generic failure). */
+/** The public actor the API attaches to a redemption (200 `inviter`, and since a08b42e the 409 INVITE_ALREADY_USED body); null when absent or a blocked pair. */
+export function parseRedeemActor(raw: unknown): RedeemActor | null {
+  if (!isRecord(raw) || typeof raw._id !== 'string' || !raw._id) return null;
+  return {
+    _id: raw._id,
+    ...(typeof raw.username === 'string' ? { username: raw.username } : {}),
+    ...(typeof raw.fullName === 'string' ? { fullName: raw.fullName } : {}),
+    ...(typeof raw.avatar === 'string' && raw.avatar ? { avatar: raw.avatar } : {}),
+    ...(raw.isIdentityVerified === true ? { isIdentityVerified: true } : {}),
+  };
+}
+
+/**
+ * The inviter named by a 409 INVITE_ALREADY_USED refusal (API a08b42e): the
+ * account already used an invite, but this code's inviter stays reachable,
+ * the way the app keeps their profile a tap away. Null for any other failure
+ * or for a blocked pair.
+ */
+export function redeemRefusalInviter(e: unknown): RedeemActor | null {
+  const failure = (e && typeof e === 'object' ? e : {}) as { response?: { status?: number; data?: unknown } };
+  const data = failure.response?.data;
+  if (failure.response?.status !== 409 || !isRecord(data) || data.code !== 'INVITE_ALREADY_USED') return null;
+  return parseRedeemActor(data.inviter);
+}
+
 export function parseRedeemBody(body: unknown): RedeemBody | null {
   if (!isRecord(body) || !isRecord(body.outcome)) return null;
   const { follow, gym, challenge } = body.outcome;
   if (!oneOf(FOLLOW_OUTCOMES, follow) || !oneOf(GYM_OUTCOMES, gym) || !oneOf(CHALLENGE_OUTCOMES, challenge)) return null;
-  const rawInviter = isRecord(body.inviter) && typeof body.inviter._id === 'string' && body.inviter._id ? body.inviter : null;
-  const inviter: RedeemActor | null = rawInviter
-    ? {
-        _id: rawInviter._id as string,
-        ...(typeof rawInviter.username === 'string' ? { username: rawInviter.username } : {}),
-        ...(typeof rawInviter.fullName === 'string' ? { fullName: rawInviter.fullName } : {}),
-        ...(typeof rawInviter.avatar === 'string' && rawInviter.avatar ? { avatar: rawInviter.avatar } : {}),
-        ...(rawInviter.isIdentityVerified === true ? { isIdentityVerified: true } : {}),
-      }
-    : null;
+  const inviter = parseRedeemActor(body.inviter);
   return {
     inviter,
     outcome: { follow, gym, challenge },

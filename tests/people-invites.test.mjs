@@ -609,3 +609,16 @@ test('the code travels through sign-up in the tab and is offered once on the wel
   assert.equal((landing.match(/\bapi\.(get|post|put|patch|delete)\(/g) || []).length, 1, 'the landing still makes one API call');
   assert.doesNotMatch(landing, /api\.post\(/, 'nothing is redeemed on the landing');
 });
+
+test('a 409 "already used" refusal keeps this code\'s inviter reachable (API a08b42e)', async () => {
+  const redeem = await import('../src/lib/inviteRedeem.ts');
+  const inviter = { _id: '6aad635402be1805f4b9ef72', username: 'sam', fullName: 'Sam Rivera', avatar: 'https://cdn.example/s.png', isIdentityVerified: true, email: 'never@shown' };
+  const e = { response: { status: 409, data: { message: 'You already used an invite.', code: 'INVITE_ALREADY_USED', inviter } } };
+  assert.deepEqual(redeem.redeemRefusalInviter(e), { _id: inviter._id, username: 'sam', fullName: 'Sam Rivera', avatar: inviter.avatar, isIdentityVerified: true });
+  assert.equal(redeem.redeemRefusalInviter({ response: { status: 409, data: { code: 'INVITE_ALREADY_USED', inviter: null } } }), null, 'a blocked pair names nobody');
+  assert.equal(redeem.redeemRefusalInviter({ response: { status: 404, data: { code: 'INVITE_NOT_FOUND', inviter } } }), null);
+  assert.equal(redeem.redeemRefusalInviter(new Error('x')), null);
+  const source = fs.readFileSync(new URL('../src/pages/settings/InviteCodeSection.tsx', import.meta.url), 'utf8');
+  assert.match(source, /usedBy=\{failure\?\.code === 'INVITE_ALREADY_USED' \? redeemRefusalInviter\(redeem\.error\) : null\}/);
+  assert.match(source, /data-testid="invite-used-by"/);
+});
