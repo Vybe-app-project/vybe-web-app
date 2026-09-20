@@ -245,7 +245,7 @@ if (!PLAYWRIGHT) {
         position: getComputedStyle(document.querySelector('.legal-topbar')).position,
         background: getComputedStyle(document.documentElement).backgroundColor,
       }));
-      assert.equal(print.wordmark, 'rgb(11, 30, 43)', 'wordmark prints in --text-1, not mint');
+      assert.equal(print.wordmark, 'rgb(0, 0, 0)', 'wordmark prints in --text-1 (Instagram black), not the mint mark colour');
       assert.equal(print.brandVisibility, 'visible');
       assert.equal(print.position, 'static');
       assert.equal(print.background, 'rgb(255, 255, 255)');
