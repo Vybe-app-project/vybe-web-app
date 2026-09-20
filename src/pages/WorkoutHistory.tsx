@@ -372,18 +372,20 @@ export default function WorkoutHistory() {
               {streak > 0 ? <StatTile label="Streak" value={formatStat(streak)} unit={streak === 1 ? 'day' : 'days'} icon={<Zap size={18} filled />} hint="Train today to keep it going" /> : null}
             </StatGrid>
           ) : (
-            <Card container className="flex flex-col gap-3 @md:flex-row @md:items-center @md:justify-between">
-              <div className="min-w-0">
-                <h2 className="type-heading text-md text-text-1">No session yet this week</h2>
-                <p className="mt-1 text-sm text-text-2">
-                  {lastTrained ? `Last session ${logs[0].name || 'Workout'}, ${relativeDay(lastTrained).toLowerCase()}.` : ''}
-                  {lastWeek.sessions > 0 ? ` Last week: ${plural(lastWeek.sessions, 'session')}${lastWeek.minutes ? ` · ${formatStat(lastWeek.minutes)} min` : ''}.` : ''}
-                  {kept > 1 ? ` ${formatStat(kept)} weeks kept so far.` : ''}
-                </p>
+            <Card container>
+              <div className="flex flex-col gap-3 @md:flex-row @md:items-center @md:justify-between">
+                <div className="min-w-0">
+                  <h2 className="type-heading text-md text-text-1">No session yet this week</h2>
+                  <p className="mt-1 text-sm text-text-2">
+                    {lastTrained ? `Last session ${logs[0].name || 'Workout'}, ${relativeDay(lastTrained).toLowerCase()}.` : ''}
+                    {lastWeek.sessions > 0 ? ` Last week: ${plural(lastWeek.sessions, 'session')}${lastWeek.minutes ? ` · ${formatStat(lastWeek.minutes)} min` : ''}.` : ''}
+                    {kept > 1 ? ` ${formatStat(kept)} weeks kept so far.` : ''}
+                  </p>
+                </div>
+                <ButtonLink to={TRAIN.newSession({ repeat: logs[0]._id })} state={state} variant="secondary" icon={<Copy size={18} />} className="shrink-0 self-start @md:self-auto">
+                  Log it again
+                </ButtonLink>
               </div>
-              <ButtonLink to={TRAIN.newSession({ repeat: logs[0]._id })} state={state} variant="secondary" icon={<Copy size={18} />} className="shrink-0 self-start @md:self-auto">
-                Log it again
-              </ButtonLink>
             </Card>
           )}
 

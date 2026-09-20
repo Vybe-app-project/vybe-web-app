@@ -46,7 +46,7 @@ import { HighlightsRow } from './StoryTray';
 export const PAGE = 'w-full space-y-section';
 
 /** Identity, stats and shortcuts left; the tabs and their content right, once there is room for both. */
-export const PROFILE_GRID = 'grid gap-section xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] xl:items-start';
+export const PROFILE_GRID = 'grid min-w-0 gap-section xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] xl:items-start [&>*]:min-w-0';
 
 /** Stat values step up to `--text-stat` once the strip has the room (a container query, not a viewport guess). */
 export const STAT_STRIP_CLASS = 'border-0 bg-transparent shadow-none divide-x-0 @md:[&_.type-stat]:text-stat';
@@ -97,6 +97,7 @@ function ShortcutCard({
   to,
   icon,
   label,
+  shortLabel,
   value,
   hint,
   loading,
@@ -105,28 +106,44 @@ function ShortcutCard({
   to: string;
   icon: ReactNode;
   label: string;
+  /** Visible label when the full one will not fit three-up on a phone; `label` stays the accessible name. */
+  shortLabel?: string;
   value?: string | number | null;
   hint?: string;
   loading?: boolean;
   badge?: number;
 }) {
   return (
-    <Card to={to} linkLabel={label} padded={false} className="relative flex min-h-24 flex-col justify-between gap-3 p-3 sm:p-4">
+    <Card to={to} linkLabel={label} padded={false} className="relative flex min-h-28 flex-col p-3 sm:p-4">
+      {/* Icon and figure share the top row so every tile's number sits on one
+          baseline; the label and hint are pinned to the bottom with fixed line
+          counts, so a wrapping label never pushes the number around. */}
       <div className="flex items-start justify-between gap-2">
-        <span className="relative grid h-9 w-9 place-items-center rounded-sm bg-surface-2 text-text-1">
+        <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-sm bg-surface-2 text-text-1">
           {icon}
           {badge ? <CountBadge value={badge} className="absolute -right-1.5 -top-1.5" /> : null}
         </span>
         <ChevronRight size={18} className="text-text-3" aria-hidden="true" />
       </div>
-      <div className="min-w-0">
+      <div className="mt-3">
         {loading ? (
-          <Skeleton className="mb-1.5 h-6 w-12" />
+          <Skeleton className="h-6 w-12" />
         ) : (
           <span className="type-stat block text-xl leading-none text-text-1">{value ?? '—'}</span>
         )}
-        <span className="mt-1 block text-xs font-semibold leading-tight text-text-2 [text-wrap:balance]">{label}</span>
-        {hint ? <span className="mt-0.5 block text-2xs leading-tight text-text-3">{hint}</span> : null}
+      </div>
+      <div className="mt-auto min-w-0 pt-1.5">
+        <span className="block truncate text-xs font-semibold leading-tight text-text-2" title={label}>
+          {shortLabel ? (
+            <>
+              <span className="sm:hidden">{shortLabel}</span>
+              <span className="hidden sm:inline">{label}</span>
+            </>
+          ) : (
+            label
+          )}
+        </span>
+        <span className="mt-0.5 block truncate text-2xs leading-tight text-text-3">{hint ?? '\u00a0'}</span>
       </div>
     </Card>
   );
@@ -169,7 +186,7 @@ function ProfileShortcuts() {
 
   const photoHint = photos.data?.latest
     ? `Latest ${new Date(photos.data.latest).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
-    : 'See how you change';
+    : 'Track changes';
   const pendingCount = pending.data?.length || 0;
 
   return (
@@ -178,6 +195,7 @@ function ProfileShortcuts() {
         to="/achievements"
         icon={<Award size={20} />}
         label="Achievements"
+        shortLabel="Badges"
         loading={achievements.isLoading}
         value={achievements.isError ? null : achievements.data?.earned}
         hint={
@@ -197,6 +215,7 @@ function ProfileShortcuts() {
         to="/health/photos"
         icon={<Camera size={20} />}
         label="Progress photos"
+        shortLabel="Photos"
         loading={photos.isLoading}
         value={photos.isError ? null : photos.data?.count}
         hint={photos.isError ? undefined : photoHint}
@@ -452,7 +471,7 @@ export default function Profile() {
       {header}
 
       <div className={PROFILE_GRID}>
-        <div className="space-y-section">
+        <div className="min-w-0 space-y-section">
           <ProfileCover src={me.coverPicture} />
 
           {/* The Instagram header: avatar left, three stats right, then name, gym and bio. */}
@@ -496,7 +515,7 @@ export default function Profile() {
                 <h2 className="text-md font-semibold text-text-1">{displayName(me)}</h2>
                 <UserBadges user={me} />
               </div>
-              <p className="text-sm text-text-2">@{me.username}</p>
+              <p className="truncate text-sm text-text-2" title={`@${me.username}`}>@{me.username}</p>
               <GymRow label={gymLabel} href={gymRow.href} />
               {me.bio ? <p className="prose-measure mt-2 whitespace-pre-wrap text-sm leading-relaxed text-text-1">{me.bio}</p> : null}
               <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-text-3">

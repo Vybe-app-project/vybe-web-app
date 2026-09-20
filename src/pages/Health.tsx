@@ -485,6 +485,10 @@ export default function Health() {
         .sort((a, b) => a.date.localeCompare(b.date)),
     [nutrition.data],
   );
+  // The API answers a row for every day in the window, zeros included, so
+  // "nothing logged" arrives as a full series of zeros. A chart of a flat
+  // zero line reads as a bug; the empty state below reads as an instruction.
+  const hasCalories = useMemo(() => calorieSeries.some((d) => (Number(d.calories) || 0) > 0), [calorieSeries]);
 
   const volumeSeries = useMemo(
     () =>
@@ -492,6 +496,10 @@ export default function Health() {
         .map((d) => ({ ...d, label: shortDate(d.date) }))
         .sort((a, b) => a.date.localeCompare(b.date)),
     [workouts.data],
+  );
+  const hasVolume = useMemo(
+    () => volumeSeries.some((d) => (Number(d.duration) || 0) > 0 || (Number(d.calories) || 0) > 0),
+    [volumeSeries],
   );
 
   const sortedEntries = useMemo(() => [...(entries.data ?? [])].sort((a, b) => b.date.localeCompare(a.date)), [entries.data]);
@@ -648,7 +656,7 @@ export default function Health() {
             <>
               <ChartEmpty height={168} label="Log weight on two days to see a trend" />
               <div className="mt-3 flex justify-center">
-                <Button variant="quiet" size="sm" onClick={openNewEntry}>
+                <Button variant="secondary" size="sm" onClick={openNewEntry}>
                   Log weight
                 </Button>
               </div>
@@ -674,11 +682,11 @@ export default function Health() {
             <Skeleton className="h-56 w-full rounded-md" />
           ) : nutrition.isError ? (
             <ErrorState error={nutrition.error} title="Could not load nutrition analytics" retry={() => nutrition.refetch()} />
-          ) : calorieSeries.length === 0 ? (
+          ) : !hasCalories ? (
             <>
               <ChartEmpty height={168} label="Log a meal and your daily calories chart here" />
               <div className="mt-3 flex justify-center">
-                <ButtonLink to="/meals/log" variant="quiet" size="sm">
+                <ButtonLink to="/meals/log" variant="secondary" size="sm">
                   Log meal
                 </ButtonLink>
               </div>
@@ -727,7 +735,7 @@ export default function Health() {
         </Card>
       </CardGrid>
 
-      {nutrition.data && nutritionInsights && calorieSeries.length > 0 ? (
+      {nutrition.data && nutritionInsights && hasCalories ? (
         <Section title="Nutrition" description={`Macros per day, meal types and the foods you log most ${WINDOW_NOUN[timeWindow]}.`}>
           <CardGrid min="20rem">
             <Card container>
@@ -817,11 +825,11 @@ export default function Health() {
           <Skeleton className="h-56 w-full rounded-md" />
         ) : workouts.isError ? (
           <ErrorState error={workouts.error} title="Could not load workout analytics" retry={() => workouts.refetch()} />
-        ) : volumeSeries.length === 0 ? (
+        ) : !hasVolume ? (
           <>
             <ChartEmpty height={168} label="Log a workout and your volume shows up here" />
             <div className="mt-3 flex justify-center">
-              <ButtonLink to="/workouts?log=1" variant="quiet" size="sm">
+              <ButtonLink to="/workouts?log=1" variant="secondary" size="sm">
                 Log workout
               </ButtonLink>
             </div>
