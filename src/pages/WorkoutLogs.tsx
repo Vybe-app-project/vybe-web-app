@@ -15,6 +15,7 @@ import {
 } from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import { formatSeconds } from '../lib/duration';
+import { pickStarterTemplate, starterLogSeed } from '../lib/firstWeek';
 import {
   Badge,
   Button,
@@ -51,6 +52,7 @@ import {
   MetaList,
   emptyExercise,
   exerciseDraftFrom,
+  fetchPremade,
   toExercisePayload,
   type ExerciseDraft,
   type SocialWorkout,
@@ -523,9 +525,12 @@ export default function WorkoutLogs() {
     setModal(true);
   };
 
-  // Deep links: ?log=1 opens the form; ?from=<workoutId> prefills it from a library workout.
+  // Deep links: ?log=1 opens the form; ?from=<workoutId> prefills it from a library workout;
+  // ?starter=1 (the first-week card's "Start here") prefills it with the starter session from
+  // the premade catalogue, or with the built-in four-move fallback when the catalogue lacks it.
   const wantsLog = params.get('log') === '1';
   const fromId = params.get('from');
+  const wantsStarter = wantsLog && params.get('starter') === '1';
   const fromWorkout = useQuery({
     queryKey: ['workout', fromId],
     queryFn: async (): Promise<SocialWorkout> => {
@@ -534,23 +539,27 @@ export default function WorkoutLogs() {
     },
     enabled: Boolean(fromId),
   });
+  const premade = useQuery({ queryKey: ['workouts', 'premade'], queryFn: fetchPremade, enabled: wantsStarter, retry: false });
 
   useEffect(() => {
     if (!wantsLog) return;
     if (fromId && fromWorkout.isPending) return; // wait for the prefill
+    if (wantsStarter && premade.isPending) return; // wait for the catalogue; a failure falls back to the constant
     if (fromId && fromWorkout.isError) toast.error('Could not load that workout; starting an empty session.');
-    openNew(fromId && fromWorkout.data ? { key: fromWorkout.data._id, value: seedFromWorkout(fromWorkout.data) } : null);
+    if (wantsStarter) openNew({ key: 'starter', value: starterLogSeed(premade.isSuccess ? pickStarterTemplate(premade.data) : null) });
+    else openNew(fromId && fromWorkout.data ? { key: fromWorkout.data._id, value: seedFromWorkout(fromWorkout.data) } : null);
     setParams(
       (prev) => {
         const n = new URLSearchParams(prev);
         n.delete('log');
         n.delete('from');
+        n.delete('starter');
         return n;
       },
       { replace: true },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsLog, fromId, fromWorkout.isPending, fromWorkout.isError, fromWorkout.data]);
+  }, [wantsLog, fromId, fromWorkout.isPending, fromWorkout.isError, fromWorkout.data, wantsStarter, premade.isPending, premade.isSuccess, premade.data]);
 
   const remove = useMutation({
     mutationFn: async (log: WorkoutLog) => {
