@@ -101,9 +101,9 @@ export default function Support({ standalone = false }: { standalone?: boolean }
             </div>
           </Card>
         ) : (
-          <Card>
+          <Card container>
             <form className="space-y-4" onSubmit={submit} noValidate>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 @md:grid-cols-2">
                 <Input
                   id="support-name"
                   label="Your name"

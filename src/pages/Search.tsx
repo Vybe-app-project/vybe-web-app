@@ -8,14 +8,15 @@ import {
   Badge,
   Button,
   Card,
+  CardGrid,
   Chip,
   EmptyState,
   ErrorState,
   IconButton,
   Input,
   PageHeader,
+  ScrollX,
   Skeleton,
-  Tabs,
   cx,
   formatStat,
   humanize,
@@ -367,7 +368,7 @@ export default function Search() {
   return (
     <>
       <PageHeader title="Search" subtitle="People, posts, hashtags, workouts, meals and challenges across Vybe." />
-      <div className="w-full max-w-form space-y-5">
+      <div className="w-full max-w-form space-y-section">
         <form onSubmit={onSubmit} role="search" className="relative">
           <Input
             id={INPUT_ID}
@@ -457,14 +458,18 @@ export default function Search() {
           ) : null}
         </form>
 
+        {/* The result type is a filter, so it reads as chips: the hub's section tabs stay the
+            only underline row on the screen. */}
         {activeQuery ? (
-          <Tabs
-            aria-label="Result type"
-            tabs={TYPE_TABS.map((t) => ({ key: t.key, label: t.label }))}
-            value={type}
-            size="sm"
-            onChange={(key) => switchType(isSearchType(key) ? key : 'all')}
-          />
+          <ScrollX fade className="-mx-1 px-1">
+            <div role="group" aria-label="Result type" className="flex w-max gap-2 py-0.5">
+              {TYPE_TABS.map((t) => (
+                <Chip key={t.key} selected={type === t.key} onClick={() => switchType(t.key)}>
+                  {t.label}
+                </Chip>
+              ))}
+            </div>
+          </ScrollX>
         ) : null}
 
         {/* ---------- People tab: live typeahead ---------- */}
@@ -628,11 +633,11 @@ export default function Search() {
                 <SubHeading action={workoutsShown.more > 0 ? <SeeAll label="See all workouts" onClick={() => switchType('workouts')} /> : undefined}>
                   <span id="res-workouts">Workouts</span>
                 </SubHeading>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <CardGrid min="16rem">
                   {workoutsShown.items.map((w) => (
                     <WorkoutTile key={w._id} workout={w} />
                   ))}
-                </div>
+                </CardGrid>
               </section>
             ) : null}
 
@@ -641,11 +646,11 @@ export default function Search() {
                 <SubHeading action={mealsShown.more > 0 ? <SeeAll label="See all meals" onClick={() => switchType('meals')} /> : undefined}>
                   <span id="res-meals">Meals</span>
                 </SubHeading>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <CardGrid min="16rem">
                   {mealsShown.items.map((m) => (
                     <MealTile key={m._id} meal={m} />
                   ))}
-                </div>
+                </CardGrid>
               </section>
             ) : null}
 
@@ -654,11 +659,11 @@ export default function Search() {
                 <SubHeading action={challengesShown.more > 0 ? <SeeAll label="See all challenges" onClick={() => switchType('challenges')} /> : undefined}>
                   <span id="res-challenges">Challenges</span>
                 </SubHeading>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <CardGrid min="16rem">
                   {challengesShown.items.map((c) => (
                     <ChallengeTile key={c._id} challenge={c} />
                   ))}
-                </div>
+                </CardGrid>
               </section>
             ) : null}
 

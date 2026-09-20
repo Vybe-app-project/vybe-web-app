@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
 import { UnitsControl } from '../components/UnitsControl';
 import { VersionRow } from '../components/VersionRow';
+import { PlaceImage } from '../components/PlaceImage';
+import { memberCountLabel } from '../components/GymBand';
+import { communityPath, coverSourceOf, type CommunityLike } from '../lib/gyms';
 import AccountPreferenceSections from './SettingsPreferences';
 import { SettingsCard, ToggleRow } from './SettingsPieces';
 import {
@@ -36,19 +39,26 @@ import {
   Avatar,
   Badge,
   Button,
+  ButtonLink,
   Callout,
+  Chip,
   ConfirmDialog,
+  EmptyState,
   ErrorState,
   IconButton,
   Input,
+  NO_GYM_COPY,
   PageHeader,
+  ScrollX,
   Skeleton,
   Textarea,
   ThemeControl,
   cx,
+  useMediaQuery,
   useToast,
 } from './ui';
-import { Award, ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Monitor, Shield } from './icons';
+import type { IconComponent } from './icons';
+import { Award, Bell, ChevronRight, ExternalLink, FileText, Info, LifeBuoy, Lock, LogOut, MapPin, Monitor, Palette, Shield, User as UserIcon } from './icons';
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
 import { DataLifecycleSection } from './settings/DataLifecycleSection';
@@ -223,6 +233,178 @@ function AccountSection() {
           </Button>
         </div>
       </form>
+    </SettingsCard>
+  );
+}
+
+/* ------------------------------------------------------------------ home gym */
+
+/** `homeGym` on GET /users/me: a bare community id, or a provider place, or absent (API.md §1). */
+type HomeGymRef = { community?: string | null; place?: { osmId: string; name: string } | null; setAt?: string } | null;
+type HomeGymCommunity = CommunityLike & { _id: string; name: string; vicinity?: string; totalMembers?: number };
+
+/**
+ * A resolvable cover for the thumbnail. Provider photo tokens need the
+ * authenticated proxy the gym page runs; here the generated identity tile
+ * stands in for them, so the card never shows a broken image.
+ */
+function communityCoverSrc(c?: CommunityLike | null): string | undefined {
+  const source = coverSourceOf(c);
+  if (!source) return undefined;
+  if (source.kind === 'url') return source.url;
+  if (source.kind === 'media-key') return source.key;
+  return undefined;
+}
+
+function HomeGymThumb({ community, name }: { community?: CommunityLike | null; name: string }) {
+  return <PlaceImage src={communityCoverSrc(community)} name={name} className="h-16 w-16 rounded-md" textClassName="text-md" />;
+}
+
+/**
+ * The gym the whole app anchors to. Reads `homeGym` off the session user
+ * (the shell fetches the gym itself under ['home-gym']; this card only needs
+ * the name, place and cover, so it asks the details route once) and writes
+ * through PUT /users/settings, always in the `{ community }` form: a
+ * community's own place id may be a `vybe-…` one the place form rejects.
+ * With no gym set, the common case today, the card offers one of the
+ * member's communities or sends them to find one.
+ */
+function HomeGymSection() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const setUser = useAuth((s) => s.setUser);
+  const homeGym = useAuth((s) => (s.user?.homeGym ?? null) as HomeGymRef);
+  const communityId = homeGym?.community ? String(homeGym.community) : null;
+  const placeName = homeGym?.place?.name?.trim() || '';
+
+  const gym = useQuery({
+    queryKey: ['settings', 'home-gym', communityId],
+    enabled: !!communityId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data } = await api.get(`/gyms/community/${communityId}`);
+      return (data.data || data) as HomeGymCommunity;
+    },
+  });
+
+  const mine = useQuery({
+    queryKey: ['settings', 'my-communities'],
+    enabled: !communityId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data } = await api.get('/gyms/community/my-communities', { params: { page: 1, limit: 5 } });
+      return (data.data?.gymCommunities ?? data.gymCommunities ?? []) as HomeGymCommunity[];
+    },
+  });
+
+  const save = useMutation({
+    mutationFn: async (next: { community: string } | null) => {
+      const { data } = await api.put('/users/settings', { homeGym: next });
+      return (data.user || data) as PublicUser;
+    },
+    onSuccess: (user, next) => {
+      setUser(user as any);
+      qc.setQueryData(['me'], user);
+      void qc.invalidateQueries({ queryKey: ['home-gym'] });
+      void qc.invalidateQueries({ queryKey: ['settings', 'my-communities'] });
+      toast.success(next ? 'Home gym set' : 'Home gym cleared');
+    },
+    onError: (e) => {
+      const field = fieldErrorsOf(e);
+      toast.error(field.homeGym || errMsg(e, 'Could not update your home gym.'));
+    },
+  });
+
+  const busy = save.isPending;
+  const actions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <ButtonLink to="/gyms" variant="secondary" size="sm">
+        Change
+      </ButtonLink>
+      <Button variant="ghost" size="sm" disabled={busy} loading={busy} onClick={() => save.mutate(null)}>
+        Clear
+      </Button>
+    </div>
+  );
+
+  let body: ReactNode;
+  if (communityId) {
+    const name = gym.data?.name?.trim() || placeName || 'Your home gym';
+    const vicinity = gym.data?.vicinity?.trim() || '';
+    const members = typeof gym.data?.totalMembers === 'number' && gym.data.totalMembers > 0 ? memberCountLabel(gym.data.totalMembers) : '';
+    body = (
+      <div className="flex flex-wrap items-center gap-4">
+        <HomeGymThumb community={gym.data} name={name} />
+        <div className="min-w-0 flex-1 basis-40">
+          <Link to={communityPath(communityId)} viewTransition className="type-heading block truncate text-md text-text-1 hover:underline">
+            {name}
+          </Link>
+          {gym.isLoading ? (
+            <Skeleton className="mt-1.5 h-3.5 w-40 rounded-xs" />
+          ) : gym.isError ? (
+            <button type="button" onClick={() => void gym.refetch()} className="mt-0.5 text-left text-xs text-text-2 hover:underline">
+              Couldn’t load the details. Try again
+            </button>
+          ) : (
+            <p className="mt-0.5 truncate text-sm text-text-2">{[vicinity, members].filter(Boolean).join(' · ') || 'Your home gym'}</p>
+          )}
+        </div>
+        {actions}
+      </div>
+    );
+  } else if (placeName) {
+    body = (
+      <div className="flex flex-wrap items-center gap-4">
+        <HomeGymThumb name={placeName} />
+        <div className="min-w-0 flex-1 basis-40">
+          <p className="type-heading truncate text-md text-text-1">{placeName}</p>
+          <p className="mt-0.5 text-sm text-text-2">Not a Vybe community yet. Start one from Gyms and its members appear here.</p>
+        </div>
+        {actions}
+      </div>
+    );
+  } else if (mine.isLoading) {
+    body = <RowsSkeleton rows={2} height="h-14" />;
+  } else if (mine.data?.length) {
+    body = (
+      <div className="space-y-3">
+        <p className="text-sm text-text-2">You train with these communities. Pick the one that is home.</p>
+        <ul className="divide-y divide-line" aria-label="Your communities">
+          {mine.data.map((c) => (
+            <li key={c._id} className="flex min-h-14 items-center gap-3 py-2">
+              <PlaceImage src={communityCoverSrc(c)} name={c.name} className="h-11 w-11 rounded-sm" textClassName="text-xs" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-text-1">{c.name}</span>
+                {c.vicinity?.trim() ? <span className="block truncate text-xs text-text-2">{c.vicinity.trim()}</span> : null}
+              </span>
+              <Button variant="secondary" size="sm" disabled={busy} onClick={() => save.mutate({ community: c._id })} aria-label={`Make ${c.name} your home gym`}>
+                Set as home gym
+              </Button>
+            </li>
+          ))}
+        </ul>
+        <ButtonLink to="/gyms" variant="ghost" size="sm" icon={<MapPin size={16} />}>
+          Find another gym
+        </ButtonLink>
+      </div>
+    );
+  } else {
+    body = (
+      <EmptyState
+        family="community"
+        size="sm"
+        level={3}
+        title={NO_GYM_COPY.kicker}
+        message={NO_GYM_COPY.body}
+        action={{ label: NO_GYM_COPY.action, to: NO_GYM_COPY.href, icon: <MapPin size={18} /> }}
+        className="rounded-md bg-surface-2 py-6"
+      />
+    );
+  }
+
+  return (
+    <SettingsCard id="home-gym" title="Home gym" description="Home, Train and Community open on this gym and the people who train there.">
+      {body}
     </SettingsCard>
   );
 }
@@ -911,17 +1093,147 @@ function AboutSection() {
   );
 }
 
+/* ------------------------------------------------------------------ groups */
+
+type GroupId = 'account' | 'preferences' | 'privacy' | 'notifications' | 'about';
+
+/**
+ * The five categories of the two-pane layout. `cards` lists every card id in
+ * the group, so a deep link such as /settings#privacy can open the right
+ * pane before it scrolls to the card. Every card keeps its id.
+ */
+const GROUPS: Array<{ id: GroupId; label: string; hint: string; icon: IconComponent; cards: string[] }> = [
+  { id: 'account', label: 'Account', hint: 'Who you are and where you train', icon: UserIcon, cards: ['account', 'home-gym', 'invite-code', 'invites', 'coaching'] },
+  { id: 'preferences', label: 'Preferences', hint: 'Appearance, units, comments, accessibility, workouts', icon: Palette, cards: ['appearance', 'units', 'comments', 'accessibility', 'workouts'] },
+  { id: 'privacy', label: 'Privacy & safety', hint: 'Who can see you, your password and devices', icon: Shield, cards: ['privacy', 'password', 'sessions'] },
+  { id: 'notifications', label: 'Notifications', hint: 'Push and email', icon: Bell, cards: ['notifications', 'email'] },
+  { id: 'about', label: 'About & data', hint: 'Help, legal and your data', icon: Info, cards: ['about', 'legal', 'data', 'delete'] },
+];
+
+const groupDomId = (id: GroupId) => `settings-group-${id}`;
+const groupOfCard = (cardId: string): GroupId | null => GROUPS.find((g) => g.cards.includes(cardId))?.id ?? null;
+const isGroupId = (v: string): v is GroupId => GROUPS.some((g) => g.id === v);
+
+/** The cards of one group, in the order they read on the phone. */
+function GroupCards({ id }: { id: GroupId }) {
+  switch (id) {
+    case 'account':
+      return (
+        <>
+          <AccountSection />
+          <HomeGymSection />
+          <InviteCodeSection />
+          <InviteFriendsSection />
+          <CoachingSection />
+        </>
+      );
+    case 'preferences':
+      return (
+        <>
+          <AppearanceSection />
+          <UnitsSection />
+          <AccountPreferenceSections />
+        </>
+      );
+    case 'privacy':
+      return (
+        <>
+          <PrivacySection />
+          <PasswordSection />
+          <SessionsSection />
+        </>
+      );
+    case 'notifications':
+      return (
+        <>
+          <NotificationsSection />
+          <EmailPreferencesSection />
+        </>
+      );
+    case 'about':
+      return (
+        <>
+          <AboutSection />
+          <LegalSection />
+          <DataLifecycleSection />
+        </>
+      );
+  }
+}
+
+/** Desktop: the sticky category rail on the left. */
+function SettingsRail({ active, onSelect }: { active: GroupId; onSelect: (id: GroupId) => void }) {
+  return (
+    <nav aria-label="Settings sections" className="hidden lg:sticky lg:top-20 lg:block">
+      <ul className="space-y-1">
+        {GROUPS.map((g) => {
+          const Icon = g.icon;
+          const current = g.id === active;
+          return (
+            <li key={g.id}>
+              <button
+                type="button"
+                aria-current={current ? 'page' : undefined}
+                onClick={() => onSelect(g.id)}
+                className={cx(
+                  'flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+                  current ? 'bg-surface-2 text-text-1' : 'text-text-2 hover:bg-surface-2 hover:text-text-1',
+                )}
+              >
+                <Icon size={18} className={cx('mt-0.5 shrink-0', current ? 'text-text-1' : 'text-text-3')} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-text-1">{g.label}</span>
+                  <span className="block text-xs leading-snug text-text-3">{g.hint}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+/** Phone: the category chips pinned under the top bar; a tap scrolls to the group. */
+function SettingsChips({ active, onSelect }: { active: GroupId; onSelect: (id: GroupId) => void }) {
+  return (
+    <div className="sticky top-[calc(var(--topbar-h)+env(safe-area-inset-top))] z-20 -mx-4 bg-bg/90 px-4 py-2 backdrop-blur-xl md:-mx-6 md:px-6 lg:hidden">
+      <ScrollX fade className="-my-1 py-1">
+        <ul className="flex w-max gap-2" aria-label="Settings sections">
+          {GROUPS.map((g) => (
+            <li key={g.id}>
+              <Chip selected={g.id === active} onClick={() => onSelect(g.id)}>
+                {g.label}
+              </Chip>
+            </li>
+          ))}
+        </ul>
+      </ScrollX>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ page */
 
 export default function Settings() {
   const logout = useAuth((s) => s.logout);
   const { hash } = useLocation();
+  // Two panes from lg: the rail picks the group and only that group's cards
+  // mount. Below lg every group renders in one column under the chip row.
+  const desktop = useMediaQuery('(min-width: 1024px)');
+  const [active, setActive] = useState<GroupId>(() => {
+    const id = hash.replace(/^#/, '');
+    return (isGroupId(id) ? id : groupOfCard(id)) ?? 'account';
+  });
 
-  // Deep links such as /settings#privacy (from the Friends page) scroll the
-  // card into view and move focus to it once the sections have rendered.
+  // Deep links such as /settings#privacy (from the Friends page) open the
+  // card's group, scroll the card into view and move focus to it once the
+  // sections have rendered.
   useEffect(() => {
     const id = hash.replace(/^#/, '');
     if (!id) return;
+    const group = isGroupId(id) ? id : groupOfCard(id);
+    if (group) setActive(group);
     const t = window.setTimeout(() => {
       const card = document.getElementById(`${id}-title`)?.closest('[role="region"]') as HTMLElement | null;
       if (!card) return;
@@ -931,6 +1243,28 @@ export default function Settings() {
     }, 60);
     return () => window.clearTimeout(t);
   }, [hash]);
+
+  // Phone: the chip row follows the group under the top bar as you scroll.
+  useEffect(() => {
+    if (desktop || typeof IntersectionObserver === 'undefined') return;
+    const sections = GROUPS.map((g) => document.getElementById(groupDomId(g.id))).filter((el): el is HTMLElement => !!el);
+    if (!sections.length) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const hit = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        const id = hit?.target.getAttribute('data-group');
+        if (id && isGroupId(id)) setActive(id);
+      },
+      { rootMargin: '-40% 0px -55% 0px' },
+    );
+    sections.forEach((s) => io.observe(s));
+    return () => io.disconnect();
+  }, [desktop]);
+
+  const jumpTo = (id: GroupId) => {
+    setActive(id);
+    document.getElementById(groupDomId(id))?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
 
   return (
     <>
@@ -948,22 +1282,28 @@ export default function Settings() {
           </IconButton>
         }
       />
-      <div className="w-full max-w-form space-y-4">
-        <AccountSection />
-        <InviteCodeSection />
-        <AppearanceSection />
-        <UnitsSection />
-        <PrivacySection />
-        <AccountPreferenceSections />
-        <InviteFriendsSection />
-        <CoachingSection />
-        <PasswordSection />
-        <SessionsSection />
-        <NotificationsSection />
-        <EmailPreferencesSection />
-        <AboutSection />
-        <LegalSection />
-        <DataLifecycleSection />
+      <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start lg:gap-8">
+        <SettingsRail active={active} onSelect={setActive} />
+        <div className="min-w-0">
+          <SettingsChips active={active} onSelect={jumpTo} />
+          <div className="mt-2 w-full max-w-form space-y-10 lg:mt-0 lg:space-y-0">
+            {GROUPS.map((g) => {
+              if (desktop && g.id !== active) return null;
+              const headingId = `${groupDomId(g.id)}-title`;
+              return (
+                <section key={g.id} id={groupDomId(g.id)} data-group={g.id} aria-labelledby={headingId} className="scroll-mt-28 space-y-4 lg:scroll-mt-20">
+                  <div className="px-1">
+                    <h2 id={headingId} className="type-heading text-xl text-text-1">
+                      {g.label}
+                    </h2>
+                    <p className="mt-0.5 text-sm text-text-2">{g.hint}</p>
+                  </div>
+                  <GroupCards id={g.id} />
+                </section>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </>
   );

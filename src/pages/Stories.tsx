@@ -114,7 +114,7 @@ function CreateHighlightModal({ open, onClose, stories, loading }: { open: boole
             Stories <span className="tabular font-medium text-text-3">({storyIds.length} selected)</span>
           </p>
           {loading ? (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4" aria-busy="true">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-2" aria-busy="true">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="aspect-[9/16] w-full rounded-md" />
               ))}
@@ -122,7 +122,7 @@ function CreateHighlightModal({ open, onClose, stories, loading }: { open: boole
           ) : stories.length === 0 ? (
             <p className="rounded-sm bg-surface-2 p-4 text-sm text-text-2">You haven’t posted a story yet. Post one and it can go into a highlight right away.</p>
           ) : (
-            <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto p-0.5 sm:grid-cols-4" role="group" aria-labelledby="highlight-picker-label">
+            <div className="grid max-h-64 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-2 overflow-y-auto p-0.5" role="group" aria-labelledby="highlight-picker-label">
               {stories.map((s) => {
                 const on = storyIds.includes(s._id);
                 return (
@@ -263,7 +263,7 @@ export default function Stories() {
         }
       />
 
-      <div className="space-y-5">
+      <div className="space-y-section">
         <SegmentedControl aria-label="Story views" tabs={TABS} value={tab} onChange={setTab} className="max-w-sm" />
 
         {tab === 'tray' ? <StoryTray variant="page" /> : null}
@@ -271,7 +271,7 @@ export default function Stories() {
         {tab === 'archive' ? (
           <section aria-label="Archived stories" className="space-y-3">
             {archive.isLoading ? (
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5" aria-busy="true">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-2" aria-busy="true">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <Skeleton key={i} className="aspect-[9/16] w-full rounded-md" />
                 ))}
@@ -299,7 +299,7 @@ export default function Stories() {
                     .
                   </p>
                 ) : null}
-                <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+                <ul className="grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-2">
                   {expired.map((s) => (
                     <li key={s._id}>
                       <button

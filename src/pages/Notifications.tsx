@@ -90,6 +90,9 @@ const FAMILY_CLASS: Record<NotificationFamily, string> = {
   system: 'bg-surface-3 text-text-2',
 };
 
+/** The band's context line: "Saturday, 20 September" in the viewer's locale. */
+const todayLine = () => new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+
 type Bucket = 'Today' | 'Yesterday' | 'This week' | 'Earlier';
 const BUCKET_ORDER: Bucket[] = ['Today', 'Yesterday', 'This week', 'Earlier'];
 const DAY = 86_400_000;
@@ -160,9 +163,8 @@ function NotificationRow({
           {text}
         </span>
         {n.title && n.title !== text ? <span className="mt-0.5 block truncate text-xs text-text-2">{n.title}</span> : null}
-        <span className="mt-1 flex items-center gap-2 text-xs text-text-3">
+        <span className="mt-1 block text-xs text-text-3">
           <time dateTime={n.createdAt}>{timeAgo(n.createdAt)}</time>
-          {unread ? <span className="font-semibold text-brand-text">New</span> : null}
         </span>
       </span>
     </>
@@ -173,8 +175,10 @@ function NotificationRow({
     href && 'hover:bg-surface-2',
   );
 
+  // One unread signal per row: the dot beside the menu. The text reads in
+  // text-1 while unread and settles to text-2 once seen; nothing else is tinted.
   return (
-    <li className={cx('flex items-start pr-1 transition-colors dur-2', unread && 'bg-brand-soft/40')}>
+    <li className="flex items-start pr-1">
       {href ? (
         <Link
           to={href}
@@ -190,7 +194,7 @@ function NotificationRow({
         <div className={rowCls}>{body}</div>
       )}
       <span className="flex items-center gap-1 self-center">
-        {unread ? <span aria-hidden="true" className="h-2 w-2 rounded-full bg-brand" /> : null}
+        {unread ? <span role="img" aria-label="Unread" className="h-2 w-2 rounded-full bg-brand" /> : null}
         <Menu items={items} label="Notification options" size={44} />
       </span>
     </li>
@@ -326,9 +330,22 @@ export default function Notifications() {
   return (
     <>
       {/* The action lives in the page header on every viewport (top bar on phones); the phone
-          row below only repeats the unread count, so there is one "Mark all read" on screen. */}
-      <PageHeader title="Notifications" subtitle={subtitle} actions={unreadCount > 0 ? markAllButton('md') : undefined} mobileActions={unreadCount > 0 ? markAllButton('sm') : null} />
-      <div className="w-full max-w-form space-y-4">
+          row below only repeats the unread count, so there is one "Mark all read" on screen.
+          The Inbox hub band carries the unread count as its one figure; at zero it says so
+          instead of drawing a 0. */}
+      <PageHeader
+        title="Notifications"
+        subtitle={subtitle}
+        actions={unreadCount > 0 ? markAllButton('md') : undefined}
+        mobileActions={unreadCount > 0 ? markAllButton('sm') : null}
+        band={{
+          context: todayLine(),
+          figure: unreadCount,
+          figureLabel: 'unread',
+          children: query.isSuccess ? <p className="text-sm text-band-ink-2">You are all caught up.</p> : undefined,
+        }}
+      />
+      <div className="w-full max-w-form space-y-section">
         {query.isSuccess && notifications.length > 0 && subtitle ? (
           <p className="flex min-h-10 items-center text-sm text-text-2 lg:hidden">{subtitle}</p>
         ) : null}
@@ -350,7 +367,7 @@ export default function Notifications() {
 
         {groups.map((g) => (
           <section key={g.label} aria-labelledby={`notif-${g.label.replace(/\s/g, '-')}`} className="space-y-2">
-            <h2 id={`notif-${g.label.replace(/\s/g, '-')}`} className="type-label px-1 text-text-2">
+            <h2 id={`notif-${g.label.replace(/\s/g, '-')}`} className="type-heading px-1 text-md text-text-1">
               {g.label}
             </h2>
             <Card padded={false} className="overflow-hidden">

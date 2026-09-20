@@ -3,22 +3,26 @@ import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useDebounced, type Post, type PublicUser } from '../lib/hooks';
-import { ButtonLink, Callout, EmptyState, ErrorState, PageHeader, SearchField, Tabs, cx } from './ui';
-import { Award } from './icons';
+import { ButtonLink, Callout, EmptyState, ErrorState, PageHeader, SearchField, SegmentedControl, cx } from './ui';
+import { Award, Search as SearchIcon } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
 import { SuggestionList } from './SuggestionRow';
 
 type TabKey = 'recommended' | 'trending' | 'people' | 'coaches';
 
+/** The old Discover page is this hub's people tab, so it keeps that name. */
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'recommended', label: 'For you' },
   { key: 'trending', label: 'Trending' },
-  { key: 'people', label: 'People' },
+  { key: 'people', label: 'Discover' },
   { key: 'coaches', label: 'Coaches' },
 ];
 
 const isTabKey = (v: string): v is TabKey => TABS.some((t) => t.key === v);
+
+/** The band's context line: "Saturday, 20 September" in the viewer's locale. */
+const todayLine = () => new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 
 function PostList({
   queryKey,
@@ -150,9 +154,24 @@ export default function Discover() {
 
   return (
     <>
-      <PageHeader title="Explore" subtitle="Fresh posts, trending workouts and people worth following." />
-      <div className="w-full max-w-form space-y-4">
-        <Tabs
+      {/* The Explore hub wears the band; the shell renders it. Its one action is the search
+          the hub is for, so the page body keeps to tonal controls. */}
+      <PageHeader
+        title="Explore"
+        subtitle="Fresh posts, trending workouts and people worth following."
+        band={{
+          context: todayLine(),
+          children: <p className="text-sm text-band-ink-2">Fresh posts, trending workouts and people worth following.</p>,
+          action: (
+            <ButtonLink to="/search" variant="primary" size="lg" icon={<SearchIcon size={18} />}>
+              Search Vybe
+            </ButtonLink>
+          ),
+        }}
+      />
+      <div className="w-full max-w-form space-y-section">
+        {/* One underline row per screen: the hub's section tabs. These are a segmented control. */}
+        <SegmentedControl
           aria-label="Explore"
           tabs={TABS.map((t) => ({ key: t.key, label: t.label }))}
           value={tab}
