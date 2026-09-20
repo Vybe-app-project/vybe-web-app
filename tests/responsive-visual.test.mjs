@@ -279,7 +279,8 @@ test('Notifications has one Mark-all-read control per viewport and PageHeader ho
   assert.equal((page.match(/markAllButton\('(?:sm|md)'\)/g) || []).length, 2, 'md for desktop header, sm for the phone top bar');
   assert.match(page, /mobileActions=\{unreadCount > 0 \? markAllButton\('sm'\) : null\}/);
   assert.doesNotMatch(page, /lg:hidden">[\s\S]{0,200}markAllButton/, 'the inline phone row must not repeat the button');
-  assert.match(ui, /actions: mobileActions === undefined \? actions : mobileActions/);
+  // PageHeader lives in PageChrome.tsx (ui.tsx re-exports it) since the Instagram rebuild.
+  assert.match(read('src/components/PageChrome.tsx'), /actions: mobileActions === undefined \? actions : mobileActions/);
 });
 
 test('page-level "+" actions use the quiet icon button; the Log circle is the only primary in the bar and shows a plus', () => {
@@ -479,7 +480,7 @@ test('a sparkline with no data or a flat series draws a quiet dashed baseline, n
   assert.match(ui, /export function ChartEmpty\(/);
 });
 
-test('dark surfaces step >=1.2:1 apart, tertiary text stays >=4.5:1 on the lightest, and light cards are tonal', () => {
+test('dark surfaces step >=1.2:1 apart, tertiary text stays >=4.5:1 on the lightest, and cards carry a hairline in both themes', () => {
   const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const lin = (c) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
   const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
@@ -495,33 +496,60 @@ test('dark surfaces step >=1.2:1 apart, tertiary text stays >=4.5:1 on the light
   assert.ok(ratio(text3, s3) >= 4.5, `dark text-3 on surface-3: ${ratio(text3, s3).toFixed(2)}`);
   const control = dark.match(/--control-border: (#[0-9a-f]{6});/)[1];
   assert.ok(ratio(control, s2) >= 3, `dark control-border on surface-2: ${ratio(control, s2).toFixed(2)}`);
-  // Light level-1 cards: no line, shadow only; dark rebinds the switch to the hairline; the admin console keeps its edge.
-  assert.match(css, /--card-border-light: transparent;/);
+  // Cards keep a 1 px hairline in BOTH themes (Instagram web boxes its modules with #dbdbdb on white); the 5 % ring that
+  // was the light card's only edge (1.12:1) is gone from --shadow-1. The admin console keeps its own edge.
+  const light = css.slice(css.indexOf(':root {'), css.indexOf('.dark {'));
+  assert.match(light, /--card-border-light: var\(--line\);/);
+  assert.match(light, /--shadow-1: 0 1px 2px rgba\(0, 0, 0, 0\.04\);/);
+  assert.doesNotMatch(light, /0 0 0 1px rgba\(0, 0, 0, 0\.05\)/, 'the 5 % ring is gone');
   assert.match(dark, /--card-border-light: var\(--line\);/);
   assert.match(css, /@utility card \{[\s\S]*?border: 1px solid var\(--card-border-light, var\(--line\)\);/);
   assert.match(adminCss, /--card-border-light: var\(--line\);/);
-  // Fluid scale tokens exist and are mirrored into Tailwind utilities.
-  for (const token of ['--gutter', '--section-gap', '--text-h1', '--text-stat', '--text-band', '--text-figure']) {
-    assert.match(css, new RegExp(`^  ${token}: clamp\\(`, 'm'), `${token} is a clamp()`);
-  }
+  // Space is fixed, as Instagram's (16 px gutters on phones, 24 from lg; 24 between sections); the one clamp left is the hero metric.
+  assert.match(light, /^  --gutter: 16px;$/m);
+  assert.match(css, /@media \(min-width: 64rem\) \{ :root \{ --gutter: 24px; \} \}/);
+  assert.match(light, /^  --section-gap: 24px;$/m);
+  assert.match(light, /^  --text-stat: clamp\(2rem, 1\.5rem \+ 1\.5vw, 2\.75rem\);$/m);
+  for (const token of ['--text-h1', '--text-band', '--text-figure']) assert.doesNotMatch(css, new RegExp(`${token}\\b`), `${token} (the unshipped fluid set) is gone`);
   assert.match(css, /--spacing-gutter: var\(--gutter\); --spacing-section: var\(--section-gap\);/);
-  assert.match(css, /--text-band: var\(--text-band\); --text-band--line-height: 1;/);
+  assert.match(css, /--text-stat: var\(--text-stat\); --text-stat--line-height: 1;/);
+  // The six type roles, on the 4 px grid, overridable by a text-* utility (components layer).
+  assert.match(css, /@layer components \{[\s\S]*?\.t-title \{ font-size: var\(--text-lg\); line-height: 1\.6rem; font-weight: 600;/);
+  for (const role of ['t-section', 't-body', 't-name', 't-meta', 't-metric']) assert.match(css, new RegExp(`^  \\.${role} \\{`, 'm'), `.${role} exists`);
 });
 
-test('the gym band collapses on a scroll timeline, or a passive listener, and never animates layout', () => {
-  const band = read('src/components/GymBand.tsx');
-  const hook = read('src/lib/gymBand.ts');
-  assert.match(band, /className=\{cx\('gym-band dark', className\)\}/, 'dark in both themes, like AuthShell');
-  assert.match(css, /@property --band-p \{ syntax: '<number>'; inherits: true; initial-value: 0; \}/);
-  assert.match(css, /\.gym-band\[data-collapse='css'\] \{\s*animation: band-collapse linear both;\s*animation-timeline: scroll\(\);/);
-  assert.match(css, /\.gym-band\[data-collapse='none'\]\[data-collapsed='true'\] \{ --band-p: 1; \}/);
-  assert.match(hook, /CSS\.supports\('animation-timeline: scroll\(\)'\)/);
-  assert.match(hook, /addEventListener\('scroll', onScroll, \{ passive: true \}\)/);
-  assert.match(hook, /requestAnimationFrame\(update\)/);
-  const bandRules = css.slice(css.indexOf('.gym-band {'), css.indexOf('/* ------------------------------------------------------------------ recharts */'));
-  assert.doesNotMatch(bandRules, /transition:[^;]*\b(height|width|top|margin|padding)\b/, 'no layout property animates');
-  // Copy sits on the scrim; the no-gym state is a designed state, not a hole.
-  assert.match(band, /kicker: 'Find your gym',\s*title: 'Train somewhere\?',\s*body: 'Pick your gym and Vybe fills with the people who train there\.',/);
-  assert.match(band, /if \(!text \|\| \/\^0\+\$\/\.test\(text\)\) return null;/, 'never "0 training today"');
-  assert.match(band, /const hasFigure = typeof figure === 'number' && Number\.isFinite\(figure\) && figure > 0;/, 'the figure draws only above zero');
+test('the gym is a pure-props GymHeader that reserves its geometry and never draws a zero; the collapsing band is gone', () => {
+  const header = read('src/components/GymHeader.tsx');
+  const helpers = read('src/components/GymBand.tsx');
+  // Pure props: pages call useHomeGym() or bandGymOf() and pass the result; no query and no capability reader inside.
+  assert.match(header, /variant: 'compact' \| 'profile';/);
+  assert.match(header, /gym: GymBandGym \| null;/);
+  assert.match(header, /stats\?: GymHeaderStats;/);
+  assert.doesNotMatch(header, /\buse(HomeGym|Query|Auth|LiveEnabled)\(|from '\.\.\/lib\/(homeGym|hooks|capabilities|auth)'/);
+  // Compact: a 72 px row with a 48 px crest; no gym is one 48 px hairline row, never a hero; the skeleton is the same 72 px row.
+  assert.match(header, /const ROW = 'flex items-center gap-3 border-b border-line px-4 lg:px-6';/);
+  assert.equal((header.match(/cx\(ROW, 'h-18', className\)/g) || []).length, 2, 'the compact row and its skeleton share the 72 px geometry');
+  assert.match(header, /cx\(ROW, 'pressable h-12 text-text-1', className\)/, 'no gym: one 48 px row');
+  assert.doesNotMatch(header, /Train somewhere\?/, 'the hero copy is gone');
+  // Profile: an 88 px crest with three metrics beside it, the name block reserved at two lines, buttons full width; the banner is opt-in, reserved, and scrolls away.
+  assert.match(header, /h-22 w-22/);
+  assert.match(header, /grid min-w-0 flex-1 grid-cols-3 gap-2/);
+  assert.match(header, /mt-3 min-h-12/);
+  assert.match(header, /aspect-\[3\/1\]/);
+  assert.doesNotMatch(header, /sticky|useBandCollapse|--band-p/);
+  // Zero rule: hasMetric guards every number; a stat that is not a metric leaves its column empty; StatTile, StatStrip, Ring and Metric take a fallback.
+  assert.match(ui, /export function hasMetric\(v: unknown\): v is number \{\s*return typeof v === 'number' && Number\.isFinite\(v\) && v > 0;/);
+  assert.match(header, /hasMetric\(gym\.memberCount\) \? memberCountLabel\(gym\.memberCount\) : null/);
+  assert.match(read('src/components/Metric.tsx'), /if \(isEmptyMetric\(value\)\) return fallback === undefined \? null : <>\{fallback\}<\/>;/);
+  assert.match(ui.slice(ui.indexOf('export function StatTile('), ui.indexOf('export function StatGrid(')), /fallback\?: ReactNode;/);
+  assert.match(ui, /export type StatStripItem = \{[\s\S]*?fallback\?: ReactNode;/);
+  assert.match(ui.slice(ui.indexOf('export function Ring('), ui.indexOf('export function Progress(')), /fallback\?: ReactNode;/);
+  // The copy helpers keep their honest rules; the band component, its collapse hook and every band token and rule are deleted.
+  assert.match(helpers, /kicker: 'Find your gym',\s*title: 'Train somewhere\?',\s*body: 'Pick your gym and Vybe fills with the people who train there\.',/);
+  assert.match(helpers, /if \(!text \|\| \/\^0\+\$\/\.test\(text\)\) return null;/, 'never "0 training today"');
+  assert.match(helpers, /export type GymBandGym = \{/);
+  assert.ok(!fs.existsSync(path.join(root, 'src/lib/gymBand.ts')), 'the collapse hook is deleted');
+  assert.doesNotMatch(css, /@property --band-p|band-collapse|\.gym-band\b|--band-h-|--band-ink|--band-chip|--band-scrim|--band-bar-h|--band-bg/);
+  assert.doesNotMatch(css, /transition:[^;]*\b(height|width|top|margin|padding)\b/, 'no layout property animates anywhere');
+  assert.doesNotMatch(ui, /transition:width/, 'nor in a component');
 });
