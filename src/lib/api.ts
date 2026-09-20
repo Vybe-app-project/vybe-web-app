@@ -154,6 +154,19 @@ export const adminApi = axios.create({ baseURL: API_BASE, timeout: 30000 });
 const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'];
 
 /**
+ * Public pages that need no session and must stay put when a stale stored
+ * token answers 401 (App's bootstrap GETs /users/me whenever a token is in
+ * storage). The one-click unsubscribe landing is mid-POST with a single-use
+ * token in its URL; a hard navigation would race that POST, copy the token
+ * into /login?next=, and re-POST it after sign-in. The token store is still
+ * cleared, useAuth settles to signed out, and the page offers sign-in itself.
+ */
+const NO_SESSION_PATHS = ['/email/unsubscribe'];
+
+const pathIsUnder = (pathname: string, paths: readonly string[]): boolean =>
+  paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+
+/**
  * Session-version invalidation: the API revokes tokens on password change,
  * "Sign out of all devices" on another device, or the 30-day expiry. This
  * runs outside React and the token is already gone, so it is a hard
@@ -169,10 +182,11 @@ function onUnauthorized(kind: 'user' | 'admin') {
   } else {
     const hadSession = !!tokenStore.get();
     tokenStore.clear();
-    if (!AUTH_PATHS.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))) {
-      if (hadSession) signOutReason.set('session-ended');
-      location.href = sessionExpiredLoginUrl(location.pathname, location.search);
-    }
+    if (pathIsUnder(location.pathname, AUTH_PATHS)) return;
+    if (hadSession) signOutReason.set('session-ended');
+    // A no-session page keeps its URL; the reason waits for the sign-in link it offers.
+    if (pathIsUnder(location.pathname, NO_SESSION_PATHS)) return;
+    location.href = sessionExpiredLoginUrl(location.pathname, location.search);
   }
 }
 

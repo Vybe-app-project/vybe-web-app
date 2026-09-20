@@ -400,10 +400,18 @@ test('settings covers privacy, per-device sessions, separate email preferences a
   assert.match(settings, /api\.post\('\/users\/unblock', \{ userId \}\)/);
   assert.match(settings, /<PrivacySection \/>/);
   // Email preferences read and write their own store and send only the changed keys.
-  assert.match(settings, /api\.get\('\/users\/email-preferences'\)/);
-  assert.match(settings, /api\.put\('\/users\/email-preferences', \{ notifications: patch \}\)/);
-  assert.match(settings, /save\.mutate\(changed\)/);
-  assert.match(settings, /qc\.setQueryData\(EMAIL_SETTINGS_KEY, settings\)/, 'a successful save must reset the dirty state');
+  // The card lives in its own file (Wave E notifications-and-email); Settings mounts it exactly once.
+  const email = read('src/pages/settings/EmailPreferencesSection.tsx');
+  assert.match(email, /api\.get\('\/users\/email-preferences'\)/);
+  assert.match(email, /api\.put\('\/users\/email-preferences', \{ notifications: patch \}\)/);
+  assert.match(email, /api\.put\('\/users\/email-preferences', \{ emailPaused \}\)/, 'the pause can move on its own');
+  assert.match(email, /save\.mutate\(changed\)/);
+  assert.match(email, /qc\.setQueryData\(EMAIL_SETTINGS_KEY, settings\)/, 'a successful save must reset the dirty state');
+  assert.match(email, /<SettingsCard id="email"/);
+  assert.match(email, /export function EmailPreferencesCard\(/, 'the pure card the render test mounts');
+  assert.match(settings, /import \{ EmailPreferencesSection \} from '\.\/settings\/EmailPreferencesSection';/);
+  assert.equal((settings.match(/<EmailPreferencesSection \/>/g) || []).length, 1, 'one mount point');
+  assert.doesNotMatch(settings, /function EmailPreferencesSection\(/, 'no inline copy of the card');
   assert.doesNotMatch(settings, /pickNotificationSettings\(next\)/, 'no card may replay the whole settings object');
   // Push toggles patch one key on the shared query with rollback.
   assert.match(settings, /save\.mutate\(\{ pauseAll: checked \}\)/);

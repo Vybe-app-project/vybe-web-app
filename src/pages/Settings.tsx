@@ -20,20 +20,16 @@ import {
 } from '../lib/trainerApplication';
 import { useAuth } from '../lib/auth';
 import {
-  DEFAULT_EMAIL_SETTINGS,
-  DEFAULT_NOTIFICATION_SETTINGS,
-  EMAIL_SETTING_KEYS,
-  NOTIFICATION_SETTING_KEYS,
+  EMPTY_NOTIFICATION_SETTINGS_RESPONSE,
+  NOTIFICATION_LABELS,
+  NOTIFICATION_SETTING_GROUPS,
   displayName,
   isPasswordValid,
   passwordRules,
-  pickEmailSettings,
-  pickNotificationSettings,
+  pickNotificationSettingsResponse,
   usernameError,
-  type EmailSettingKey,
-  type EmailSettings,
-  type NotificationSettingKey,
   type NotificationSettings,
+  type NotificationSettingsResponse,
   type PublicUser,
 } from '../lib/hooks';
 import {
@@ -56,27 +52,9 @@ import { Award, ChevronRight, ExternalLink, FileText, LifeBuoy, Lock, LogOut, Mo
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
 import { DataLifecycleSection } from './settings/DataLifecycleSection';
+import { EmailPreferencesSection } from './settings/EmailPreferencesSection';
+import { HydrationTimesEditor } from './settings/HydrationTimesEditor';
 import { LegalSection } from './settings/LegalSection';
-
-const NOTIFICATION_LABELS: Record<NotificationSettingKey, { title: string; hint: string }> = {
-  pauseAll: {
-    title: 'Pause all notifications',
-    hint: 'Temporarily stop every push notification from Vybe.',
-  },
-  messagesFromFollowing: {
-    title: 'Messages from people you follow',
-    hint: 'Direct messages from accounts you follow.',
-  },
-  messagesFromOthers: {
-    title: 'Messages from everyone else',
-    hint: 'Direct messages from accounts you do not follow.',
-  },
-  newFollowers: { title: 'New followers', hint: 'When someone follows you.' },
-  workoutPosts: { title: 'Workout posts', hint: 'Activity posts from people you follow.' },
-  likes: { title: 'Likes', hint: 'When someone likes your post or comment.' },
-  comments: { title: 'Comments', hint: 'When someone comments on your post.' },
-  friendRequests: { title: 'Friend requests', hint: 'Incoming and accepted friend requests.' },
-};
 
 /* ------------------------------------------------------------------ pieces */
 
@@ -624,7 +602,7 @@ function useNotificationSettings() {
     queryKey: NOTIFICATION_SETTINGS_KEY,
     queryFn: async () => {
       const { data } = await api.get('/notifications/settings');
-      return pickNotificationSettings(data.settings || data);
+      return pickNotificationSettingsResponse(data);
     },
   });
 }
@@ -632,7 +610,11 @@ function useNotificationSettings() {
 /**
  * Push preferences. Every switch reads from and writes to the shared query:
  * there is no per-card draft, and a save sends only the key that changed, so
- * nothing here can replay a stale value over another card's work.
+ * nothing here can replay a stale value over another card's work. The 17
+ * switches under "Pause all" are grouped the way the API gates them
+ * (lib/notificationSettings NOTIFICATION_SETTING_GROUPS); the water check-in
+ * times under the last group have their own editor and request
+ * (settings/HydrationTimesEditor.tsx) and land in the same query.
  */
 function NotificationsSection() {
   const toast = useToast();
@@ -642,12 +624,15 @@ function NotificationsSection() {
   const save = useMutation({
     mutationFn: async (patch: Partial<NotificationSettings>) => {
       const { data } = await api.put('/notifications/settings', patch);
-      return pickNotificationSettings(data.settings || { ...settingsQuery.data, ...patch });
+      return pickNotificationSettingsResponse(data);
     },
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: NOTIFICATION_SETTINGS_KEY });
-      const previous = qc.getQueryData<NotificationSettings>(NOTIFICATION_SETTINGS_KEY);
-      qc.setQueryData<NotificationSettings>(NOTIFICATION_SETTINGS_KEY, (old) => ({ ...(old ?? DEFAULT_NOTIFICATION_SETTINGS), ...patch }));
+      const previous = qc.getQueryData<NotificationSettingsResponse>(NOTIFICATION_SETTINGS_KEY);
+      qc.setQueryData<NotificationSettingsResponse>(NOTIFICATION_SETTINGS_KEY, (old) => {
+        const base = old ?? EMPTY_NOTIFICATION_SETTINGS_RESPONSE;
+        return { ...base, settings: { ...base.settings, ...patch } };
+      });
       return { previous };
     },
     onSuccess: (settings) => qc.setQueryData(NOTIFICATION_SETTINGS_KEY, settings),
@@ -660,7 +645,7 @@ function NotificationsSection() {
   if (settingsQuery.isLoading) {
     return (
       <SettingsCard id="notifications" title="Notifications">
-        <RowsSkeleton rows={5} height="h-12" />
+        <RowsSkeleton rows={8} height="h-12" />
       </SettingsCard>
     );
   }
@@ -673,9 +658,10 @@ function NotificationsSection() {
     );
   }
 
-  const value = settingsQuery.data || DEFAULT_NOTIFICATION_SETTINGS;
+  const response = settingsQuery.data ?? EMPTY_NOTIFICATION_SETTINGS_RESPONSE;
+  const value = response.settings;
   const paused = value.pauseAll === true;
-  const rest = NOTIFICATION_SETTING_KEYS.filter((k) => k !== 'pauseAll');
+  const hydrationTimes = response.hydrationReminders?.times ?? [];
 
   return (
     <SettingsCard id="notifications" title="Notifications" description="Choose what Vybe is allowed to notify you about. Changes save automatically.">
@@ -691,95 +677,37 @@ function NotificationsSection() {
           All notifications are paused. Turn “Pause all notifications” off to adjust the individual settings.
         </Callout>
       ) : null}
-      <div className="mt-1 divide-y divide-line border-t border-line">
-        {rest.map((key) => (
-          <ToggleRow
-            key={key}
-            title={NOTIFICATION_LABELS[key].title}
-            hint={NOTIFICATION_LABELS[key].hint}
-            checked={value[key]}
-            disabled={save.isPending || paused}
-            onChange={(checked) => save.mutate({ [key]: checked } as Partial<NotificationSettings>)}
-          />
+      <div className="mt-2 space-y-3">
+        {NOTIFICATION_SETTING_GROUPS.map((group) => (
+          <div key={group.id} role="group" aria-labelledby={`notifications-${group.id}-title`} className="border-t border-line pt-3">
+            <h3 id={`notifications-${group.id}-title`} className="type-label text-text-2">
+              {group.title}
+            </h3>
+            <div className="divide-y divide-line">
+              {group.keys.map((key) => (
+                <div key={key}>
+                  <ToggleRow
+                    title={NOTIFICATION_LABELS[key].title}
+                    hint={NOTIFICATION_LABELS[key].hint}
+                    checked={value[key]}
+                    disabled={save.isPending || paused}
+                    onChange={(checked) => save.mutate({ [key]: checked } as Partial<NotificationSettings>)}
+                  />
+                  {key === 'hydration' ? (
+                    <HydrationTimesEditor
+                      times={hydrationTimes}
+                      hydrationOn={value.hydration}
+                      quietHours={response.quietHours}
+                      disabled={paused || save.isPending}
+                      onSaved={(next) => qc.setQueryData(NOTIFICATION_SETTINGS_KEY, next)}
+                    />
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
-    </SettingsCard>
-  );
-}
-
-/* ------------------------------------------------------------------ email */
-
-const EMAIL_SETTINGS_KEY = ['email-preferences'] as const;
-
-/**
- * Email is its own store on the API (settings.emailNotifications). Until it
- * was, this card wrote the push object with every key from a draft taken at
- * page load, so "Save email preferences" silently flipped push switches back.
- * The draft here holds only the keys the user touched.
- */
-function EmailPreferencesSection() {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const [draft, setDraft] = useState<Partial<EmailSettings>>({});
-
-  const settingsQuery = useQuery({
-    queryKey: EMAIL_SETTINGS_KEY,
-    queryFn: async () => {
-      const { data } = await api.get('/users/email-preferences');
-      return pickEmailSettings(data.settings || data);
-    },
-  });
-
-  const base = settingsQuery.data || DEFAULT_EMAIL_SETTINGS;
-  const value: EmailSettings = { ...base, ...draft };
-  const changed = Object.fromEntries(
-    EMAIL_SETTING_KEYS.filter((k) => value[k] !== base[k]).map((k) => [k, value[k]]),
-  ) as Partial<EmailSettings>;
-  const dirty = Object.keys(changed).length > 0;
-
-  const save = useMutation({
-    mutationFn: async (patch: Partial<EmailSettings>) => {
-      const { data } = await api.put('/users/email-preferences', { notifications: patch });
-      return pickEmailSettings(data.settings || { ...base, ...patch });
-    },
-    onSuccess: (settings) => {
-      qc.setQueryData(EMAIL_SETTINGS_KEY, settings);
-      setDraft({});
-      toast.success('Email preferences saved');
-    },
-    onError: (e) => toast.error(errMsg(e, 'Could not save your email preferences.')),
-  });
-
-  return (
-    <SettingsCard id="email" title="Email preferences" description="Which of these updates you also receive by email. Separate from push notifications.">
-      {settingsQuery.isLoading ? (
-        <RowsSkeleton rows={4} height="h-12" />
-      ) : settingsQuery.isError ? (
-        <ErrorState title="Preferences unavailable" error={settingsQuery.error} retry={() => void settingsQuery.refetch()} />
-      ) : (
-        <>
-          <div className="divide-y divide-line">
-            {EMAIL_SETTING_KEYS.map((key: EmailSettingKey) => (
-              <ToggleRow
-                key={key}
-                title={NOTIFICATION_LABELS[key].title}
-                hint={NOTIFICATION_LABELS[key].hint}
-                checked={value[key]}
-                disabled={save.isPending}
-                onChange={(checked) => setDraft((d) => ({ ...d, [key]: checked }))}
-              />
-            ))}
-          </div>
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-xs text-text-3" aria-live="polite">
-              {dirty ? 'You have unsaved changes.' : 'Up to date.'}
-            </p>
-            <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate(changed)}>
-              Save email preferences
-            </Button>
-          </div>
-        </>
-      )}
     </SettingsCard>
   );
 }
