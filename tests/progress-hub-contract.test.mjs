@@ -26,6 +26,7 @@ const prefs = read('src/pages/SettingsPreferences.tsx');
 const logs = read('src/pages/WorkoutLogs.tsx');
 const caps = read('src/lib/capabilities.ts');
 const types = read('src/lib/accountTypes.ts');
+const calendar = read('src/pages/progress/TrainingCalendar.tsx');
 
 test('the route and its entry points are registered, and every one hides behind features.progression', () => {
   assert.match(app, /lazyPage\('\/workouts\/progress', \(\) => import\('\.\/pages\/WorkoutProgress'\)\)/);
@@ -49,8 +50,16 @@ test('the route and its entry points are registered, and every one hides behind 
   // WorkoutLogs: the button and the invalidation.
   assert.match(logs, /const progressionEnabled = useFeature\('progression'\);/);
   assert.match(logs, /\{progressionEnabled \? \(\s*<ButtonLink to="\/workouts\/progress" variant="secondary" icon=\{<TrendingUp size=\{18\} \/>\}>\s*View progress\s*<\/ButtonLink>\s*\) : null\}/);
-  assert.match(logs, /qc\.invalidateQueries\(\{ queryKey: \['workout-progress'\] \}\);/);
+  // Both writers of the log invalidate the hub: the save path and the delete path (the hub's queries carry a 60 s staleTime).
+  assert.equal(count(logs, /qc\.invalidateQueries\(\{ queryKey: \['workout-progress'\] \}\);/g), 2, 'save and delete both invalidate the hub');
   assert.match(logs, /\^day-\\d\{4\}-\\d\{2\}-\\d\{2\}\$/, 'the #day-<date> deep link from a calendar cell');
+  // A #day- target the loaded window does not reach gets an honest line instead of a silent landing at the top.
+  assert.match(logs, /const missingDay = useMemo\(/);
+  assert.match(logs, /groups\.some\(\(g\) => g\.key === match\[1\]\)/);
+  assert.match(logs, /Boolean\(data\.hasNextPage\) && !!oldest && day < startOfDay\(oldest\)/);
+  assert.match(logs, /data-testid="log-day-missing"/);
+  assert.match(logs, /is further back than the latest \$\{formatStat\(logs\.length\)\} sessions shown here\./);
+  assert.match(logs, /No sessions on \$\{missingDay\.label\} in this log\./);
   // Today's stats stay as they were.
   assert.match(logs, /qc\.invalidateQueries\(\{ queryKey: \['workout-logs'\] \}\);/);
   assert.match(logs, /api\.get<LogsResponse>\('\/workouts\/logs', \{ params: \{ page: 1, limit: 100 \} \}\)/);
@@ -86,6 +95,20 @@ test('each records route is called once, with the API\'s raw timezone offset; th
   assert.match(page, /calendar\.isError && isFeatureDisabled\(calendar\.error\)/);
   assert.match(page, /PROGRESS_STRINGS\.yearFallback/);
   assert.match(page, /YEAR_FALLBACK/, 'the Year chip reads the quarter summary');
+  // The label under the chips names the summary's window (the quarter on Year); the year range sits on the calendar card alone.
+  assert.match(page, /const label = periodLabel\(range\);/);
+  assert.doesNotMatch(page, /periodLabel\(period === 'year' \? yearRange : range\)/);
+  assert.match(page, /calendarHidden \? PROGRESS_STRINGS\.yearAllQuarterNote : PROGRESS_STRINGS\.yearSummaryNote/);
+  assert.match(page, /const heatRangeLabel = heatRange === yearRange \? periodLabel\(yearRange\) : null;/);
+  assert.match(page, /rangeLabel=\{heatRangeLabel\}/);
+  // The heatmap: a non-colour cue on every trained level, 24 px-clear targets under a coarse pointer, and the newest week in view.
+  assert.match(calendar, /0: 'border border-line bg-surface-2',/);
+  for (const level of ['1', '2', '3']) assert.match(calendar, new RegExp(`${level}: 'border border-brand-text bg-brand`), `level ${level} carries the outline cue`);
+  assert.match(calendar, /const CELL = 'size-3 pointer-coarse:size-5 rounded-\[3px\]';/);
+  assert.match(calendar, /const GAP = 'gap-1 pointer-coarse:gap-1\.5';/);
+  assert.match(calendar, /const COLS = 'auto-cols-\[0\.75rem\] pointer-coarse:auto-cols-\[1\.25rem\]';/);
+  assert.match(calendar, /if \(el\) el\.scrollLeft = el\.scrollWidth;/);
+  assert.match(calendar, /\}, \[range\.from, range\.to, grid\.columns\.length\]\);/);
   assert.match(sheet, /params: \{ exerciseId: id, page: 1, limit: 100 \}/);
   assert.match(sheet, /enabled: open && preferences\.progressionHints,/, '/previous is read only while Suggestions is on');
   assert.match(sheet, /previous\.data\?\.suggested \?\? null/, 'a missing key draws no line');

@@ -20,6 +20,7 @@ import { formatSeconds } from '../lib/duration';
 import {
   Badge,
   Button,
+  Callout,
   Card,
   ConfirmDialog,
   DateField,
@@ -585,6 +586,8 @@ export default function WorkoutLogs() {
     onSettled: () => {
       setPendingDelete(null);
       qc.invalidateQueries({ queryKey: ['workout-logs'] });
+      // The progress hub's tiles, calendar, movements and records count this session too.
+      qc.invalidateQueries({ queryKey: ['workout-progress'] });
     },
   });
 
@@ -646,7 +649,20 @@ export default function WorkoutLogs() {
     return out;
   }, [logs]);
 
-  // A calendar cell on the progress hub links to /workouts/logs#day-<yyyy-MM-dd>; land on that day once the list has rendered.
+  // A calendar cell on the progress hub links to /workouts/logs#day-<yyyy-MM-dd>. This list holds the
+  // latest 100 sessions only, so a day past that window (or one emptied since) has no heading to land on;
+  // say so instead of leaving the member at the top of the log wondering.
+  const missingDay = useMemo(() => {
+    const match = /^#day-(\d{4}-\d{2}-\d{2})$/.exec(hash);
+    if (!match || !data || !logs.length || groups.some((g) => g.key === match[1])) return null;
+    const day = parseISO(match[1]);
+    if (!isValid(day)) return null;
+    const oldest = parseDate(logs[logs.length - 1].date);
+    const beyondWindow = Boolean(data.hasNextPage) && !!oldest && day < startOfDay(oldest);
+    return { label: format(day, 'EEEE d MMMM yyyy'), beyondWindow };
+  }, [hash, data, logs, groups]);
+
+  // Land on that day once the list has rendered.
   useEffect(() => {
     const id = hash.replace(/^#/, '');
     if (!/^day-\d{4}-\d{2}-\d{2}$/.test(id) || !groups.length) return;
@@ -765,6 +781,15 @@ export default function WorkoutLogs() {
         />
       ) : (
         <div className="space-y-6">
+          {missingDay ? (
+            <Callout tone="info">
+              <p role="status" data-testid="log-day-missing">
+                {missingDay.beyondWindow
+                  ? `${missingDay.label} is further back than the latest ${formatStat(logs.length)} sessions shown here.`
+                  : `No sessions on ${missingDay.label} in this log.`}
+              </p>
+            </Callout>
+          ) : null}
           {groups.map((g) => (
             <section key={g.key} aria-labelledby={`day-${g.key}`} className="space-y-3">
               <div className="flex items-baseline justify-between gap-3">

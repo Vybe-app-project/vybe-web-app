@@ -40,8 +40,10 @@ import { ExerciseTrendSheet } from './progress/ExerciseTrendSheet';
  * /workouts/logs. Nothing here fetches until the flag has answered true.
  *
  * Windows: GET /workouts/records/summary is capped at 92 days, so the Year
- * chip reads the 3-month summary for sets, muscle groups, movements and
- * records and says so; the heatmap alone reads GET /workouts/records/calendar
+ * chip reads the 3-month summary for every tile and list and says so: the
+ * label under the chips is always the summary's own window, and the year
+ * range is printed on the calendar card alone, the one card that covers it.
+ * The heatmap reads GET /workouts/records/calendar
  * (365 days), which the server keeps behind the flag per caller. A 404
  * FEATURE_DISABLED there (a rollout bucket, a 30 s cache window) degrades to
  * `summary.byDay` with an honest line, never an error.
@@ -129,7 +131,10 @@ export default function WorkoutProgress() {
   const heatDays = period === 'year' && calendar.data ? calendar.data.days : summary.data?.byDay;
   const heatRange = period === 'year' && calendar.data ? yearRange : range;
   const calendarNote = calendarHidden ? PROGRESS_STRINGS.yearFallback : null;
-  const label = periodLabel(period === 'year' ? yearRange : range);
+  // The label names the window the tiles and lists actually cover; on Year that is the quarter.
+  const label = periodLabel(range);
+  const yearNote = period === 'year' ? (calendarHidden ? PROGRESS_STRINGS.yearAllQuarterNote : PROGRESS_STRINGS.yearSummaryNote) : null;
+  const heatRangeLabel = heatRange === yearRange ? periodLabel(yearRange) : null;
 
   const data = summary.data;
   const nothingLogged = !!data && data.sessions === 0 && (data.prs?.length ?? 0) === 0;
@@ -150,7 +155,7 @@ export default function WorkoutProgress() {
         />
         <p className="text-xs text-text-2">
           {label}
-          {period === 'year' ? <span className="block text-text-3 sm:ml-2 sm:inline">{PROGRESS_STRINGS.yearSummaryNote}</span> : null}
+          {yearNote ? <span className="block text-text-3 sm:ml-2 sm:inline">{yearNote}</span> : null}
         </p>
       </div>
 
@@ -165,7 +170,7 @@ export default function WorkoutProgress() {
       ) : calendarFailed ? (
         <ErrorState error={calendar.error} title="Could not load your training days" onRetry={() => calendar.refetch()} />
       ) : heatDays || !summary.isError ? (
-        <TrainingCalendar range={heatRange} days={heatDays} note={calendarNote} />
+        <TrainingCalendar range={heatRange} days={heatDays} rangeLabel={heatRangeLabel} note={calendarNote} />
       ) : null}
 
       {summary.isPending ? (

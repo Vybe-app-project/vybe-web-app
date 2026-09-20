@@ -90,7 +90,17 @@ test('TrainingCalendar: one cell per day with data-level and a spoken label; tra
   assert.ok(html.includes('3 Sep, 2 sessions'));
   assert.ok(html.includes('0 · 1 · 2 · 3+ sessions'), 'the legend');
   assert.ok(html.includes('3 training days · 7 sessions'));
-  assert.ok(html.includes('bg-brand/25') && html.includes('bg-brand/55') && html.includes('bg-brand"'), 'the brand ramp');
+  assert.ok(html.includes('bg-brand/45') && html.includes('bg-brand/75') && html.includes('bg-brand"'), 'the brand ramp');
+  // Colour is not the only cue: rest days are hollow on the hairline, every trained level carries the brand-text outline.
+  assert.match(html, /data-level="0"[^>]*class="[^"]*border-line[^"]*bg-surface-2/);
+  assert.doesNotMatch(html, /data-level="0"[^>]*class="[^"]*border-brand-text/);
+  assert.match(html, /data-level="1"[^>]*class="[^"]*border-brand-text[^"]*bg-brand\/45/);
+  assert.match(html, /data-level="2"[^>]*class="[^"]*border-brand-text[^"]*bg-brand\/75/);
+  assert.match(html, /data-level="3"[^>]*class="[^"]*border-brand-text[^"]*bg-brand"/);
+  assert.equal(count(html, 'pointer-coarse:size-5'), 10 + 4 + count(html, 'aria-hidden="true" class="size-3'), 'every cell and legend swatch grows under a coarse pointer');
+  assert.ok(!html.includes('Sep 2025'), 'no range label unless the caller passes one');
+  const labelled = render(h(TrainingCalendar, { range, days, rangeLabel: '1 Sep 2026–10 Sep 2026', now: NOW }));
+  assert.ok(labelled.includes('1 Sep 2026–10 Sep 2026 · 3 training days · 7 sessions'), 'the range label leads the subtitle when given');
   assert.doesNotMatch(html, VERDICT_CLASS);
   assert.ok(!html.includes('NaN'));
 
