@@ -341,7 +341,7 @@ export default function Notifications() {
         band={{
           context: todayLine(),
           figure: unreadCount,
-          figureLabel: unreadCount === 1 ? 'unread' : 'unread',
+          figureLabel: 'unread',
           children: query.isSuccess ? <p className="text-sm text-band-ink-2">You are all caught up.</p> : undefined,
         }}
       />
