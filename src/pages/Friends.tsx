@@ -17,8 +17,8 @@ import {
   Menu,
   PageHeader,
   SearchField,
+  SegmentedControl,
   SkeletonRow,
-  Tabs,
   cx,
   useToast,
 } from './ui';
@@ -281,15 +281,20 @@ export default function Friends() {
   const searching = peopleQuery.trim().length >= 1;
 
   return (
-    <div className="mx-auto w-full max-w-[52rem] space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Friends"
         subtitle="Your circle, plus the requests waiting on you."
-        actions={
-          <ButtonLink to="/discover" variant="secondary" icon={<Compass size={18} />}>
-            Explore people
-          </ButtonLink>
-        }
+        band={{
+          context: friends.data?.length ? 'Your circle, plus the requests waiting on you' : 'Find the people you train with',
+          figure: friends.data?.length ?? null,
+          figureLabel: 'friends',
+          action: (
+            <ButtonLink to="/discover" variant="primary" size="lg" icon={<Compass size={18} />}>
+              Explore people
+            </ButtonLink>
+          ),
+        }}
         mobileActions={
           <IconButton to="/discover" label="Explore people">
             <Compass size={22} />
@@ -366,7 +371,7 @@ export default function Friends() {
           heading="For you"
           emptyState={
             <EmptyState
-              variant="first-run"
+              family="social"
               size="sm"
               title="Follow people from your gym or contacts"
               message="Suggestions appear here as people you may know join Vybe."
@@ -377,7 +382,7 @@ export default function Friends() {
       </Card>
 
       <section className="space-y-4" aria-label="Friends and requests">
-        <Tabs aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} size={compact ? 'sm' : 'md'} />
+        <SegmentedControl aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} size={compact ? 'sm' : 'md'} />
 
         <Card padded={false} className={cx('overflow-hidden', 'anim-fade-in')} key={tab}>
           {tab === 'friends' && (
@@ -401,9 +406,10 @@ export default function Friends() {
                     <EmptyState variant="no-results" size="sm" title="No friends match" message="Try a different name." />
                   ) : (
                     <EmptyState
-                      title="No friends yet"
-                      message="Search for people above, or explore who is training near you."
-                      action={{ label: 'Explore people', to: '/discover', icon: <Compass size={18} /> }}
+                      family="social"
+                      title="Add the people you train with"
+                      message="Search for them above, or explore who is training near you."
+                      action={{ label: 'Explore people', to: '/discover', variant: 'secondary', icon: <Compass size={18} /> }}
                     />
                   )
                 }

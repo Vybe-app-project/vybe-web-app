@@ -29,8 +29,11 @@ const hidden = await loadModule('src/lib/hiddenWords.ts');
 const a11y = await loadModule('src/lib/accessibility.ts');
 const types = await loadModule('src/lib/accountTypes.ts');
 
-/** controllers/userController.js SETTINGS_KEYS ('workout' joined in Wave F1, v2-be-progression; 'homeGym' in v2-be-home-gym — live on the deployed API, API.md §1). */
+/** controllers/userController.js SETTINGS_KEYS ('workout' joined in Wave F1, v2-be-progression;
+ *  'homeGym' in v2-be-home-gym -- live on the deployed API, gym-first API.md section 1). */
 const BACKEND_SETTINGS_KEYS = ['privacy', 'notifications', 'health', 'hiddenWords', 'commentDefault', 'units', 'locale', 'timezone', 'accessibility', 'workout', 'homeGym'];
+/** Kept as the allow-list name the literal-body check reads; homeGym is already in the list above. */
+const LIVE_SETTINGS_KEYS = BACKEND_SETTINGS_KEYS;
 
 /* ------------------------------------------------------------------ timezone */
 
@@ -210,7 +213,7 @@ test('every PUT /users/settings body the web sends is inside the backend allow-l
   for (const { file, arg } of callSites) {
     if (arg.startsWith('{')) {
       const first = arg.match(/^\{\s*([A-Za-z]+)/)?.[1];
-      assert.ok(first && BACKEND_SETTINGS_KEYS.includes(first), `${file}: literal body starts with "${first}", not an allow-listed key`);
+      assert.ok(first && LIVE_SETTINGS_KEYS.includes(first), `${file}: literal body starts with "${first}", not an allow-listed key`);
     } else {
       assert.equal(arg, 'patch', `${file}: a non-literal body must be the typed \`patch\` variable`);
       const source = read(file);
