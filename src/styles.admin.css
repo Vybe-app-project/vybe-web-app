@@ -68,6 +68,9 @@
   --shadow-3: 0 24px 48px -16px rgba(15, 23, 42, 0.24);
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 
+  /* the console keeps the 1 px card edge in light; the consumer app's light cards are tonal */
+  --card-border-light: var(--line);
+
   /* the console has no bottom nav; shared utilities that pad for it collapse */
   --nav-h: 0px;
 }
