@@ -31,6 +31,8 @@ import { describedByIds } from '../lib/a11y';
 import { useAuth } from '../lib/auth';
 import { toastViewportClass, upsertToast } from '../lib/toastPlacement';
 import { Brand, BrandMark, PairFigure } from './Brand';
+import { ILLUSTRATIONS } from './icons';
+import type { IllustrationFamily } from './icons';
 import {
   Alert as AlertIcon,
   Calendar as CalendarIcon,
@@ -52,11 +54,36 @@ import {
 } from './icons';
 
 export { Brand, BrandMark, PairFigure };
+/* Gym First foundation: the band, its map tile and the collapse hook live in their own files. */
+export { GymBand, NO_GYM_COPY, trainingTodayLine } from './GymBand';
+export type { GymBandGym, GymBandProps } from './GymBand';
+export { MapTile, osmHref } from './MapTile';
+export type { MapTileProps } from './MapTile';
+export { useBandCollapse } from '../lib/gymBand';
+export type { BandCollapse } from '../lib/gymBand';
+export type { IllustrationFamily } from './icons';
+import type { GymBandGym as GymBandGymType } from './GymBand';
 
 /* ================================================================== helpers */
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
+}
+
+/**
+ * Generated identity: one of five token gradient pairs (--identity-1..5) with
+ * its ink, picked by hashing an id or handle so a person or place always gets
+ * the same colour everywhere. The grey-initials tile is gone.
+ */
+export function identityIndex(seed?: string | null): 1 | 2 | 3 | 4 | 5 {
+  const text = (seed ?? '').trim() || '?';
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
+  return ((h % 5) + 1) as 1 | 2 | 3 | 4 | 5;
+}
+export function identityStyle(seed?: string | null): CSSProperties {
+  const n = identityIndex(seed);
+  return { background: `var(--identity-${n})`, color: `var(--identity-${n}-ink)` };
 }
 
 const ACRONYMS: Record<string, string> = {
@@ -337,6 +364,30 @@ export type PageChrome = {
   hideBottomNav?: boolean;
   /** Use the full content width (no feed max-width). */
   wide?: boolean;
+  /** Declares the hub band the shell renders above <main>. Omit for pages with no band. */
+  band?: PageBand;
+};
+
+/**
+ * What a page declares about its band; the shell merges it with the viewer's
+ * home gym and renders <GymBand>. Pages never render the band themselves.
+ */
+export type PageBand = {
+  variant?: 'full' | 'hub';
+  /** Overrides the band title; defaults to `title`. */
+  bandTitle?: string;
+  context?: string;
+  figure?: number | null;
+  figureLabel?: string;
+  figureUnit?: string;
+  action?: ReactNode;
+  secondaryAction?: ReactNode;
+  /** Rendered instead of the figure block when `figure` is falsy. */
+  children?: ReactNode;
+  /** Gym-scoped tabs rendered on the band itself. */
+  tabs?: ReactNode;
+  /** Page-supplied gym; when omitted the shell uses the viewer's home gym. */
+  gym?: GymBandGymType | null;
 };
 
 type PageChromeState = { chrome: PageChrome | null; set: (c: PageChrome | null) => void };
@@ -368,6 +419,7 @@ export function PageHeader({
   rail,
   wide,
   hideSectionTabs,
+  band,
   className,
   children,
 }: {
@@ -380,11 +432,13 @@ export function PageHeader({
   rail?: ReactNode | null;
   wide?: boolean;
   hideSectionTabs?: boolean;
+  /** The hub band this page wears; forwarded to the shell through usePageChrome. */
+  band?: PageBand;
   className?: string;
   children?: ReactNode;
 }) {
   // `mobileActions={null}` means "nothing in the top bar"; only undefined falls back to the desktop set.
-  usePageChrome({ title, subtitle, back, actions: mobileActions === undefined ? actions : mobileActions, rail, wide, hideSectionTabs });
+  usePageChrome({ title, subtitle, back, actions: mobileActions === undefined ? actions : mobileActions, rail, wide, hideSectionTabs, band });
   return (
     <header className={cx('mb-6 hidden items-end justify-between gap-4 lg:flex', className)}>
       <div className="min-w-0">
@@ -534,6 +588,7 @@ export function Avatar({
   className,
   ring,
   ringTone = 'brand',
+  seed,
 }: {
   src?: string | null;
   name?: string;
@@ -543,6 +598,8 @@ export function Avatar({
   /** Story ring: 2 px brand with an offset in the page background. */
   ring?: boolean;
   ringTone?: 'brand' | 'accent' | 'neutral';
+  /** Id or handle that picks the generated colour; falls back to the name. */
+  seed?: string | null;
 }) {
   const px = avatarPx(size);
   const [broken, setBroken] = useState(false);
@@ -592,15 +649,15 @@ export function Avatar({
       role="img"
       aria-label={alt || name || 'avatar'}
       title={name}
-      style={style}
-      className={cx(base, 'bg-surface-3 font-semibold text-text-2')}
+      style={{ ...style, ...identityStyle(seed || name) }}
+      className={cx(base, 'font-semibold')}
     >
       {initialsOf(name)}
     </span>
   );
 }
 
-type AvatarLike = { src?: string | null; name?: string };
+type AvatarLike = { src?: string | null; name?: string; seed?: string | null };
 
 /** Two overlapping avatars — "trained with". */
 export function AvatarPair({ a, b, size = 'md', className }: { a: AvatarLike; b: AvatarLike; size?: AvatarSize; className?: string }) {
@@ -1494,6 +1551,7 @@ export function Card({
   interactive = false,
   to,
   linkLabel,
+  container = false,
   children,
   ...rest
 }: HTMLAttributes<HTMLDivElement> & {
@@ -1502,10 +1560,12 @@ export function Card({
   interactive?: boolean;
   to?: string;
   linkLabel?: string;
+  /** `container-type: inline-size`, so the card's internals can reflow with `@sm:`/`@md:` by the card's own width. */
+  container?: boolean;
 }) {
   return (
     <div
-      className={cx('card', padded && 'p-4 sm:p-5', (interactive || to) && 'card-interactive', to && 'relative', className)}
+      className={cx('card', padded && 'p-4 sm:p-5', (interactive || to) && 'card-interactive', to && 'relative', container && '@container', className)}
       {...rest}
     >
       {to ? (
@@ -1516,6 +1576,28 @@ export function Card({
           className="absolute inset-0 z-[1] rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         />
       ) : null}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Card grid that fills by the space it has: `repeat(auto-fill, minmax(min(100%, min), 1fr))`.
+ * Replaces the hard `sm:grid-cols-2 xl:grid-cols-3` pattern so 320 px, 1440 px and 1920 px all fill honestly.
+ */
+export function CardGrid({
+  min,
+  className,
+  style,
+  children,
+  ...rest
+}: HTMLAttributes<HTMLDivElement> & {
+  /** Minimum column width; default 22rem. Any CSS length. */
+  min?: string;
+}) {
+  const vars = min ? ({ ...style, '--card-min': min } as CSSProperties) : style;
+  return (
+    <div className={cx('card-grid', className)} style={vars} {...rest}>
       {children}
     </div>
   );
@@ -2374,9 +2456,12 @@ export function EmptyState({
   size = 'md',
   className,
   level = 2,
+  family,
 }: {
   icon?: ReactNode;
   variant?: EmptyStateVariant;
+  /** Hub illustration for a first-run state; without it the pair figure stays. */
+  family?: IllustrationFamily;
   title: string;
   message?: string;
   description?: string;
@@ -2409,6 +2494,11 @@ export function EmptyState({
         >
           {glyph}
         </div>
+      ) : family ? (
+        (() => {
+          const Art = ILLUSTRATIONS[family];
+          return <Art size={size === 'sm' ? 64 : 96} className="text-text-3" />;
+        })()
       ) : (
         <PairFigure size={size === 'sm' ? 64 : 96} className="text-text-3" />
       )}
@@ -2749,6 +2839,8 @@ export const chartTheme = {
   macro: { kcal: VIZ.kcal, calories: VIZ.kcal, protein: VIZ.protein, carbs: VIZ.carbs, fat: VIZ.fat } as Record<string, string>,
   areaFill: { start: 0.24, end: 0 },
   goalLine: { stroke: 'var(--text-3)', strokeDasharray: '4 4', strokeWidth: 1 },
+  /** The one mark a chart draws when it has no data: a dashed baseline, never a full axis frame. */
+  emptyBaseline: { stroke: 'var(--text-3)', strokeDasharray: '3 4', strokeWidth: 1 } as const,
   cartesianGrid: { stroke: 'var(--line)', vertical: false } as const,
   axisProps: {
     tick: { fill: 'var(--text-3)', fontSize: 12 },
@@ -2778,6 +2870,18 @@ export const chartTheme = {
 
 export const seriesColor = (i: number) => chartTheme.series[i % chartTheme.series.length];
 
+/** A dashed baseline across a chart's box, with an optional line of direction under it; the empty state for any chart. */
+export function ChartEmpty({ height = 160, label, className }: { height?: number; label?: string; className?: string }) {
+  return (
+    <div className={cx('flex flex-col items-center justify-end', className)} style={{ height }} role={label ? 'img' : undefined} aria-label={label}>
+      <svg viewBox="0 0 100 8" preserveAspectRatio="none" width="100%" height={8} aria-hidden="true">
+        <path d="M0 4 L100 4" fill="none" {...chartTheme.emptyBaseline} vectorEffect="non-scaling-stroke" />
+      </svg>
+      {label ? <p className="mt-3 text-xs text-text-3">{label}</p> : null}
+    </div>
+  );
+}
+
 /** 40 px tokenised sparkline with a one-time draw-in. */
 export function Sparkline({
   data,
@@ -2797,22 +2901,18 @@ export function Sparkline({
   color?: string;
 }) {
   const id = useId();
-  const placeholder = <span className={className} style={{ display: 'inline-block', width, height }} aria-hidden="true" />;
-  if (!data || data.length < 2) return placeholder;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
   const w = 100;
   const h = 40;
-  // A flat series has no trend to show. All-zero (nothing logged) draws
-  // nothing at all; a constant non-zero value gets a quiet dashed baseline.
-  if (max === min) {
-    if (max === 0) return placeholder;
-    return (
-      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width={width} height={height} className={className} aria-hidden="true">
-        <path d={`M0 ${h / 2} L${w} ${h / 2}`} fill="none" stroke="var(--text-3)" strokeWidth={1} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
-      </svg>
-    );
-  }
+  // No data, or a flat series with no trend to show: a quiet dashed baseline in
+  // place of the line, never an empty box and never full axes.
+  const baseline = (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width={width} height={height} className={className} aria-hidden="true">
+      <path d={`M0 ${h - 3} L${w} ${h - 3}`} fill="none" stroke="var(--text-3)" strokeWidth={1} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+  const min = data?.length ? Math.min(...data) : 0;
+  const max = data?.length ? Math.max(...data) : 0;
+  if (!data || data.length < 2 || max === min) return baseline;
   const span = max - min;
   const pts = data.map((v, i) => [(i / (data.length - 1)) * w, h - 3 - ((v - min) / span) * (h - 6)] as const);
   const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
@@ -2869,7 +2969,8 @@ export function StatTile({
   to?: string;
   onClick?: () => void;
   tone?: 'neutral' | 'brand' | 'accent';
-  size?: 'md' | 'lg';
+  /** `hero` sets the value in the fluid --text-stat role (the one big number on a hub). */
+  size?: 'md' | 'lg' | 'hero';
   loading?: boolean;
   className?: string;
   hint?: string;
@@ -2887,7 +2988,7 @@ export function StatTile({
       </div>
       <div className="mt-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <span className={cx('type-stat block truncate text-text-1', size === 'lg' ? 'text-3xl' : 'text-2xl', tone === 'brand' && 'text-brand-text', tone === 'accent' && 'text-accent-text')}>
+          <span className={cx('type-stat block truncate text-text-1', size === 'hero' ? 'text-stat' : size === 'lg' ? 'text-3xl' : 'text-2xl', tone === 'brand' && 'text-brand-text', tone === 'accent' && 'text-accent-text')}>
             {value}
             {unit ? <span className="ml-1 align-baseline text-xs font-semibold tracking-normal text-text-2 [font-variation-settings:'wdth'_100]">{unit}</span> : null}
           </span>
@@ -2960,7 +3061,7 @@ export function StatStrip({ items, className, 'aria-label': ariaLabel = 'Stats' 
       {items.map((item) => {
         const body = (
           <>
-            <span className={cx('type-stat block truncate text-lg leading-6 sm:text-xl sm:leading-7', item.tone === 'brand' ? 'text-brand-text' : 'text-text-1')}>
+            <span className={cx('type-stat block truncate text-stat-sm', item.tone === 'brand' ? 'text-brand-text' : 'text-text-1')}>
               {typeof item.value === 'number' ? formatStat(item.value) : item.value}
             </span>
             <span className="type-label block truncate text-text-2">{item.label}</span>
@@ -3027,7 +3128,11 @@ export function Ring({
       aria-label={label ? (max > 0 ? `${label}: ${Math.round(pct * 100)}%` : label) : undefined}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+        {max > 0 ? (
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+        ) : (
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--text-3)" strokeWidth={1} strokeDasharray="3 4" />
+        )}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -3055,15 +3160,25 @@ export function Progress({
   label,
   className,
 }: {
-  value: number;
+  /** null/undefined = nothing logged yet: a dashed baseline replaces the track. */
+  value?: number | null;
   max?: number;
   tone?: 'brand' | 'accent' | 'success' | 'warning' | 'danger' | VizKey;
   size?: 'sm' | 'md';
   label?: string;
   className?: string;
 }) {
-  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   const bg = (VIZ as Record<string, string>)[tone] ?? `var(--${tone})`;
+  if (value === null || value === undefined || !(max > 0)) {
+    return (
+      <div role="img" aria-label={label ? `${label}: nothing yet` : undefined} className={cx('w-full', size === 'sm' ? 'h-1.5' : 'h-2.5', className)}>
+        <svg viewBox="0 0 100 4" preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true">
+          <path d="M0 2 L100 2" fill="none" {...chartTheme.emptyBaseline} vectorEffect="non-scaling-stroke" />
+        </svg>
+      </div>
+    );
+  }
+  const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return (
     <div
       role="progressbar"

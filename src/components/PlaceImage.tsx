@@ -1,22 +1,15 @@
 import { useEffect, useState } from 'react';
 import { mediaUrl } from '../lib/api';
-import { cx } from './ui';
+import { cx, identityStyle } from './ui';
 
 /**
  * Picture for a place that came from the map provider (nearby gyms, place
  * search). The API hands us a signed, same-origin `photoUrl` that it resolves
  * from public map data on first request; when there is none, or the picture
  * fails to load, we draw a deterministic tile from the place's name so every
- * row still has a face. Nothing is hard-coded per place.
+ * row still has a face: the same five token gradient pairs people get
+ * (identityStyle), so a place and a person read as one system.
  */
-
-const HUES = [168, 196, 214, 262, 292, 334, 18, 42] as const;
-
-function hueFor(name: string): number {
-  let hash = 0;
-  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return HUES[hash % HUES.length];
-}
 
 export function placeInitials(name: string): string {
   const words = name
@@ -58,14 +51,11 @@ export function PlaceImage({ src, name, className, textClassName = 'text-sm' }: 
     );
   }
 
-  const hue = hueFor(label || 'place');
   return (
     <span
       aria-hidden="true"
-      className={cx('flex shrink-0 select-none items-center justify-center font-semibold tracking-wide text-white', textClassName, className)}
-      style={{
-        background: `linear-gradient(135deg, hsl(${hue} 62% 42%), hsl(${(hue + 40) % 360} 58% 30%))`,
-      }}
+      className={cx('flex shrink-0 select-none items-center justify-center font-semibold tracking-wide', textClassName, className)}
+      style={identityStyle(label || 'place')}
     >
       {placeInitials(label)}
     </span>
