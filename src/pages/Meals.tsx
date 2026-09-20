@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isToday, isValid, isYesterday, parseISO } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
@@ -29,26 +29,24 @@ import {
   IconButton,
   Input,
   Menu,
-  Modal,
   PageHeader,
+  Progress,
   Ring,
   Section,
+  SegmentedControl,
   Select,
   Skeleton,
   Spinner,
-  StatTile,
   Stepper,
-  Tabs,
   VIZ,
   cx,
   formatStat,
   humanize,
-  useIsCompact,
   usePulse,
   useToast,
 } from './ui';
 import type { MenuItem } from './ui';
-import { Utensils, Plus, Trash, Heart, Clock, BookOpen, Flame, Target, ChevronRight, Search, Globe, Users, Camera } from './icons';
+import { Utensils, Plus, Trash, Heart, Clock, BookOpen, ChevronRight, Search, Globe, Camera } from './icons';
 
 /* ------------------------------------------------------------------ types */
 
@@ -324,7 +322,8 @@ function MacroRing({
   size: number;
 }) {
   const hasGoal = goal > 0;
-  const over = hasGoal && value > goal;
+  // Nutrition numbers stay neutral (DP-005): the ring fills past its target in
+  // the macro's own colour, and nothing turns red or green.
   return (
     <div className="flex flex-col items-center gap-2">
       <Ring
@@ -332,10 +331,10 @@ function MacroRing({
         max={hasGoal ? goal : 0}
         size={size}
         stroke={size >= 96 ? 10 : 8}
-        color={over ? 'accent' : color}
+        color={color}
         label={hasGoal ? `${label} ${Math.round(value)} of ${Math.round(goal)} ${unit}` : `${label} ${Math.round(value)} ${unit}`}
       >
-        <span className={cx('leading-none', size >= 96 ? 'text-xl' : 'text-lg', over && 'text-accent-text')}>{formatStat(Math.round(value))}</span>
+        <span className={cx('leading-none', size >= 96 ? 'text-xl' : 'text-lg')}>{formatStat(Math.round(value))}</span>
         {hasGoal ? <span className="mt-0.5 text-2xs font-semibold tracking-normal text-text-3 [font-variation-settings:'wdth'_100]">of {formatStat(Math.round(goal))}</span> : null}
       </Ring>
       <span className="type-label text-text-2">
@@ -636,7 +635,41 @@ export function SelectedFoodRow({
 /** A picked food as the API's serving line, e.g. "1 large (50 g)" or "2 × 100 g". */
 export const servingLineFor = (food: SelectedFood) => (food.servings === 1 ? food.servingLabel : `${food.servings} × ${food.servingLabel}`);
 
-/* --------------------------------------------------------------- log modal */
+/* ---------------------------------------------------------- macro summary */
+
+/**
+ * One thin bar per macro: label, grams eaten against the target in tabular
+ * numerals, the fill in the macro's fixed colour. Without a target the bar is
+ * the dashed baseline and the grams stand alone. The phone half of the Today
+ * card, beside the single kcal ring.
+ */
+function MacroBars({ consumed, goals }: { consumed: MacroGoals; goals: MacroGoals | null }) {
+  return (
+    <ul className="flex flex-1 flex-col justify-center gap-3" aria-label="Macros today">
+      {MACRO_ITEMS.map((m) => {
+        const eaten = Math.round(consumed[m.key]);
+        const goal = goals ? Math.round(goals[m.key]) : 0;
+        return (
+          <li key={m.key} className="space-y-1.5">
+            <div className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-text-2">
+                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: m.color }} />
+                {m.label}
+              </span>
+              <span className="tabular text-text-2">
+                <span className="font-semibold text-text-1">{formatStat(eaten)}</span>
+                {goal > 0 ? ` / ${formatStat(goal)}` : ''} g
+              </span>
+            </div>
+            <Progress value={goal > 0 ? eaten : null} max={goal} tone={m.key} size="sm" label={`${m.label} ${eaten}${goal > 0 ? ` of ${goal}` : ''} g`} />
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/* ---------------------------------------------------------------- log form */
 
 const EMPTY_MANUAL: Nutrition = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
@@ -663,7 +696,12 @@ type PhotoState = {
 
 const PHOTO_COPY = 'Photo + label: the picture is saved with the meal and the name you type is matched against the food catalog and your history. Photos are not identified automatically.';
 
-export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * The meal logger. Lives on the /meals/log route (src/pages/MealLog.tsx)
+ * inside a RouteSheet, so it is a plain form with its own footer rather than
+ * a modal: `onDone` after a successful log, `onCancel` to leave.
+ */
+export function LogMealForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState('');
@@ -759,7 +797,7 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
 
   const cancel = () => {
     if (!log.isPending) removePhoto(true);
-    onClose();
+    onCancel();
   };
 
   const log = useMutation({
@@ -811,7 +849,7 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
       qc.invalidateQueries({ queryKey: ['meals'] });
       qc.invalidateQueries({ queryKey: ['nutrition-summary'] });
       reset();
-      onClose();
+      onDone();
     },
     onError: (e) => {
       if (!nameError) toast.error(errMsg(e, 'Could not log meal'));
@@ -821,23 +859,8 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
   const formId = 'log-meal-form';
 
   return (
-    <Modal
-      open={open}
-      onClose={cancel}
-      title="Log a meal"
-      description="Search the food database, add a photo, or enter the macros yourself."
-      size="md"
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={cancel}>
-            Cancel
-          </Button>
-          <Button type="submit" form={formId} variant="primary" loading={log.isPending}>
-            Log meal
-          </Button>
-        </div>
-      }
-    >
+    <div className="space-y-5">
+      <p className="text-sm text-text-2">Search the food database, add a photo, or enter the macros yourself.</p>
       <form
         id={formId}
         className="space-y-5"
@@ -1004,8 +1027,17 @@ export function LogMealModal({ open, onClose }: { open: boolean; onClose: () => 
           <p className="type-label text-text-2">This meal</p>
           <MacroLine nutrition={totals} className="mt-1 text-sm" />
         </div>
+
+        <div className="flex justify-end gap-2 border-t border-line pt-4">
+          <Button type="button" variant="ghost" onClick={cancel}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" loading={log.isPending}>
+            Log meal
+          </Button>
+        </div>
       </form>
-    </Modal>
+    </div>
   );
 }
 
@@ -1129,7 +1161,7 @@ function MealCard({
   const foodCount = meal.foods?.length ?? 0;
 
   return (
-    <Card padded={false} className="flex gap-3 p-3 sm:gap-4 sm:p-4">
+    <li className="flex gap-3 p-3 sm:gap-4 sm:p-4">
       <Link to={href} viewTransition tabIndex={-1} aria-hidden="true" className="shrink-0">
         {meal.image_url ? (
           <img src={mediaUrl(meal.image_url)} alt="" loading="lazy" className="h-[72px] w-[72px] rounded-md bg-surface-2 object-cover" />
@@ -1204,15 +1236,26 @@ function MealCard({
           publish.mutate(true);
         }}
       />
+    </li>
+  );
+}
+
+/** Rows of meals in one card, separated by hairlines rather than stacked as cards. */
+function MealList({ children, label }: { children: ReactNode; label?: string }) {
+  return (
+    <Card padded={false}>
+      <ul className="divide-y divide-line" aria-label={label}>
+        {children}
+      </ul>
     </Card>
   );
 }
 
 function MealListSkeleton({ count = 3 }: { count?: number }) {
   return (
-    <div className="space-y-3" aria-busy="true" aria-label="Loading meals">
+    <div className="card divide-y divide-line" aria-busy="true" aria-label="Loading meals">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="card flex gap-3 p-3 sm:p-4">
+        <div key={i} className="flex gap-3 p-3 sm:p-4">
           <Skeleton className="h-[72px] w-[72px] rounded-md" />
           <div className="flex-1 space-y-2 py-1">
             <Skeleton className="h-4 w-1/2" />
@@ -1250,10 +1293,10 @@ function CommunityMeals({ onLog }: { onLog: () => void }) {
     return (
       <Card padded={false}>
         <EmptyState
-          icon={<Users size={24} />}
+          family="social"
           title="Nothing shared yet"
           message="Meals your friends share with the community show up here. Share one of yours from its menu to get things going."
-          action={{ label: 'Log meal', onClick: onLog, icon: <Plus size={18} />, variant: 'primary' }}
+          action={{ label: 'Log meal', onClick: onLog, icon: <Plus size={18} />, variant: 'secondary' }}
         />
       </Card>
     );
@@ -1263,9 +1306,11 @@ function CommunityMeals({ onLog }: { onLog: () => void }) {
       <p className="text-sm text-text-2">
         <span className="tabular font-semibold text-text-1">{formatStat(total)}</span> {plural(total, 'meal')} shared by people you follow.
       </p>
-      {meals.map((meal) => (
-        <MealCard key={meal._id} meal={meal} cacheKey={['meals', 'community']} showOwner />
-      ))}
+      <MealList label="Community meals">
+        {meals.map((meal) => (
+          <MealCard key={meal._id} meal={meal} cacheKey={['meals', 'community']} showOwner />
+        ))}
+      </MealList>
       {feed.hasNextPage ? (
         <div className="flex justify-center pt-1">
           <Button variant="secondary" loading={feed.isFetchingNextPage} onClick={() => void feed.fetchNextPage()}>
@@ -1280,13 +1325,13 @@ function CommunityMeals({ onLog }: { onLog: () => void }) {
 export default function Meals() {
   const qc = useQueryClient();
   const toast = useToast();
-  const compact = useIsCompact();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   // /meals?tab=community deep-links the Community tab (and /meals/community redirects here).
   const tabParam = params.get('tab');
   const [tab, setTab] = useState<LogTab>(() => (LOG_TABS.includes(tabParam as LogTab) ? (tabParam as LogTab) : 'today'));
   const range: Range = tab === 'week' ? 'week' : 'today';
-  const [modal, setModal] = useState(() => params.get('log') === '1');
   const [pendingDelete, setPendingDelete] = useState<Meal | null>(null);
 
   useEffect(() => {
@@ -1300,20 +1345,24 @@ export default function Meals() {
     setParams(nextParams, { replace: true });
   };
 
-  // Deep-link contract: /meals?log=1 (Log sheet, manifest shortcut) opens the entry modal.
-  useEffect(() => {
-    if (params.get('log') === '1') setModal(true);
-  }, [params]);
+  // The logger is the /meals/log route, presented over this page on lg+ and
+  // as its own page on phones (RouteSheet reads `backgroundLocation`).
+  const openLog = () => navigate('/meals/log', { viewTransition: true, state: { backgroundLocation: location } });
 
-  const openLog = () => setModal(true);
-  const closeLog = () => {
-    setModal(false);
-    if (params.has('log')) {
-      const next = new URLSearchParams(params);
-      next.delete('log');
-      setParams(next, { replace: true });
-    }
-  };
+  // Deep-link contract: /meals?log=1 (Log sheet, manifest shortcut) forwards to
+  // the logger route. Strip the flag from this entry first so back lands on a
+  // plain /meals instead of re-opening the sheet.
+  const wantsLog = params.get('log') === '1';
+  useEffect(() => {
+    if (!wantsLog) return;
+    const next = new URLSearchParams(params);
+    next.delete('log');
+    const search = next.toString();
+    const background = { ...location, search: search ? `?${search}` : '' };
+    navigate({ pathname: location.pathname, search: background.search }, { replace: true });
+    navigate('/meals/log', { state: { backgroundLocation: background } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsLog]);
 
   // Every "which day is it" call carries the device offset, so Today here,
   // on /health/goals and on /health all mean the same local calendar day.
@@ -1394,17 +1443,18 @@ export default function Meals() {
   const summary = goalsQuery.data ?? null;
   const goals = summary?.adjustedGoals ?? summary?.baseGoals ?? null;
   const hasGoals = Boolean(goals && goals.calories > 0);
-  const consumed = {
+  const goalsKnown = goalsQuery.isSuccess;
+  const consumed: MacroGoals = {
     calories: todayQuery.data?.totalCalories ?? 0,
     protein: todayQuery.data?.totalProtein ?? 0,
     carbs: todayQuery.data?.totalCarbs ?? 0,
     fat: todayQuery.data?.totalFat ?? 0,
   };
+  const kcalToday = Math.round(consumed.calories);
   const remainingKcal = hasGoals && goals ? Math.round(goals.calories - consumed.calories) : null;
   const burned = Math.round(summary?.exercise?.caloriesBurned ?? 0);
   const workouts = summary?.exercise?.workoutsCount ?? 0;
   const streak = streakQuery.data?.streak ?? 0;
-  const mealsToday = todayQuery.data?.totalMeals ?? 0;
 
   const meals = rangeQuery.data?.meals ?? [];
   const groups = useMemo(() => {
@@ -1420,30 +1470,51 @@ export default function Meals() {
     return [...byDay.values()].sort((a, b) => b.date - a.date);
   }, [meals, range]);
 
-  const subtitle = streakQuery.data
-    ? streak > 0
-      ? `${streak}-day logging streak. Keep it going.`
-      : 'Log a meal today to start a streak.'
-    : 'Track what you eat, every day.';
-
-  const ringSize = compact ? 72 : 96;
   const ringsLoading = todayQuery.isLoading || goalsQuery.isLoading;
 
+  // The band's one figure is today's kcal, drawn only once something is logged.
+  // With nothing logged the band carries the next step instead: targets first
+  // when there are none, otherwise a plain "nothing yet".
+  const bandNext = ringsLoading ? null : goalsKnown && !hasGoals ? (
+    <div>
+      <p className="text-base font-semibold">Set your daily targets</p>
+      <p className="gym-band-body-copy">Calorie and macro goals give every meal you log something to fill.</p>
+      <ButtonLink to="/health/goals" variant="secondary" size="sm" className="mt-3">
+        Set targets
+      </ButtonLink>
+    </div>
+  ) : (
+    <p className="text-sm text-band-ink-2">Nothing logged yet today.</p>
+  );
+
+  const streakLine = streak > 0 ? `${streak}-day logging streak` : undefined;
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       <PageHeader
         title="Meals"
-        subtitle={subtitle}
         actions={
           <>
-            <ButtonLink to="/meals/templates" variant="secondary" icon={<BookOpen size={18} />}>
+            <ButtonLink to="/meals/templates" variant="quiet" icon={<BookOpen size={18} />}>
               Templates
             </ButtonLink>
-            <Button variant="primary" icon={<Plus size={18} />} onClick={openLog}>
-              Log meal
-            </Button>
+            <ButtonLink to="/meals/plans" variant="quiet">
+              Weekly plans
+            </ButtonLink>
           </>
         }
+        band={{
+          context: format(new Date(), 'EEEE d MMMM'),
+          figure: kcalToday,
+          figureUnit: 'kcal',
+          figureLabel: hasGoals && goals ? `of ${formatStat(Math.round(goals.calories))} today` : 'eaten today',
+          action: (
+            <Button variant="primary" size="lg" icon={<Plus size={18} />} onClick={openLog}>
+              Log meal
+            </Button>
+          ),
+          children: bandNext,
+        }}
         mobileActions={
           <IconButton label="Log meal" onClick={openLog}>
             <Plus size={22} />
@@ -1451,116 +1522,75 @@ export default function Meals() {
         }
       />
 
-      <Section title="Today" description={format(new Date(), 'EEEE, d MMMM')}>
-        <Card className="space-y-5">
+      <Section title="Today" description={streakLine}>
+        <Card container className="space-y-5">
           {ringsLoading ? (
-            <div className="grid grid-cols-4 justify-items-center gap-3" aria-busy="true" aria-label="Loading today’s nutrition">
-              {RINGS.map((r) => (
-                <div key={r.key} className="flex flex-col items-center gap-2">
-                  <Skeleton className="rounded-full" style={{ width: ringSize, height: ringSize }} />
-                  <Skeleton className="h-3 w-12" />
-                </div>
-              ))}
+            <div className="flex items-center gap-5" aria-busy="true" aria-label="Loading today’s nutrition">
+              <Skeleton className="h-[132px] w-[132px] shrink-0 rounded-full" />
+              <div className="flex-1 space-y-4">
+                {MACRO_ITEMS.map((m) => (
+                  <div key={m.key} className="space-y-2">
+                    <Skeleton className="h-3 w-1/2" />
+                    <Skeleton className="h-1.5 w-full rounded-full" />
+                  </div>
+                ))}
+              </div>
             </div>
           ) : todayQuery.isError ? (
-            <ErrorState
-              title="Couldn’t load today’s nutrition"
-              error={todayQuery.error}
-              onRetry={() => todayQuery.refetch()}
-              className="py-6"
-            />
+            <ErrorState title="Couldn’t load today’s nutrition" error={todayQuery.error} onRetry={() => todayQuery.refetch()} className="py-6" />
           ) : (
-            <div className="grid grid-cols-4 justify-items-center gap-2 sm:gap-4">
-              {RINGS.map((r) => (
-                <MacroRing
-                  key={r.key}
-                  label={r.label}
-                  unit={r.unit}
-                  color={r.color}
-                  size={ringSize}
-                  value={consumed[r.key]}
-                  goal={hasGoals && goals ? goals[r.key] : 0}
-                />
-              ))}
-            </div>
+            <>
+              {/* Narrow card: one kcal ring and three macro bars. Wide card (@lg): the four-ring row. */}
+              <div className="flex items-center gap-5 @lg:hidden">
+                <MacroRing label="Calories" unit="kcal" color="kcal" size={132} value={consumed.calories} goal={hasGoals && goals ? goals.calories : 0} />
+                <MacroBars consumed={consumed} goals={hasGoals ? goals : null} />
+              </div>
+              <div className="hidden grid-cols-4 justify-items-center gap-4 @lg:grid">
+                {RINGS.map((r) => (
+                  <MacroRing key={r.key} label={r.label} unit={r.unit} color={r.color} size={96} value={consumed[r.key]} goal={hasGoals && goals ? goals[r.key] : 0} />
+                ))}
+              </div>
+
+              <p className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-4 text-sm text-text-2">
+                {goalsQuery.isError ? (
+                  <>
+                    <span>Targets didn’t load, so today’s totals are shown without them.</span>
+                    <Button size="sm" variant="quiet" onClick={() => void goalsQuery.refetch()}>
+                      Try again
+                    </Button>
+                  </>
+                ) : !hasGoals ? (
+                  <>
+                    <span>Set calorie and macro targets and these fill as you log.</span>
+                    <ButtonLink to="/health/goals" size="sm" variant="quiet">
+                      Set targets
+                    </ButtonLink>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      <span className="tabular font-semibold text-text-1">{formatStat(Math.abs(remainingKcal ?? 0))} kcal</span>{' '}
+                      {(remainingKcal ?? 0) >= 0 ? 'left today' : 'past today’s target'}
+                    </span>
+                    {burned > 0 ? (
+                      <span className="tabular">
+                        Target raised {formatStat(burned)} kcal for {formatStat(workouts)} {plural(workouts, 'workout')}
+                      </span>
+                    ) : null}
+                  </>
+                )}
+              </p>
+            </>
           )}
-
-          {!ringsLoading && !todayQuery.isError ? (
-            goalsQuery.isError ? (
-              <Callout
-                tone="warning"
-                title="Couldn’t load your goals"
-                action={
-                  <Button size="sm" variant="secondary" onClick={() => void goalsQuery.refetch()}>
-                    Retry
-                  </Button>
-                }
-              >
-                Today’s totals are shown without targets. {errMsg(goalsQuery.error, '')}
-              </Callout>
-            ) : !hasGoals ? (
-              <Callout
-                tone="brand"
-                icon={<Target size={20} className="text-brand" />}
-                title="Set your daily targets"
-                action={
-                  <ButtonLink to="/health/goals" size="sm" variant="primary">
-                    Set goals
-                  </ButtonLink>
-                }
-              >
-                Add calorie and macro goals and these rings fill as you log.
-              </Callout>
-            ) : null
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
-            {remainingKcal !== null ? (
-              <StatTile
-                label={remainingKcal >= 0 ? 'Remaining today' : 'Over target'}
-                value={formatStat(Math.abs(remainingKcal))}
-                unit="kcal"
-                tone={remainingKcal >= 0 ? 'brand' : 'accent'}
-                hint={burned > 0 ? `+${formatStat(burned)} kcal from ${workouts} ${plural(workouts, 'workout')}` : 'No workouts yet today'}
-                className="col-span-2 sm:col-span-1"
-              />
-            ) : (
-              <StatTile
-                label="Eaten today"
-                value={formatStat(Math.round(consumed.calories))}
-                unit="kcal"
-                loading={todayQuery.isLoading}
-                hint={burned > 0 ? `+${formatStat(burned)} kcal from ${workouts} ${plural(workouts, 'workout')}` : 'Set goals to see what is left'}
-                className="col-span-2 sm:col-span-1"
-              />
-            )}
-            <StatTile
-              label="Streak"
-              value={formatStat(streak)}
-              unit={plural(streak, 'day')}
-              icon={<Flame size={18} />}
-              tone={streak > 0 ? 'accent' : 'neutral'}
-              loading={streakQuery.isLoading}
-              hint={streak > 0 ? 'Logged daily' : 'Starts today'}
-            />
-            <StatTile
-              label="Logged"
-              value={formatStat(mealsToday)}
-              unit={plural(mealsToday, 'meal')}
-              icon={<Utensils size={18} />}
-              loading={todayQuery.isLoading}
-              hint="So far today"
-            />
-          </div>
         </Card>
       </Section>
 
       <Section
         title="Log"
         action={
-          <Tabs
-            variant="segmented"
+          <SegmentedControl
             size="sm"
+            fill={false}
             aria-label="Range"
             tabs={[
               { key: 'today', label: 'Today' },
@@ -1581,13 +1611,14 @@ export default function Meals() {
         ) : meals.length === 0 ? (
           <Card padded={false}>
             <EmptyState
+              family="fuel"
               title={range === 'today' ? 'Nothing logged today' : 'Nothing logged this week'}
               message={
                 range === 'today'
                   ? 'Log your first meal and the rings above start to fill.'
                   : 'Meals you logged since Monday show up here, grouped by day.'
               }
-              action={{ label: 'Log meal', onClick: openLog, icon: <Plus size={18} />, variant: 'primary' }}
+              action={{ label: 'Log meal', onClick: openLog, icon: <Plus size={18} />, variant: 'secondary' }}
               secondaryAction={{ label: 'Use a template', to: '/meals/templates', icon: <BookOpen size={18} /> }}
             />
           </Card>
@@ -1609,16 +1640,17 @@ export default function Meals() {
                     </span>
                   </h3>
                 ) : null}
-                {g.meals.map((meal) => (
-                  <MealCard key={meal._id} meal={meal} cacheKey={['meals', 'range', range]} onDelete={(m) => setPendingDelete(m)} />
-                ))}
+                <MealList label={g.label ?? 'Today’s meals'}>
+                  {g.meals.map((meal) => (
+                    <MealCard key={meal._id} meal={meal} cacheKey={['meals', 'range', range]} onDelete={(m) => setPendingDelete(m)} />
+                  ))}
+                </MealList>
               </div>
             ))}
           </div>
         )}
       </Section>
 
-      <LogMealModal open={modal} onClose={closeLog} />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title="Delete this meal?"
