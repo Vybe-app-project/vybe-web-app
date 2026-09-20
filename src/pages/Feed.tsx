@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { communityPath } from '../lib/gyms';
 import { FEED_PAGE_SIZE, dedupeById, feedPageParams, nextFeedPageParam, type FeedPageParam } from '../lib/feedLogic';
 import {
   ACCEPTED_IMAGE_TYPES,
@@ -26,7 +27,6 @@ import {
   AvatarStack,
   Button,
   ButtonLink,
-  Card,
   Chip,
   ConfirmDialog,
   EmptyState,
@@ -44,7 +44,7 @@ import {
   useToast,
 } from './ui';
 import { ArrowUp, Image as ImageIcon, Refresh, UserPlus, Video as VideoIcon, X } from './icons';
-import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors } from './PostCard';
+import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors, useViewerGym } from './PostCard';
 import { StoryTray } from './StoryTray';
 import FirstWeekCard from './FirstWeekCard';
 
@@ -199,7 +199,7 @@ function Composer({
 
   if (!open) {
     return (
-      <Card className="flex items-center gap-3">
+      <div className="flex items-center gap-3 pt-3">
         {fileInputs}
         <Avatar src={me?.avatar} name={displayName(me)} size="md" />
         <button
@@ -215,12 +215,12 @@ function Composer({
         <IconButton label="Add a video" variant="secondary" onClick={() => videoRef.current?.click()} className="hidden sm:inline-flex">
           <VideoIcon size={22} />
         </IconButton>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <Card aria-label="New post" role="form">
+    <div aria-label="New post" role="form" className="pt-3">
       {fileInputs}
       <div className="flex gap-3">
         <Avatar src={me?.avatar} name={displayName(me)} size="md" className="mt-0.5 hidden sm:inline-flex" />
@@ -327,7 +327,7 @@ function Composer({
         }}
         onCancel={() => setConfirmDiscard(false)}
       />
-    </Card>
+    </div>
   );
 }
 
@@ -360,8 +360,8 @@ function TrendingHashtags() {
   if (!data?.length) return null;
 
   return (
-    <nav aria-label="Trending hashtags" className="-mx-4 md:-mx-6 lg:hidden">
-      <div className="snap-row no-scrollbar mask-fade-r flex gap-2 overflow-x-auto px-4 scroll-pl-4 md:px-6 md:scroll-pl-6">
+    <nav aria-label="Trending hashtags" className="-mx-gutter lg:hidden">
+      <div className="snap-row no-scrollbar mask-fade-r flex gap-2 overflow-x-auto px-gutter scroll-pl-gutter">
         {data.slice(0, 12).map((tag) => (
           <Chip key={tag._id} to={`/search?q=${encodeURIComponent(`#${tag._id}`)}`} className="snap-item shrink-0">
             #{tag._id}
@@ -513,6 +513,31 @@ function NewPostsPill({ fresh, onShow, busy }: { fresh: Post[]; onShow: () => vo
 /* Feed                                                                */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Gym-scoped tabs on the band                                         */
+/* ------------------------------------------------------------------ */
+
+const GYM_TABS = [
+  { key: 'feed', label: 'Feed' },
+  { key: 'today', label: 'Today' },
+  { key: 'members', label: 'Members' },
+  { key: 'about', label: 'About' },
+] as const;
+
+/** Feed · Today · Members · About, each opening the gym page on that tab. Home is the gym's feed, so Feed reads as current. */
+function GymTabs({ communityId, gymName }: { communityId: string; gymName: string }) {
+  const base = communityPath(communityId);
+  return (
+    <nav aria-label={gymName ? `${gymName} sections` : 'Your gym'} className="contents">
+      {GYM_TABS.map((t) => (
+        <Link key={t.key} to={`${base}&tab=${t.key}`} viewTransition className="gym-band-tab" data-active={t.key === 'feed' ? 'true' : undefined}>
+          {t.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
 function todayLabel(): string {
   try {
     return new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
@@ -530,6 +555,10 @@ export default function Feed() {
   const [showingNew, setShowingNew] = useState(false);
   const hidden = useHiddenAuthors((s) => s.ids);
   const unhide = useHiddenAuthors((s) => s.unhide);
+  // The viewer's gym: the shell paints the band from its own read; this
+  // decides the stories label, the band's gym tabs and the empty-state copy.
+  const gym = useViewerGym();
+  const gymName = gym?.name ?? '';
 
   // Deep link contract: /?compose=1 (Log sheet, manifest shortcut, /create) opens the composer once.
   const compose = searchParams.get('compose') === '1';
@@ -605,20 +634,34 @@ export default function Feed() {
     window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
 
+  const today = todayLabel();
+
   return (
     <div>
-      <PageHeader title="Home" subtitle={todayLabel()} />
+      <PageHeader
+        title="Home"
+        subtitle={today}
+        band={{
+          variant: 'full',
+          context: today,
+          // Tabs only for a real community: a bare place has no gym page to open.
+          tabs: gym?.kind === 'community' ? <GymTabs communityId={gym.id} gymName={gymName} /> : undefined,
+        }}
+      />
       <PullIndicator {...pullState} />
 
-      <div className="space-y-4">
+      <div className="space-y-section">
         <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
-        <StoryTray variant="home" />
+        {/* One region under a hairline: the stories row under its label, the composer docked beneath. Nothing boxed on the white page. */}
+        <div className="border-b border-line pb-4">
+          <StoryTray variant="home" label={gymName ? `At ${gymName}` : undefined} />
+          <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
+        </div>
         <FirstWeekCard />
-        <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
         <TrendingHashtags />
 
         {isLoading ? (
-          <div className="space-y-4" aria-busy="true" aria-label="Loading your feed">
+          <div className="space-y-section" aria-busy="true" aria-label="Loading your feed">
             {Array.from({ length: 3 }).map((_, i) => (
               <PostCardSkeleton key={i} media={i !== 1} />
             ))}
@@ -631,8 +674,13 @@ export default function Feed() {
 
         {!isLoading && !isError && allPosts.length === 0 ? (
           <EmptyState
+            family="social"
             title="Your feed is quiet"
-            message="Follow a few athletes and their sessions will show up here."
+            message={
+              gymName
+                ? `Follow the people who train at ${gymName} and their sessions show up here.`
+                : 'Follow a few athletes and their sessions will show up here.'
+            }
             action={{ label: 'Find people to follow', to: '/discover', icon: <UserPlus size={18} /> }}
             secondaryAction={{ label: 'Share your first post', onClick: openComposer }}
           />
@@ -648,9 +696,13 @@ export default function Feed() {
           />
         ) : null}
 
-        {posts.map((post) => (
-          <PostCard key={post._id} post={post} invalidate={[['feed']]} />
-        ))}
+        {posts.length ? (
+          <div className="-mt-1">
+            {posts.map((post) => (
+              <PostCard key={post._id} post={post} invalidate={[['feed']]} surface="item" />
+            ))}
+          </div>
+        ) : null}
 
         {hasNextPage ? (
           <div ref={sentinelRef} className="flex justify-center py-4">

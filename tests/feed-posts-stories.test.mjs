@@ -15,7 +15,7 @@ test('the feed pages by cursor, never renders a post twice, and shows the storie
   assert.match(feed, /feedPageParams\(pageParam, FEED_PAGE_SIZE\)/, 'later pages must use the API cursor (?before=)');
   assert.match(feed, /getNextPageParam: \(last, all\) => nextFeedPageParam\(last, all\.length\)/);
   assert.match(feed, /dedupeById\(data\?\.pages\.flatMap/, 'a shifted page must not duplicate a card or its React key');
-  assert.match(feed, /<StoryTray variant="home" \/>/, 'Home shows the stories tray above the composer');
+  assert.match(feed, /<StoryTray variant="home" label=\{gymName \? `At \$\{gymName\}` : undefined\} \/>/, 'Home shows the stories tray, labelled by the viewer’s gym, above the composer');
   // Video posting through the presigned flow, with a browser-captured poster.
   assert.match(feed, /ACCEPTED_VIDEO_TYPES\.includes\(contentType\)/);
   assert.match(feed, /captureVideoPoster\(file\)/);

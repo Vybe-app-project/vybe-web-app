@@ -32,7 +32,6 @@ import {
   Avatar,
   Badge,
   Button,
-  Card,
   ConfirmDialog,
   EmptyState,
   ErrorState,
@@ -980,6 +979,22 @@ export function CreateStoryModal({ open, onClose }: { open: boolean; onClose: ()
 
 /* --------------------------------------------------------------- bubbles */
 
+/**
+ * The Instagram ring: a 2 px gradient (`--story-ring`, falling back to the
+ * action colour until the token lands) with a 2 px gap in the page surface,
+ * then the avatar. Seen stories wear the same construction in `--line`.
+ */
+export function StoryRing({ unseen, children, className }: { unseen: boolean; children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={cx('story-ring inline-flex rounded-full p-[2px]', !unseen && 'bg-line', className)}
+      style={unseen ? { background: 'var(--story-ring, var(--brand))' } : undefined}
+    >
+      <span className="inline-flex rounded-full bg-bg p-[2px]">{children}</span>
+    </span>
+  );
+}
+
 function Bubble({
   onClick,
   label,
@@ -1009,11 +1024,13 @@ function Bubble({
 /* ------------------------------------------------------------------ tray */
 
 /**
- * The stories row. `home` sits above the Home composer and stays hidden until
- * there is something to show; `page` (the Stories screen) always renders and
- * owns the loading, error and empty states.
+ * The stories row. `home` sits at the top of Home's first surface (the Feed
+ * page docks the composer under it) under a section label — "At <gym>" when
+ * the viewer has a gym, "Stories" otherwise — and stays hidden until there is
+ * something to show; `page` (the Stories screen) always renders and owns the
+ * loading, error and empty states.
  */
-export function StoryTray({ variant = 'page' }: { variant?: 'home' | 'page' }) {
+export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'page'; /** Home's section label; defaults to "Stories". */ label?: string }) {
   const me = useAuth((s) => s.user);
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -1029,6 +1046,7 @@ export function StoryTray({ variant = 'page' }: { variant?: 'home' | 'page' }) {
 
   const groups = useMemo(() => tray.data || [], [tray.data]);
   const { own, others } = useMemo(() => splitOwnGroup(groups, me?._id), [groups, me?._id]);
+  const unseenGroups = useMemo(() => others.filter((g) => groupHasUnseen(g, me?._id)).length, [others, me?._id]);
   const meAsAuthor = asStoryAuthor(me);
   const openComposer = () => setComposerOpen(true);
 
@@ -1042,7 +1060,15 @@ export function StoryTray({ variant = 'page' }: { variant?: 'home' | 'page' }) {
       onClick={() => (own ? setViewer({ groups: [own], start: 0, startStory: 0 }) : openComposer())}
       label={own ? `Your story (${own.stories.length} ${own.stories.length === 1 ? 'story' : 'stories'})` : 'Add to your story'}
       caption="Your story"
-      avatar={<Avatar src={meAsAuthor.avatar} name={authorName(meAsAuthor)} size={64} ring={Boolean(own)} ringTone="neutral" />}
+      avatar={
+        own ? (
+          <StoryRing unseen={false}>
+            <Avatar src={meAsAuthor.avatar} name={authorName(meAsAuthor)} size={60} seed={meAsAuthor._id} />
+          </StoryRing>
+        ) : (
+          <Avatar src={meAsAuthor.avatar} name={authorName(meAsAuthor)} size={68} seed={meAsAuthor._id} />
+        )
+      }
     >
       <button
         type="button"
@@ -1056,7 +1082,7 @@ export function StoryTray({ variant = 'page' }: { variant?: 'home' | 'page' }) {
   ) : null;
 
   const row = (
-    <div className={cx('snap-row no-scrollbar flex gap-3 overflow-x-auto py-2', variant === 'page' ? '-mx-4 px-4 scroll-pl-4 md:-mx-6 md:px-6 md:scroll-pl-6' : 'px-3 scroll-pl-3')}>
+    <div className={cx('snap-row no-scrollbar flex gap-3 overflow-x-auto py-2', variant === 'page' ? '-mx-gutter px-gutter scroll-pl-gutter' : '')}>
       {ownBubble}
       {others.map((g, i) => {
         const unseen = groupHasUnseen(g, me?._id);
@@ -1067,7 +1093,11 @@ export function StoryTray({ variant = 'page' }: { variant?: 'home' | 'page' }) {
             label={`${unseen ? 'New stories' : 'Stories'} from ${authorName(g.author)}`}
             caption={authorName(g.author)}
             emphasised={unseen}
-            avatar={<Avatar src={g.author.avatar} name={authorName(g.author)} size={64} ring ringTone={unseen ? 'brand' : 'neutral'} />}
+            avatar={
+              <StoryRing unseen={unseen}>
+                <Avatar src={g.author.avatar} name={authorName(g.author)} size={60} seed={g.author._id} />
+              </StoryRing>
+            }
           />
         );
       })}
@@ -1098,9 +1128,15 @@ export function StoryTray({ variant = 'page' }: { variant?: 'home' | 'page' }) {
       ) : variant === 'page' && tray.isError ? (
         <ErrorState error={tray.error} title="Couldn’t load stories" onRetry={() => tray.refetch()} />
       ) : variant === 'home' ? (
-        <Card padded={false} className="overflow-hidden">
+        <div>
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="type-heading text-lg text-text-1">{label?.trim() || 'Stories'}</h2>
+            {unseenGroups > 0 ? (
+              <span className="tabular shrink-0 text-sm text-text-2">{unseenGroups === 1 ? '1 new' : `${unseenGroups} new`}</span>
+            ) : null}
+          </div>
           {row}
-        </Card>
+        </div>
       ) : (
         row
       )}

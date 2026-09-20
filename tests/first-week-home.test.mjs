@@ -430,10 +430,11 @@ test('firstWeek.ts is import-free and free of hex colours', () => {
   assert.doesNotMatch(src, /#[0-9a-fA-F]{3,6}\b/);
 });
 
-test('Feed mounts the card once, right after the story tray and before the composer', () => {
+test('Feed mounts the card once, right after the stories-and-composer region and before the feed', () => {
   const feed = read('src/pages/Feed.tsx');
   assert.match(feed, /^import FirstWeekCard from '\.\/FirstWeekCard';$/m);
-  assert.match(feed, /<StoryTray variant="home" \/>\s*<FirstWeekCard \/>\s*<Composer/);
+  // Gym First: the stories row and the composer share one hairline region; the first-week module follows it.
+  assert.match(feed, /<StoryTray variant="home"[^>]*\/>\s*<Composer[\s\S]*?\/>\s*<\/div>\s*<FirstWeekCard \/>/);
   assert.equal((feed.match(/<FirstWeekCard \/>/g) || []).length, 1);
   assert.match(read('src/App.tsx'), /<WelcomeSheet \/>/, 'the WelcomeSheet stays mounted from App.tsx');
   assert.ok(!feed.includes('WelcomeSheet'), 'Feed does not mount a second WelcomeSheet');
