@@ -470,16 +470,21 @@ test('every api.get literal in the card and the model is pinned in contracts/bac
   assert.ok(literals.includes('/workouts/logs') && literals.includes('/gyms/community/my-communities') && literals.includes('/meals/streak'));
 });
 
-test('WorkoutLogs seeds the form from ?starter=1 and deletes the param; Discover opens the tab from ?tab=', () => {
-  const logs = read('src/pages/WorkoutLogs.tsx');
-  assert.match(logs, /params\.get\(['"]starter['"]\)/);
-  assert.match(logs, /n\.delete\('starter'\)/);
-  assert.match(logs, /starterLogSeed\(/);
-  assert.match(logs, /pickStarterTemplate\(/);
-  assert.match(logs, /queryKey: \['workouts', 'premade'\]/);
+test('History forwards ?starter=1 to the session route, which seeds the form from it; Discover opens the tab from ?tab=', () => {
+  // /workouts/logs?log=1&starter=1 → (shell redirect) /workouts/history?log=1&starter=1 → /workouts/history/new?starter=1
+  const history = read('src/pages/WorkoutHistory.tsx');
+  assert.match(history, /params\.get\(['"]starter['"]\)/);
+  assert.match(history, /n\.delete\('starter'\)/);
+  assert.match(history, /TRAIN\.newSession\(\{ from: fromId \?\? undefined, starter: wantsStarter \}\)/);
+  const session = read('src/pages/workouts/SessionDetail.tsx');
+  assert.match(session, /params\.get\('starter'\) === '1'/);
+  assert.match(session, /starterLogSeed\(/);
+  assert.match(session, /pickStarterTemplate\(/);
+  assert.match(session, /queryKey: \['workouts', 'premade'\]/);
   assert.equal(fw.STARTER_SEED_KEY, 'starter');
-  assert.match(logs, /key: STARTER_SEED_KEY/, 'the starter seed is keyed by the shared constant');
-  assert.match(logs, /seedKey === STARTER_SEED_KEY\s*\?\s*firstWeekStrings\.starter\.logDescription/, 'the starter gets its own description, never "Based on Start here."');
+  assert.match(session, /key: STARTER_SEED_KEY/, 'the starter seed is keyed by the shared constant');
+  assert.match(session, /description = firstWeekStrings\.starter\.logDescription;/, 'the starter gets its own description, never "Based on Start here."');
+  assert.doesNotMatch(session, /Based on Start here/);
   const discover = read('src/pages/Discover.tsx');
   assert.match(discover, /useSearchParams/);
   assert.match(discover, /get\(['"]tab['"]\)/);

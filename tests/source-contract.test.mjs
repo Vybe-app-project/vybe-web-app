@@ -128,8 +128,9 @@ test('admin sessions are tab-scoped and legacy paths still resolve', () => {
   // A meal shared from the app travels as its 64-hex share token and must land on the shared-meal page.
   assert.match(read('src/lib/shareLinks.ts'), /case 'meal':\s*return MEAL_SHARE_TOKEN\.test\(id\) \? `\/meals\/shared\/\$\{q\}` : `\/meals\/\$\{q\}`/);
   // Editing a workout must use the full-update route; PATCH /workouts/:id only changes visibility.
-  assert.match(read('src/pages/Workouts.tsx'), /api\.put<[^>]*>\(`\/workouts\/update\/\$\{editing\._id\}`/);
-  assert.doesNotMatch(read('src/pages/Workouts.tsx'), /api\.patch<[^>]*>\(`\/workouts\/\$\{editing\._id\}`/);
+  // The editor is its own route module (/workouts/new, /workouts/:workoutId/edit) since the gym-first redesign.
+  assert.match(read('src/pages/workouts/WorkoutEditor.tsx'), /api\.put<[^>]*>\(`\/workouts\/update\/\$\{editing\._id\}`/);
+  assert.doesNotMatch(read('src/pages/workouts/WorkoutEditor.tsx'), /api\.patch<[^>]*>\(`\/workouts\/\$\{editing\._id\}`/);
   assert.match(read('src/pages/Gyms.tsx'), /params\.get\('gym'\)/);
   // API-emitted links: emails carry /support.html, meal shares carry /meals/shared/<token>.
   assert.match(appSrc, /path=["']\/support\.html["']/);

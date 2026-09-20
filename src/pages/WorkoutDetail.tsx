@@ -17,21 +17,21 @@ import {
   IconButton,
   Input,
   Menu,
-  PageHeader,
   Section,
   Skeleton,
   SkeletonRow,
   SkeletonText,
-  StatGrid,
-  StatTile,
-  cx,
   formatStat,
   humanize,
   type MenuItem,
   useToast,
 } from './ui';
-import { Activity, Clock, Copy, Dumbbell, Edit, Flag, Flame, Layers, MessageCircle, Send, ShareUp, Trash } from './icons';
-import { AddToPlanModal, LikeButton, WorkoutModal, shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise, type WorkoutPlan } from './Workouts';
+import { Activity, Clock, Copy, Dumbbell, Edit, Flag, Flame, Layers, MessageCircle, Play, Send, ShareUp, Trash } from './icons';
+import { RouteSheet } from '../components/RouteSheet';
+import { LikeButton, MetaList, categoryTone } from './workouts/cards';
+import { shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise, type WorkoutPlan } from './workouts/model';
+import { AddToPlanModal } from './workouts/planPickers';
+import { TRAIN, useSheetClose, useSheetNav } from './workouts/sheet';
 import { useReportModal } from './Report';
 
 type WorkoutComment = {
@@ -110,6 +110,12 @@ function Prescription({ ex }: { ex: WorkoutExercise }) {
   );
 }
 
+/**
+ * /workouts/:workoutId — one library workout as a sheet over the page that
+ * opened it (a page on phones, or when the URL is loaded cold). Editing is
+ * its own route, /workouts/:workoutId/edit; "Log this workout" seeds a new
+ * session at /workouts/history/new?from=<id>.
+ */
 export default function WorkoutDetail() {
   const { workoutId = '' } = useParams();
   const navigate = useNavigate();
@@ -117,8 +123,9 @@ export default function WorkoutDetail() {
   const qc = useQueryClient();
   const toast = useToast();
   const { user } = useAuth();
+  const { open } = useSheetNav();
+  const close = useSheetClose(TRAIN.hub);
   const [comment, setComment] = useState('');
-  const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addToPlan, setAddToPlan] = useState(false);
   const [pendingComment, setPendingComment] = useState<WorkoutComment | null>(null);
@@ -251,7 +258,7 @@ export default function WorkoutDetail() {
       toast.success('Workout deleted');
       qc.removeQueries({ queryKey });
       qc.invalidateQueries({ queryKey: ['workouts'] });
-      navigate('/workouts', { replace: true, viewTransition: true });
+      navigate(TRAIN.hub, { replace: true, viewTransition: true });
     },
     onError: (e) => toast.error(errMsg(e, 'Could not delete workout')),
   });
@@ -260,7 +267,7 @@ export default function WorkoutDetail() {
 
   const menu: MenuItem[] = data
     ? [
-        ...(isOwn ? [{ label: 'Edit', icon: <Edit size={18} />, onSelect: () => setEditOpen(true) }] : []),
+        ...(isOwn ? [{ label: 'Edit', icon: <Edit size={18} />, onSelect: () => open(TRAIN.editWorkout(data._id)) }] : []),
         { label: 'Add to plan', description: 'Schedule it into one of your plans', icon: <Layers size={18} />, onSelect: () => setAddToPlan(true) },
         { label: 'Share', icon: <ShareUp size={18} />, onSelect: () => void shareWorkout(data, toast, 'share') },
         { label: 'Copy link', icon: <Copy size={18} />, onSelect: () => void shareWorkout(data, toast, 'copy') },
@@ -271,37 +278,27 @@ export default function WorkoutDetail() {
       ]
     : [];
 
-  const headerActions = data ? (
-    <>
-      <LikeButton liked={liked} count={(data.likes ?? []).length} disabled={like.isPending} onToggle={() => like.mutate()} />
-      <Menu items={menu} label={`More options for ${title}`} />
-    </>
-  ) : null;
-
   if (isLoading) {
     return (
-      <>
-        <PageHeader title="Workout" />
+      <RouteSheet title="Workout" onClose={close}>
         <DetailSkeleton />
-      </>
+      </RouteSheet>
     );
   }
 
   if (isError || !data) {
     if (plan.isLoading) {
       return (
-        <>
-          <PageHeader title="Workout plan" />
+        <RouteSheet title="Workout plan" onClose={close}>
           <DetailSkeleton />
-        </>
+        </RouteSheet>
       );
     }
     // Canonical plan pages live under /workouts/plans/:planId; older share
     // links used the workout path, so send them on.
     if (plan.data) return <Navigate to={`/workouts/plans/${plan.data._id}`} replace />;
     return (
-      <>
-        <PageHeader title="Workout" />
+      <RouteSheet title="Workout" onClose={close}>
         <ErrorState
           error={error}
           title="Workout not found"
@@ -311,13 +308,13 @@ export default function WorkoutDetail() {
               <Button variant="primary" onClick={() => void refetch()}>
                 Try again
               </Button>
-              <Button variant="secondary" onClick={() => navigate('/workouts', { viewTransition: true })}>
+              <Button variant="secondary" onClick={close}>
                 Back to workouts
               </Button>
             </div>
           }
         />
-      </>
+      </RouteSheet>
     );
   }
 
@@ -328,27 +325,36 @@ export default function WorkoutDetail() {
   const author = data.createdBy;
 
   return (
-    <div className="space-y-6">
-      <PageHeader title={title} actions={headerActions} />
+    <RouteSheet title={title} onClose={close}>
+    <div className="space-y-section">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge tone={categoryTone(data.category)}>{humanize(data.category)}</Badge>
+          {data.level ? <Badge>{humanize(data.level)}</Badge> : null}
+          {data.isPremade ? <Badge tone="info">Premade</Badge> : null}
+          {isOwn && data.isPublic === false ? <Badge>Private</Badge> : null}
+        </div>
+        <div className="flex items-center gap-1">
+          <LikeButton liked={liked} count={(data.likes ?? []).length} disabled={like.isPending} onToggle={() => like.mutate()} />
+          <Menu items={menu} label={`More options for ${title}`} />
+        </div>
+      </div>
 
       <Card padded={false} className="overflow-hidden">
-        <div className={cx('relative bg-surface-2', cover ? 'aspect-[16/9] w-full md:aspect-auto md:h-72 lg:h-80' : 'flex aspect-[21/9] w-full items-center justify-center md:aspect-auto md:h-40')}>
-          {cover ? (
+        {cover ? (
+          <div className="relative aspect-[16/9] w-full bg-surface-2 md:aspect-auto md:h-64">
             <img src={cover} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <span className="inline-flex flex-col items-center gap-2 text-text-3" aria-hidden="true">
-              <Dumbbell size={40} />
-              <span className="type-label">{humanize(data.category)}</span>
-            </span>
-          )}
-        </div>
-        <div className="space-y-4 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge tone="brand">{humanize(data.category)}</Badge>
-            {data.level ? <Badge>{humanize(data.level)}</Badge> : null}
-            {data.isPremade ? <Badge tone="accent">Premade</Badge> : null}
-            {isOwn && data.isPublic === false ? <Badge>Private</Badge> : null}
           </div>
+        ) : null}
+        <div className="space-y-4 p-4 sm:p-5">
+          <MetaList
+            items={[
+              { icon: <Activity size={14} />, label: plural(exercises.length, 'exercise') },
+              totalSets > 0 && { icon: <Dumbbell size={14} />, label: plural(totalSets, 'set') },
+              !!data.duration && { icon: <Clock size={14} />, label: `${formatStat(data.duration)} min` },
+              !!data.caloriesBurned && { icon: <Flame size={14} />, label: `${formatStat(data.caloriesBurned)} kcal` },
+            ]}
+          />
 
           {data.description ? <p className="prose-measure text-base text-text-1">{data.description}</p> : null}
 
@@ -387,15 +393,8 @@ export default function WorkoutDetail() {
         </div>
       </Card>
 
-      <StatGrid columns={4}>
-        <StatTile label="Exercises" value={formatStat(exercises.length)} icon={<Activity size={18} />} tone="brand" />
-        <StatTile label="Sets" value={formatStat(totalSets)} icon={<Dumbbell size={18} />} hint={totalSets ? undefined : 'Not specified'} />
-        <StatTile label="Duration" value={data.duration ? formatStat(data.duration) : '–'} unit={data.duration ? 'min' : undefined} icon={<Clock size={18} />} hint={data.duration ? undefined : 'Not specified'} />
-        <StatTile label="Burn" value={data.caloriesBurned ? formatStat(data.caloriesBurned) : '–'} unit={data.caloriesBurned ? 'kcal' : undefined} icon={<Flame size={18} />} tone={data.caloriesBurned ? 'accent' : 'neutral'} hint={data.caloriesBurned ? undefined : 'Not specified'} />
-      </StatGrid>
-
       <Section title="Exercises" description={exercises.length ? 'In order, with the prescribed sets, reps and load.' : undefined} action={
-        <Button variant="secondary" onClick={() => navigate(`/workouts/logs?log=1&from=${data._id}`, { viewTransition: true })} icon={<Dumbbell size={18} />}>
+        <Button variant="primary" onClick={() => open(TRAIN.newSession({ from: data._id }))} icon={<Play size={18} />}>
           Log this workout
         </Button>
       }>
@@ -405,13 +404,13 @@ export default function WorkoutDetail() {
             icon={<Activity size={26} />}
             title="No exercises listed"
             message={isOwn ? 'Add the movements so this workout can be logged and followed.' : 'The author has not listed the movements yet.'}
-            action={isOwn ? { label: 'Add exercises', onClick: () => setEditOpen(true), icon: <Edit size={18} /> } : undefined}
+            action={isOwn ? { label: 'Add exercises', onClick: () => open(TRAIN.editWorkout(data._id)), icon: <Edit size={18} />, variant: 'secondary' } : undefined}
           />
         ) : (
-          <ol className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface-1 shadow-1">
+          <ol className="divide-y divide-line overflow-hidden rounded-md bg-surface-2">
             {exercises.map((ex, i) => (
               <li key={ex._id ?? `${ex.name}-${i}`} className="flex gap-3 p-4">
-                <span className="type-stat inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-sm text-text-2" aria-hidden="true">
+                <span className="type-stat inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-1 text-sm text-text-2" aria-hidden="true">
                   {i + 1}
                 </span>
                 <div className="min-w-0 flex-1 space-y-1.5">
@@ -454,7 +453,7 @@ export default function WorkoutDetail() {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
           />
-          <Button type="submit" variant="primary" loading={addComment.isPending} disabled={!comment.trim()} icon={<Send size={18} />} aria-label="Post comment">
+          <Button type="submit" variant="secondary" loading={addComment.isPending} disabled={!comment.trim()} icon={<Send size={18} />} aria-label="Post comment">
             <span className="hidden sm:inline">Post</span>
           </Button>
         </form>
@@ -514,7 +513,6 @@ export default function WorkoutDetail() {
         {plural((data.likes ?? []).length, 'like')}, {plural(comments.length, 'comment')}
       </p>
 
-      <WorkoutModal open={editOpen} editing={data} onClose={() => setEditOpen(false)} />
       <AddToPlanModal workout={addToPlan ? data : null} onClose={() => setAddToPlan(false)} />
       <ConfirmDialog
         open={Boolean(pendingComment)}
@@ -538,5 +536,6 @@ export default function WorkoutDetail() {
       />
       {reportModal}
     </div>
+    </RouteSheet>
   );
 }
