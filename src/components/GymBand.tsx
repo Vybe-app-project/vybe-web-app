@@ -7,8 +7,20 @@ import { MapPin } from './icons';
 import { MapTile, osmHref } from './MapTile';
 import { AvatarStack, ButtonLink, Skeleton, cx, formatStat } from './ui';
 
-/** "1 member" / "128 members": every community starts at one (its creator), so the singular is the normal case. */
-export const memberCountLabel = (n: number) => `${formatStat(n)} ${n === 1 ? 'member' : 'members'}`;
+/**
+ * "1 member" / "128 members": every community starts at one (its creator), so
+ * the singular is the normal case, not an edge case.
+ *
+ * `long` appends "Only you so far" at exactly one member. A bare "1 member"
+ * is honest but reads like a screen that has not finished loading; the longer
+ * form tells the founder that being alone is expected. Use it where there is
+ * room for a sentence and keep the bare count in tight meta lines. The mobile
+ * client makes the same split, so the two agree wherever they overlap.
+ */
+export const memberCountLabel = (n: number, options: { long?: boolean } = {}) => {
+  const count = `${formatStat(n)} ${n === 1 ? 'member' : 'members'}`;
+  return options.long && n === 1 ? `${count} \u00b7 Only you so far` : count;
+};
 
 /**
  * The gym band: the cover every hub wears. The gym is Vybe's social unit, so

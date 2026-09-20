@@ -331,7 +331,7 @@ function HomeGymSection() {
   if (communityId) {
     const name = gym.data?.name?.trim() || placeName || 'Your home gym';
     const vicinity = gym.data?.vicinity?.trim() || '';
-    const members = typeof gym.data?.totalMembers === 'number' && gym.data.totalMembers > 0 ? memberCountLabel(gym.data.totalMembers) : '';
+    const members = typeof gym.data?.totalMembers === 'number' && gym.data.totalMembers > 0 ? memberCountLabel(gym.data.totalMembers, { long: true }) : '';
     body = (
       <div className="flex flex-wrap items-center gap-4">
         <HomeGymThumb community={gym.data} name={name} />
