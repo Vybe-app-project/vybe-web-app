@@ -72,9 +72,10 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 }
 
 /**
- * Generated identity: one of five token gradient pairs (--identity-1..5) with
- * its ink, picked by hashing an id or handle so a person or place always gets
- * the same colour everywhere. The grey-initials tile is gone.
+ * Generated identity: a neutral disc with initials (Instagram's #efefef / #666
+ * in light, #2a2a2a / #a8a8a8 in dark). The five --identity-N slots all bind
+ * to that one pair now; the hash stays so a seed keeps a stable slot should
+ * the set ever grow again, and PlaceImage shares it.
  */
 export function identityIndex(seed?: string | null): 1 | 2 | 3 | 4 | 5 {
   const text = (seed ?? '').trim() || '?';
@@ -3229,7 +3230,8 @@ export function Progress({
       aria-valuenow={Math.round(value)}
       className={cx('w-full overflow-hidden rounded-full bg-surface-3', size === 'sm' ? 'h-1.5' : 'h-2.5', className)}
     >
-      <div className="h-full rounded-full [transition:width_var(--duration-4)_var(--ease-out)]" style={{ width: `${pct}%`, background: bg }} />
+      {/* The fill grows on transform, never on width. */}
+      <div className="h-full w-full origin-left rounded-full [transition:transform_var(--duration-4)_var(--ease-out)]" style={{ transform: `scaleX(${pct / 100})`, background: bg }} />
     </div>
   );
 }
