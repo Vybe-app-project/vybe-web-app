@@ -14,7 +14,7 @@ import {
 import { clearDraftEmail, readDraftEmail, writeDraftEmail } from '../lib/authDrafts';
 import { isEmail } from '../lib/hooks';
 import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, cx, useDocumentTitle } from './ui';
-import { Eye, EyeOff } from './icons';
+import { Dumbbell, Eye, EyeOff, Users, Zap } from './icons';
 import { PendingDeletionInterstitial, SignInLifecycleNotice } from './settings/SignInLifecycleNotice';
 
 /* ------------------------------------------------------------------ *
@@ -50,23 +50,37 @@ export function AuthShell({
 
   return (
     <div className="min-h-dvh bg-bg text-text-1 lg:grid lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
-      <aside className="dark safe-top relative flex flex-col bg-bg text-text-1 lg:min-h-dvh lg:justify-between lg:px-14 lg:py-12">
+      <aside className="auth-hero dark safe-top relative flex flex-col overflow-hidden bg-bg text-text-1 lg:min-h-dvh lg:justify-between lg:px-14 lg:py-12">
+        <span className="auth-hero-geo auth-hero-geo-1" aria-hidden="true" />
+        <span className="auth-hero-geo auth-hero-geo-2" aria-hidden="true" />
         {/* Mobile band: mark + wordmark + the line */}
-        <div className="flex flex-col items-center px-6 pb-8 pt-10 text-center lg:hidden">
+        <div className="relative flex flex-col items-center px-6 pb-8 pt-10 text-center lg:hidden">
           <BrandMark size={56} title="Vybe" className="text-mark" />
           <p className="type-display mt-4 text-xl text-text-1">{headline}</p>
         </div>
 
         {/* Desktop hero */}
-        <Link to="/login" className="hidden w-fit rounded-sm lg:inline-flex" aria-label="Vybe">
+        <Link to="/login" className="relative hidden w-fit rounded-sm lg:inline-flex" aria-label="Vybe">
           <Brand size="md" tone="brand" />
         </Link>
-        <div className="hidden lg:block">
-          <BrandMark size={200} className="text-mark" />
-          <h2 className="type-display mt-10 text-display text-text-1">{headline}</h2>
+        <div className="relative hidden lg:block">
+          <h2 className="type-display text-display text-text-1">{headline}</h2>
           <p className="mt-5 max-w-md text-md text-text-2">{tagline}</p>
+          <ul className="mt-10 grid max-w-md gap-3" aria-label="What Vybe does">
+            {AUTH_POINTS.map((p) => (
+              <li key={p.title} className="flex items-start gap-3 rounded-md border border-line bg-surface-1/60 p-3.5 backdrop-blur-sm">
+                <span className="mt-0.5 inline-grid size-8 shrink-0 place-items-center rounded-sm bg-brand-soft text-brand-text">
+                  <p.Icon size={18} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-text-1">{p.title}</span>
+                  <span className="block text-xs leading-relaxed text-text-2">{p.body}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <p className="hidden text-xs text-text-3 lg:block">Vybe is social fitness. Free to join.</p>
+        <p className="relative hidden text-xs text-text-3 lg:block">Vybe is social fitness. Free to join.</p>
       </aside>
 
       <main className="flex flex-1 flex-col lg:min-h-dvh lg:justify-center lg:bg-surface-1">
@@ -80,6 +94,12 @@ export function AuthShell({
     </div>
   );
 }
+
+const AUTH_POINTS = [
+  { Icon: Dumbbell, title: 'Log the work', body: 'Sessions, meals, water and weight in one place.' },
+  { Icon: Users, title: 'Find your gym', body: 'See who trains where you do and keep each other honest.' },
+  { Icon: Zap, title: 'Share the wins', body: 'Post a PR, join a challenge, earn the badge.' },
+] as const;
 
 /**
  * Move focus to the first field in error so keyboard and screen-reader users
@@ -138,11 +158,11 @@ export function PasswordField({
  * half-finished sign-up or sign-in is not thrown away, and each is a 44 px
  * target (the inline text alone measured 14 px tall on a phone).
  */
-const LEGAL_LINK = 'inline-flex min-h-11 items-center rounded-sm px-1 -mx-1 font-semibold text-text-2 underline-offset-2 hover:underline';
+const LEGAL_LINK = 'inline-flex min-h-11 items-center -my-3 rounded-sm px-1 -mx-1 font-semibold text-text-2 underline-offset-2 hover:underline whitespace-nowrap';
 
 export function LegalLine({ className }: { className?: string }) {
   return (
-    <p className={cx('text-center text-xs leading-relaxed text-text-3', className)}>
+    <p className={cx('text-balance text-center text-xs leading-relaxed text-text-3', className)}>
       By continuing you agree to the Vybe{' '}
       <a href="/terms-and-conditions.html" target="_blank" rel="noopener noreferrer" className={LEGAL_LINK}>
         Terms<span className="sr-only"> (opens in a new tab)</span>

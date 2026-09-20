@@ -2425,15 +2425,21 @@ function isActionSpec(a: EmptyStateAction): a is EmptyStateActionSpec {
 function renderAction(a: EmptyStateAction, fallbackVariant: ButtonVariant) {
   if (!a) return null;
   if (isActionSpec(a)) {
+    // The first action in an empty state is the thing to do next. Pages pass
+    // `secondary` because the band already spends the brand blue; a bare grey
+    // pill under a heading still read as disabled, so a secondary first action
+    // takes the ink fill (the same treatment as a "Start" on a recent workout).
+    const ink = fallbackVariant === 'primary' && (a.variant ?? fallbackVariant) === 'secondary';
+    const cls = ink ? 'btn-ink' : undefined;
     if (a.to) {
       return (
-        <ButtonLink to={a.to} state={a.state} variant={a.variant ?? fallbackVariant} icon={a.icon}>
+        <ButtonLink to={a.to} state={a.state} variant={a.variant ?? fallbackVariant} icon={a.icon} className={cls}>
           {a.label}
         </ButtonLink>
       );
     }
     return (
-      <Button variant={a.variant ?? fallbackVariant} onClick={a.onClick} icon={a.icon}>
+      <Button variant={a.variant ?? fallbackVariant} onClick={a.onClick} icon={a.icon} className={cls}>
         {a.label}
       </Button>
     );
@@ -2481,14 +2487,14 @@ export function EmptyState({
     <div
       className={cx(
         'flex flex-col items-center justify-center text-center',
-        size === 'sm' ? 'gap-2 px-4 py-8' : size === 'lg' ? 'gap-4 px-6 py-20' : 'gap-3 px-6 py-14',
+        size === 'sm' ? 'gap-2 px-4 py-6' : size === 'lg' ? 'gap-3.5 px-6 py-14' : 'gap-3 px-6 py-10',
         className,
       )}
     >
       {glyph ? (
         <div
           className={cx(
-            'flex h-14 w-14 items-center justify-center rounded-full',
+            'mb-1 flex h-14 w-14 items-center justify-center rounded-full',
             variant === 'error' ? 'bg-danger-soft text-danger' : 'bg-surface-2 text-text-2',
           )}
         >
@@ -2497,15 +2503,21 @@ export function EmptyState({
       ) : family ? (
         (() => {
           const Art = ILLUSTRATIONS[family];
-          return <Art size={size === 'sm' ? 64 : 96} className="text-text-3" />;
+          return (
+            <span className={cx('mb-1 inline-grid place-items-center rounded-full bg-surface-2', size === 'sm' ? 'size-20' : 'size-28')}>
+              <Art size={size === 'sm' ? 48 : 68} className="text-text-2" />
+            </span>
+          );
         })()
       ) : (
-        <PairFigure size={size === 'sm' ? 64 : 96} className="text-text-3" />
+        <span className={cx('mb-1 inline-grid place-items-center rounded-full bg-surface-2', size === 'sm' ? 'size-20' : 'size-28')}>
+          <PairFigure size={size === 'sm' ? 48 : 68} className="text-text-2" />
+        </span>
       )}
-      <Heading className={cx('type-heading text-text-1', size === 'sm' ? 'text-md' : 'text-lg')}>{title}</Heading>
-      {text ? <p className="max-w-sm text-sm leading-relaxed text-text-2">{text}</p> : null}
+      <Heading className={cx('type-heading text-balance text-text-1', size === 'sm' ? 'text-md' : 'text-lg')}>{title}</Heading>
+      {text ? <p className="max-w-sm text-balance text-sm leading-relaxed text-text-2">{text}</p> : null}
       {action || secondaryAction ? (
-        <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
           {renderAction(action, 'primary')}
           {renderAction(secondaryAction, 'ghost')}
         </div>
@@ -2872,12 +2884,17 @@ export const seriesColor = (i: number) => chartTheme.series[i % chartTheme.serie
 
 /** A dashed baseline across a chart's box, with an optional line of direction under it; the empty state for any chart. */
 export function ChartEmpty({ height = 160, label, className }: { height?: number; label?: string; className?: string }) {
+  // A ghost of the chart to come: faint gridlines and a flat baseline, so the
+  // card keeps its shape and the eye reads "no data yet" rather than "broken".
   return (
     <div className={cx('flex flex-col items-center justify-end', className)} style={{ height }} role={label ? 'img' : undefined} aria-label={label}>
-      <svg viewBox="0 0 100 8" preserveAspectRatio="none" width="100%" height={8} aria-hidden="true">
-        <path d="M0 4 L100 4" fill="none" {...chartTheme.emptyBaseline} vectorEffect="non-scaling-stroke" />
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true" className="min-h-0 flex-1">
+        {[8, 18, 28].map((y) => (
+          <path key={y} d={`M0 ${y} L100 ${y}`} fill="none" stroke="var(--line)" strokeWidth={1} strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+        ))}
+        <path d="M0 38 L100 38" fill="none" {...chartTheme.emptyBaseline} vectorEffect="non-scaling-stroke" />
       </svg>
-      {label ? <p className="mt-3 text-xs text-text-3">{label}</p> : null}
+      {label ? <p className="mt-3 text-center text-xs text-text-2">{label}</p> : null}
     </div>
   );
 }

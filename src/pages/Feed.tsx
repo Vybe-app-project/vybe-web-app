@@ -212,9 +212,12 @@ function Composer({
         <IconButton label="Add a photo" variant="secondary" onClick={() => photoRef.current?.click()}>
           <ImageIcon size={22} />
         </IconButton>
-        <IconButton label="Add a video" variant="secondary" onClick={() => videoRef.current?.click()} className="hidden sm:inline-flex">
-          <VideoIcon size={22} />
-        </IconButton>
+        {/* IconButton sets its own display, so `hidden` on it cannot win; the wrapper hides it on phones. */}
+        <span className="hidden sm:contents">
+          <IconButton label="Add a video" variant="secondary" onClick={() => videoRef.current?.click()}>
+            <VideoIcon size={22} />
+          </IconButton>
+        </span>
       </div>
     );
   }

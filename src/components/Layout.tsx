@@ -928,12 +928,16 @@ function BottomTab({ tab, active, badge }: { tab: (typeof TABS)[number]; active:
         aria-label={label}
         aria-current={active ? 'page' : undefined}
         {...navProps}
-        className={cx('relative flex min-h-11 flex-1 items-center justify-center rounded-sm transition-colors dur-1', active ? 'text-text-1' : 'text-text-1 hover:text-text-2')}
+        className={cx(
+          'relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-sm pt-1.5 pb-1 transition-colors dur-1',
+          active ? 'text-text-1' : 'text-text-3 hover:text-text-1',
+        )}
       >
         <span className="relative">
-          <Icon size={24} filled={active} />
+          <Icon size={24} filled={active} strokeWidth={active ? 2.2 : 1.8} />
           {key === 'home' && badge ? <CountBadge value={badge} className="absolute -right-2.5 -top-1.5" /> : null}
         </span>
+        <span className={cx('text-[0.6875rem] leading-none', active ? 'font-semibold' : 'font-medium')}>{label}</span>
       </Link>
     </li>
   );
@@ -941,7 +945,7 @@ function BottomTab({ tab, active, badge }: { tab: (typeof TABS)[number]; active:
 
 function BottomNav({ meta, homeBadge }: { meta: RouteMeta; homeBadge: string | number | null }) {
   return (
-    <nav aria-label="Primary" className="vt-nav safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface-1 lg:hidden">
+    <nav aria-label="Primary" className="vt-nav safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface-1/95 backdrop-blur-xl lg:hidden">
       <ul className="mx-auto flex h-14 max-w-lg items-stretch justify-around px-1">
         {TABS.map((tab) => (
           <BottomTab key={tab.key} tab={tab} active={meta.tab === tab.key} badge={homeBadge} />
@@ -1205,7 +1209,10 @@ function ShellBand({
   // Desktop, no gym: the page header below owns the page's primary action, so
   // the band's find-your-gym call is tonal there; on phones the band is the
   // page's header and its one CTA is the page's action, else find-your-gym.
-  const noGymAction = !hub && !gym && !loading ? (wide ? <ButtonLink to={NO_GYM_COPY.href} variant="secondary">{NO_GYM_COPY.action}</ButtonLink> : band.action) : undefined;
+  // On the Gyms page itself the search field below is the way to find a gym,
+  // so a button that reloads the same page is dropped.
+  const onGymsPage = meta.pattern === NO_GYM_COPY.href;
+  const noGymAction = !hub && !gym && !loading ? (wide ? (onGymsPage ? null : <ButtonLink to={NO_GYM_COPY.href} variant="secondary">{NO_GYM_COPY.action}</ButtonLink>) : band.action) : undefined;
   const bandHasPrimary = hub ? !!band.action : !gym && !loading && !wide;
   const mintLog = !bandHasPrimary && !wide && !!gym;
   return (
