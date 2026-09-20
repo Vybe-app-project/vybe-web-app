@@ -160,17 +160,22 @@ function WeekStrip({ items }: { items: StripItem[] }) {
 /** Replaces the strip until the first session exists. One quiet action; the band already holds the primary. */
 function FirstSessionPrompt() {
   return (
-    <Card container className="flex flex-col gap-4 @md:flex-row @md:items-center @md:justify-between">
-      <div className="flex items-start gap-4">
-        <IllustrationTrain size={56} className="hidden shrink-0 text-text-3 @sm:block" />
-        <div className="min-w-0">
-          <h2 className="type-heading text-md text-text-1">Your first session goes here</h2>
-          <p className="mt-1 max-w-prose text-sm text-text-2">Log what you did today, or start from a premade. Your sessions, minutes and volume fill in from the first one.</p>
+    // A container cannot query its own width, so the row lives one level in.
+    <Card container>
+      <div className="flex flex-col gap-4 @md:flex-row @md:items-center @md:justify-between">
+        <div className="flex items-start gap-4">
+          <span className="hidden size-14 shrink-0 place-items-center rounded-full bg-surface-2 text-text-2 @sm:grid">
+            <IllustrationTrain size={40} />
+          </span>
+          <div className="min-w-0">
+            <h2 className="type-heading text-md text-text-1">Your first session goes here</h2>
+            <p className="mt-1 max-w-prose text-sm text-text-2">Log what you did today, or start from a premade. Your sessions, minutes and volume fill in from the first one.</p>
+          </div>
         </div>
+        <ButtonLink to={TRAIN.tab('premade')} variant="secondary" className="shrink-0 self-start @md:self-auto">
+          Browse premade
+        </ButtonLink>
       </div>
-      <ButtonLink to={TRAIN.tab('premade')} variant="secondary" className="shrink-0 self-start @md:self-auto">
-        Browse premade
-      </ButtonLink>
     </Card>
   );
 }
@@ -257,18 +262,18 @@ function WorkoutCard({
       <CardLink to={href} label={`Open ${workout.title}`} state={state} />
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h3 className="type-heading truncate text-lg text-text-1">{workout.title}</h3>
+          <h3 className="type-heading line-clamp-2 text-lg text-text-1">{workout.title}</h3>
           <p className="tabular mt-0.5 truncate text-xs text-text-2">
             {exerciseCount(count)}
             {workout.duration ? ` · ${formatStat(workout.duration)} min` : ''}
           </p>
         </div>
-        <div className="relative z-[2] flex shrink-0 items-center gap-1.5">
-          <Badge tone={categoryTone(workout.category)}>{humanize(workout.category)}</Badge>
-          {workout.isPremade ? <Badge tone="info">Premade</Badge> : null}
-          {isOwn && workout.isPublic === false ? <Badge>Private</Badge> : null}
-          <Menu items={menu} label={`More options for ${workout.title}`} className="-mr-2 -mt-1.5" />
-        </div>
+        <Menu items={menu} label={`More options for ${workout.title}`} className="relative z-[2] -mr-2 -mt-1.5 shrink-0" />
+      </div>
+      <div className="relative z-[2] -mt-1 flex flex-wrap items-center gap-1.5">
+        <Badge tone={categoryTone(workout.category)}>{humanize(workout.category)}</Badge>
+        {workout.isPremade ? <Badge tone="info">Premade</Badge> : null}
+        {isOwn && workout.isPublic === false ? <Badge>Private</Badge> : null}
       </div>
 
       {line ? (
@@ -285,7 +290,7 @@ function WorkoutCard({
           <i aria-hidden="true" className={cx('h-2 w-2 shrink-0 rounded-full', recent ? 'bg-text-1' : 'bg-text-3')} />
           <span className="truncate">{lastDate ? relativeDay(lastDate) : 'Not logged yet'}</span>
         </span>
-        <ButtonLink to={TRAIN.newSession({ from: workout._id })} state={state} variant="secondary" size="sm" icon={<Play size={14} />} className={cx('relative z-[2] shrink-0', recent && 'border-transparent bg-text-1 text-bg hover:bg-text-1/90')}>
+        <ButtonLink to={TRAIN.newSession({ from: workout._id })} state={state} variant="secondary" size="sm" icon={<Play size={14} />} className={cx('relative z-[2] shrink-0', recent && 'btn-ink')}>
           {lastDone || !workout.isPremade ? 'Start' : 'Try it'}
         </ButtonLink>
       </div>

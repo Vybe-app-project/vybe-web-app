@@ -565,11 +565,14 @@ function RoomList({
         ) : rooms.isError ? (
           <ErrorState error={rooms.error} title="Couldn’t load your chats" onRetry={() => rooms.refetch()} />
         ) : list.length === 0 && !q ? (
+          // Two-pane: the page header already carries the primary New message
+          // button, so this pane points at friends instead of repeating it.
           <EmptyState
+            size={compact ? 'md' : 'sm'}
             title="No conversations yet"
             message="Message a friend or start a group — training is better together."
-            action={{ label: 'New message', onClick: onNewMessage, icon: <Edit size={18} /> }}
-            secondaryAction={{ label: 'Find friends', to: '/friends' }}
+            action={compact ? { label: 'New message', onClick: onNewMessage, icon: <Edit size={18} /> } : { label: 'Find friends', to: '/friends', variant: 'secondary' }}
+            secondaryAction={compact ? { label: 'Find friends', to: '/friends' } : undefined}
           />
         ) : (
           <>
@@ -2701,8 +2704,8 @@ export default function Messages() {
           <EmptyState
             size="lg"
             title="Your messages"
-            message="Pick a conversation on the left, or start a new one."
-            action={{ label: 'New message', onClick: () => setPickerOpen(true), icon: <Edit size={18} /> }}
+            message={rooms.data?.length ? 'Pick a conversation on the left to read it here.' : 'Start a conversation with the New message button, or find friends first.'}
+            action={rooms.data?.length ? undefined : { label: 'Find friends', to: '/friends', variant: 'secondary' }}
           />
         </div>
       )}
