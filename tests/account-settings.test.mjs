@@ -29,8 +29,8 @@ const hidden = await loadModule('src/lib/hiddenWords.ts');
 const a11y = await loadModule('src/lib/accessibility.ts');
 const types = await loadModule('src/lib/accountTypes.ts');
 
-/** controllers/userController.js SETTINGS_KEYS at 83dbffb ('workout' joined in Wave F1, v2-be-progression). */
-const BACKEND_SETTINGS_KEYS = ['privacy', 'notifications', 'health', 'hiddenWords', 'commentDefault', 'units', 'locale', 'timezone', 'accessibility', 'workout'];
+/** controllers/userController.js SETTINGS_KEYS ('workout' joined in Wave F1, v2-be-progression; 'homeGym' in v2-be-home-gym — live on the deployed API, API.md §1). */
+const BACKEND_SETTINGS_KEYS = ['privacy', 'notifications', 'health', 'hiddenWords', 'commentDefault', 'units', 'locale', 'timezone', 'accessibility', 'workout', 'homeGym'];
 
 /* ------------------------------------------------------------------ timezone */
 

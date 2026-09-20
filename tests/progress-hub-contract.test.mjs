@@ -122,7 +122,7 @@ test('each records route is called once, with the API\'s raw timezone offset; th
 });
 
 test('the settings card sends only { workout } through the shared PATCH and hides with the flag', () => {
-  assert.match(types, /'accessibility',\s+'workout',\s+\] as const;/, "SETTINGS_KEYS ends with 'workout'");
+  assert.match(types, /'accessibility',\s+'workout',\s+'homeGym',\s+\] as const;/, "SETTINGS_KEYS: 'workout' then the Gym First 'homeGym'");
   assert.match(types, /workout\?: \{ progressionHints\?: boolean; defaultRepRange\?: \{ min: number; max: number \} \| null \};/);
   assert.match(types, /export type WorkoutSettings = \{/);
   assert.match(prefs, /export function useAccount\(\)/);
