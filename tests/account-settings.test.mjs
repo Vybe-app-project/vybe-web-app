@@ -31,6 +31,9 @@ const types = await loadModule('src/lib/accountTypes.ts');
 
 /** controllers/userController.js SETTINGS_KEYS at 83dbffb ('workout' joined in Wave F1, v2-be-progression). */
 const BACKEND_SETTINGS_KEYS = ['privacy', 'notifications', 'health', 'hiddenWords', 'commentDefault', 'units', 'locale', 'timezone', 'accessibility', 'workout'];
+// `homeGym` is accepted by the deployed PUT /users/settings (gym-first API.md §1: { community } | { place } | null)
+// and is written by the gym page; the shell package adds it to SETTINGS_KEYS/SettingsPatch.
+const LIVE_SETTINGS_KEYS = [...BACKEND_SETTINGS_KEYS, 'homeGym'];
 
 /* ------------------------------------------------------------------ timezone */
 
@@ -210,7 +213,7 @@ test('every PUT /users/settings body the web sends is inside the backend allow-l
   for (const { file, arg } of callSites) {
     if (arg.startsWith('{')) {
       const first = arg.match(/^\{\s*([A-Za-z]+)/)?.[1];
-      assert.ok(first && BACKEND_SETTINGS_KEYS.includes(first), `${file}: literal body starts with "${first}", not an allow-listed key`);
+      assert.ok(first && LIVE_SETTINGS_KEYS.includes(first), `${file}: literal body starts with "${first}", not an allow-listed key`);
     } else {
       assert.equal(arg, 'patch', `${file}: a non-literal body must be the typed \`patch\` variable`);
       const source = read(file);

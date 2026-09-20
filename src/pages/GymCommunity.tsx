@@ -1,28 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
-import { useAuth } from '../lib/auth';
-import {
-  ACCEPTED_IMAGE_TYPES,
-  MAX_UPLOAD_BYTES,
-  extractHashtags,
-  uploadImage,
-  uploadOwnedMedia,
-  useDebounced,
-  type UploadedMedia,
-} from '../lib/hooks';
+import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, type PublicUser, uploadOwnedMedia, useDebounced } from '../lib/hooks';
 import {
   COMMUNITY_DESCRIPTION_MAX,
   COMMUNITY_NAME_MAX,
   type CommunityLike,
   type CommunityPreset,
   communityNameError,
-  communityPath,
   coverSourceOf,
-  founderIdOf,
   isModRole,
   isObjectId,
   joinLabel,
@@ -31,90 +20,64 @@ import {
   pluralize,
   visibilityBadge,
 } from '../lib/gyms';
+import { memberCountLabel } from '../components/GymBand';
 import {
-  Avatar,
   Badge,
   Button,
-  Callout,
+  Card,
+  CardGrid,
   CardMedia,
-  ConfirmDialog,
   EmptyState,
   ErrorState,
   IconButton,
   Input,
-  Menu,
   Modal,
   PageHeader,
   RadioGroup,
   SearchField,
+  SegmentedControl,
   Skeleton,
-  SkeletonRow,
-  SkeletonText,
   Spinner,
   Switch,
-  Tabs,
   Textarea,
   cx,
   humanize,
   useToast,
-  type MenuItem,
 } from './ui';
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  Globe,
-  Heart,
-  Image as ImageIcon,
-  Lock,
-  MapPin,
-  MessageCircle,
-  Plus,
-  Shield,
-  Trash,
-  Users,
-  X,
-} from './icons';
-import { ContextualInviteButton } from './InviteLinkSheet';
+import { Check, ChevronLeft, ChevronRight, Clock, Image as ImageIcon, Lock, MapPin, Plus, Shield, Users, X } from './icons';
 
-/* ------------------------------------------------------------------ types */
+/* ------------------------------------------------------------------ types (shared with the detail pages) */
 
-type Community = CommunityLike & {
+export type CommunityMember = {
+  _id?: string;
+  role?: string;
+  joinedAt?: string;
+  isFollowing?: boolean;
+  user?: PublicUser;
+};
+
+/**
+ * `GET /gyms/community/:id` (API.md §2): `totalMembers` is a top-level sibling
+ * of `members`, computed from the live array; `vicinity` is street-then-city
+ * free text that may be partial or empty; `googleMapsData.rating` is usually
+ * absent; `timezone` is set by the first event and is often missing.
+ */
+export type Community = CommunityLike & {
   _id: string;
   name?: string;
   description?: string;
   vicinity?: string;
   category?: string;
+  placeId?: string;
+  timezone?: string;
   location?: { latitude?: number; longitude?: number };
   founder?: { _id?: string; username?: string; fullName?: string; avatar?: string } | null;
   foundedAt?: string;
+  totalMembers?: number;
+  members?: CommunityMember[];
+  googleMapsData?: { rating?: number | null } | null;
   stats?: { totalMembers?: number; activeMembers?: number; totalPosts?: number };
   settings?: { isPublic?: boolean; requireApproval?: boolean; maxMembers?: number };
-};
-
-type Member = {
-  _id?: string;
-  role?: string;
-  joinedAt?: string;
-  user?: { _id: string; username?: string; fullName?: string; avatar?: string };
-};
-
-type MembershipRequest = {
-  _id: string;
-  requestedAt?: string;
-  user?: { _id: string; username?: string; fullName?: string; avatar?: string };
-};
-
-type CommunityPost = {
-  _id: string;
-  content?: string;
-  createdAt?: string;
-  media?: { uri?: string; url?: string; type?: string }[];
-  medias?: { uri?: string; url?: string; type?: string }[];
-  author?: { _id: string; username?: string; fullName?: string; avatar?: string };
-  likes?: unknown[];
-  comments?: unknown[];
 };
 
 type Paged<T> = {
@@ -125,12 +88,10 @@ type Paged<T> = {
 type ListTab = 'explore' | 'mine';
 
 const PAGE = 18;
-const POST_MAX_CHARS = 2200;
-const POST_MAX_IMAGES = 4;
 
-/* ------------------------------------------------------------------ helpers */
+/* ------------------------------------------------------------------ helpers (shared) */
 
-const ago = (iso?: string) => {
+export const ago = (iso?: string) => {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -141,9 +102,31 @@ const ago = (iso?: string) => {
   }
 };
 
-const nameOf = (u?: { username?: string; fullName?: string } | null) => u?.fullName?.trim() || u?.username || 'Member';
+export const nameOf = (u?: { username?: string; fullName?: string } | null) => u?.fullName?.trim() || u?.username || 'Member';
 
-const unwrapCommunity = (data: any): Community => (data?.data || data?.gymCommunity || data) as Community;
+export const unwrapCommunity = (data: any): Community => (data?.data || data?.gymCommunity || data) as Community;
+
+export const statusOf = (error: unknown): number | undefined => (error as { response?: { status?: number } } | null)?.response?.status;
+
+/** The community route; `communityPath()` in lib/gyms (the `?community=` share form) redirects here. */
+export const communityHref = (id: string) => `/communities/${encodeURIComponent(id)}`;
+
+/** What a card hands the detail through router state so the band paints before the fetch lands. */
+export type BandPreview = { id?: string; name: string; city?: string; photoUrl?: string };
+
+export const communityLinkState = (c: Community, photoUrl?: string): { gym: BandPreview } => ({
+  gym: { id: c._id, name: c.name || 'Community', city: c.vicinity?.trim() || undefined, photoUrl: photoUrl || undefined },
+});
+
+/**
+ * Member count for a card or a band: `totalMembers` from the details payload,
+ * the stored counter from list payloads. Undefined when neither is a number,
+ * so nothing ever prints a zero (every community has at least its creator).
+ */
+export const memberTotalOf = (c?: Community | null): number | undefined => {
+  const n = typeof c?.totalMembers === 'number' ? c.totalMembers : c?.stats?.totalMembers;
+  return typeof n === 'number' && n > 0 ? n : undefined;
+};
 
 /**
  * Cover image for a community. Signed media URLs and managed keys render
@@ -152,7 +135,7 @@ const unwrapCommunity = (data: any): Community => (data?.data || data?.gymCommun
  * from an object URL (shared across cards).
  */
 const placePhotoCache = new Map<string, Promise<string>>();
-function usePlacePhoto(reference: string | null): string {
+export function usePlacePhoto(reference: string | null): string {
   const [url, setUrl] = useState('');
   useEffect(() => {
     if (!reference) {
@@ -176,7 +159,7 @@ function usePlacePhoto(reference: string | null): string {
   return url;
 }
 
-function useCommunityCover(community?: CommunityLike | null): string {
+export function useCommunityCover(community?: CommunityLike | null): string {
   const source = coverSourceOf(community);
   const placeRef = source?.kind === 'place-photo' ? source.reference : null;
   const fetched = usePlacePhoto(placeRef);
@@ -186,7 +169,27 @@ function useCommunityCover(community?: CommunityLike | null): string {
   return fetched;
 }
 
-function Pager({
+/** Looks a community up by its provider place id (API.md §10): null when none exists yet. */
+export function useCommunityAtPlace(placeId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['community', 'place', placeId],
+    enabled: Boolean(placeId),
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      try {
+        const { data } = await api.get(`/gyms/community/place/${encodeURIComponent(placeId!)}`);
+        const c = unwrapCommunity(data);
+        return c && isObjectId(c._id) ? c : null;
+      } catch (e) {
+        if (statusOf(e) === 404) return null;
+        throw e;
+      }
+    },
+  });
+}
+
+export function Pager({
   page,
   totalPages,
   hasNext,
@@ -218,25 +221,8 @@ function Pager({
   );
 }
 
-function CommunityCardSkeleton() {
-  return (
-    <div className="card p-3">
-      <Skeleton className="aspect-video w-full rounded-md" />
-      <div className="mt-3 space-y-2 px-1">
-        <Skeleton className="h-4 w-2/3" />
-        <Skeleton className="h-3 w-1/2" />
-        <div className="flex gap-2 pt-1">
-          <Skeleton className="h-6 w-20 rounded-xs" />
-          <Skeleton className="h-6 w-16 rounded-xs" />
-        </div>
-      </div>
-      <Skeleton className="mt-3 h-11 w-full rounded-sm" />
-    </div>
-  );
-}
-
-function RoleBadge({ role }: { role?: string | null }) {
-  if (!role) return null;
+export function RoleBadge({ role }: { role?: string | null }) {
+  if (!role || role === 'member') return null;
   return (
     <Badge tone={isModRole(role) ? 'brand' : 'neutral'}>
       {isModRole(role) ? <Shield size={12} /> : null}
@@ -245,7 +231,7 @@ function RoleBadge({ role }: { role?: string | null }) {
   );
 }
 
-function VisibilityBadge({ community }: { community: Community }) {
+export function VisibilityBadge({ community }: { community: Community }) {
   const kind = visibilityBadge(community);
   if (!kind) return null;
   return (
@@ -256,77 +242,16 @@ function VisibilityBadge({ community }: { community: Community }) {
   );
 }
 
-function MembersBadge({ count }: { count: number }) {
-  return (
-    <Badge tone="neutral">
-      <Users size={12} />
-      <span className="tabular">{count}</span> {count === 1 ? 'member' : 'members'}
-    </Badge>
-  );
-}
+/* ------------------------------------------------------------------ join (shared) */
 
-/* ------------------------------------------------------------------ card */
+export type JoinOutcome = 'member' | 'pending' | 'none';
 
-function CommunityCard({
-  community,
-  onOpen,
-  action,
-}: {
-  community: Community;
-  onOpen: () => void;
-  action?: React.ReactNode;
-}) {
-  const cover = useCommunityCover(community);
-  const members = community.stats?.totalMembers ?? 0;
-  const membership = membershipOf(community);
-  return (
-    <article className="card flex flex-col p-3">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="group -m-1 flex-1 rounded-md p-1 text-left"
-        aria-label={`${community.name || 'Community'} — open`}
-      >
-        {/* Inline elements only: block content inside a <button> is invalid HTML. */}
-        <CardMedia as="span" ratio="16/9">
-          {cover ? (
-            <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center text-text-3">
-              <Users size={28} />
-            </span>
-          )}
-        </CardMedia>
-        <span className="mt-3 block space-y-1 px-1">
-          <span className="block truncate text-md font-semibold text-text-1 group-hover:underline group-hover:underline-offset-2">
-            {community.name || 'Community'}
-          </span>
-          <span className="flex min-w-0 items-center gap-1 truncate text-xs text-text-2">
-            {community.vicinity ? <MapPin size={13} className="shrink-0 text-text-3" /> : <Globe size={13} className="shrink-0 text-text-3" />}
-            <span className="truncate">{community.vicinity || community.description || 'Global community'}</span>
-          </span>
-          <span className="flex flex-wrap items-center gap-1.5 pt-1">
-            <MembersBadge count={members} />
-            {community.category && community.category !== 'gym' ? <Badge tone="neutral">{humanize(community.category)}</Badge> : null}
-            <VisibilityBadge community={community} />
-            {membership.isMember ? <RoleBadge role={membership.role} /> : null}
-            {membership.pending ? (
-              <Badge tone="info">
-                <Clock size={12} />
-                Request pending
-              </Badge>
-            ) : null}
-          </span>
-        </span>
-      </button>
-      {action ? <div className="mt-3 border-t border-line pt-3">{action}</div> : null}
-    </article>
-  );
-}
-
-/* ------------------------------------------------------------------ join button */
-
-function useJoinMutation(onJoined?: (communityId: string, status: 'member' | 'pending' | 'none') => void) {
+/**
+ * `POST /gyms/community/join { gymId }` joins, requests, or cancels a pending
+ * request (a second tap). The server's membership status is the truth: after
+ * a cancel it reports `none` and the button simply reads Join again.
+ */
+export function useJoinMutation(onJoined?: (communityId: string, status: JoinOutcome) => void) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
@@ -336,28 +261,32 @@ function useJoinMutation(onJoined?: (communityId: string, status: 'member' | 'pe
     },
     onSuccess: (data) => {
       const msg = data?.message || '';
-      const status = (data.membership?.status as 'member' | 'pending' | 'none' | undefined) || 'none';
-      if (/cancel/i.test(msg)) toast.info('Request withdrawn');
-      else if (status === 'pending' || /request|approval|pending/i.test(msg)) toast.info('Request sent — a moderator will review it');
+      const status = (data.membership?.status as JoinOutcome | undefined) || (/cancel/i.test(msg) ? 'none' : /request|approval|pending/i.test(msg) ? 'pending' : 'member');
+      if (status === 'none') toast.info('Request withdrawn');
+      else if (status === 'pending') toast.info('Request sent — an admin will review it');
       else toast.success('You joined the community');
       qc.invalidateQueries({ queryKey: ['communities'] });
       qc.invalidateQueries({ queryKey: ['community', data.gymId] });
+      qc.invalidateQueries({ queryKey: ['home-gym'] });
       onJoined?.(data.gymId, status);
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not update your membership')),
+    onError: (e) => toast.error(errMsg(e, statusOf(e) === 409 ? 'This community is not taking requests right now' : 'Could not update your membership')),
   });
 }
 
-function JoinButton({
+export function JoinButton({
   community,
   mutation,
   block,
   size,
+  variant,
 }: {
   community: Community;
   mutation: ReturnType<typeof useJoinMutation>;
   block?: boolean;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
+  /** Primary only where the button is the screen's one mint control (the band). */
+  variant?: 'primary' | 'secondary';
 }) {
   const membership = membershipOf(community);
   const busy = mutation.isPending && mutation.variables === community._id;
@@ -366,7 +295,7 @@ function JoinButton({
     <Button
       block={block}
       size={size}
-      variant={membership.pending ? 'secondary' : 'primary'}
+      variant={membership.pending ? 'secondary' : variant ?? 'secondary'}
       loading={busy}
       disabled={mutation.isPending && !busy}
       onClick={() => mutation.mutate(community._id)}
@@ -377,741 +306,72 @@ function JoinButton({
   );
 }
 
-/* ------------------------------------------------------------------ composer */
+/* ------------------------------------------------------------------ card */
 
-function CommunityComposer({
-  communityId,
-  communityName,
-  onPosted,
-  onCancel,
-}: {
-  communityId: string;
-  communityName: string;
-  onPosted: () => void;
-  onCancel: () => void;
-}) {
-  const me = useAuth((s) => s.user);
-  const qc = useQueryClient();
-  const toast = useToast();
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [content, setContent] = useState('');
-  const [medias, setMedias] = useState<UploadedMedia[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
-
-  const dirty = content.trim().length > 0 || medias.length > 0;
-
-  const create = useMutation({
-    mutationFn: async () => {
-      const text = content.trim();
-      const { data } = await api.post('/posts/create', {
-        content: text,
-        medias: medias.map((m) => ({ type: m.type, key: m.key, url: m.url })),
-        hashtags: extractHashtags(text),
-        community: communityId,
-      });
-      return data;
-    },
-    onSuccess: () => {
-      previews.forEach((u) => URL.revokeObjectURL(u));
-      toast.success(`Posted to ${communityName}`);
-      qc.invalidateQueries({ queryKey: ['community', communityId] });
-      qc.invalidateQueries({ queryKey: ['feed'] });
-      onPosted();
-    },
-    onError: (e) => toast.error(errMsg(e, 'Could not post to this community')),
-  });
-
-  async function addFiles(files: FileList | null) {
-    if (!files?.length) return;
-    const room = POST_MAX_IMAGES - medias.length;
-    if (room <= 0) {
-      toast.error(`Up to ${POST_MAX_IMAGES} photos per post.`);
-      return;
-    }
-    setUploading(true);
-    try {
-      for (const file of Array.from(files).slice(0, room)) {
-        if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-          toast.error(`${file.name}: use a JPEG, PNG, WebP or HEIC photo.`);
-          continue;
-        }
-        if (file.size > MAX_UPLOAD_BYTES) {
-          toast.error(`${file.name} is over 10 MB.`);
-          continue;
-        }
-        const uploaded = await uploadImage(file, 'posts');
-        setMedias((prev) => [...prev, uploaded]);
-        setPreviews((prev) => [...prev, URL.createObjectURL(file)]);
-      }
-    } catch (e) {
-      toast.error(errMsg(e, 'Photo upload failed.'));
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  }
-
-  const remaining = POST_MAX_CHARS - content.length;
+function CommunityCardSkeleton() {
   return (
-    <div className="rounded-md border border-line bg-surface-1 p-3" role="form" aria-label={`New post in ${communityName}`}>
-      <input ref={fileRef} type="file" accept={ACCEPTED_IMAGE_TYPES.join(',')} multiple hidden onChange={(e) => void addFiles(e.target.files)} />
-      <div className="flex gap-3">
-        <Avatar src={me?.avatar} name={me?.fullName || me?.username || 'You'} size="sm" className="mt-1 hidden sm:inline-flex" />
-        <div className="min-w-0 flex-1">
-          <Textarea
-            label={`What's happening at ${communityName}?`}
-            hideLabel
-            autoFocus
-            autoGrow
-            rows={3}
-            maxRows={10}
-            maxLength={POST_MAX_CHARS}
-            placeholder={`Share a session, a PR or a meetup with ${communityName}…`}
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            disabled={create.isPending}
-          />
-          {previews.length > 0 || uploading ? (
-            <ul className="mt-3 flex flex-wrap gap-2" aria-label="Attached photos">
-              {previews.map((src, i) => (
-                <li key={src} className="relative h-20 w-20 overflow-hidden rounded-md bg-surface-2">
-                  <img src={src} alt={`Attachment ${i + 1}`} className="h-full w-full object-cover" />
-                  <button
-                    type="button"
-                    aria-label={`Remove photo ${i + 1}`}
-                    onClick={() => {
-                      setMedias((prev) => prev.filter((_, j) => j !== i));
-                      setPreviews((prev) => {
-                        URL.revokeObjectURL(prev[i]);
-                        return prev.filter((_, j) => j !== i);
-                      });
-                    }}
-                    className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-scrim text-[var(--navy-50)] hover:bg-danger"
-                  >
-                    <X size={14} />
-                  </button>
-                </li>
-              ))}
-              {uploading ? (
-                <li className="grid h-20 w-20 place-items-center rounded-md bg-surface-2 text-text-2" aria-label="Uploading">
-                  <Spinner size={20} />
-                </li>
-              ) : null}
-            </ul>
-          ) : null}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" icon={<ImageIcon size={18} />} onClick={() => fileRef.current?.click()} disabled={uploading || medias.length >= POST_MAX_IMAGES || create.isPending}>
-              Photo
-            </Button>
-            {content.length > 0 ? (
-              <span className={cx('tabular text-xs', remaining < 100 ? 'text-warning-text' : 'text-text-3')} aria-live="polite">
-                {remaining} left
-              </span>
-            ) : null}
-            <div className="ml-auto flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={onCancel} disabled={create.isPending}>
-                Cancel
-              </Button>
-              <Button variant="primary" size="sm" onClick={() => create.mutate()} disabled={!dirty || uploading || create.isPending} loading={create.isPending}>
-                Post
-              </Button>
-            </div>
-          </div>
-        </div>
+    <div className="card p-3" aria-hidden="true">
+      <Skeleton className="aspect-video w-full rounded-md" />
+      <div className="mt-3 space-y-2 px-1">
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-3 w-1/2" />
+        <Skeleton className="h-6 w-24 rounded-xs" />
       </div>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ members */
-
-function MemberRow({
-  member,
-  community,
-  viewerId,
-  viewerRole,
-  onChanged,
-}: {
-  member: Member;
-  community: Community;
-  viewerId?: string;
-  viewerRole: string | null;
-  onChanged: () => void;
-}) {
-  const toast = useToast();
-  const [confirm, setConfirm] = useState<null | 'remove' | 'transfer'>(null);
-  const name = nameOf(member.user);
-  const userId = member.user?._id;
-  const founderId = founderIdOf(community);
-  const isFounderRow = Boolean(userId && founderId && userId === founderId);
-  const viewerIsFounder = Boolean(viewerId && founderId && viewerId === founderId);
-  const viewerIsAdmin = viewerRole === 'admin';
-  const isSelf = Boolean(userId && viewerId && userId === viewerId);
-  const role = String(member.role || 'member');
-
-  const setRole = useMutation({
-    mutationFn: async (body: { role: string; transferOwnership?: boolean }) => {
-      const { data } = await api.patch(`/gyms/community/${community._id}/members/${userId}/role`, body);
-      return data as { message?: string };
-    },
-    onSuccess: (data) => {
-      toast.success(data?.message || 'Member role updated');
-      setConfirm(null);
-      onChanged();
-    },
-    onError: (e) => {
-      toast.error(errMsg(e, 'Could not change this role'));
-      setConfirm(null);
-    },
-  });
-
-  const remove = useMutation({
-    mutationFn: async () => {
-      await api.delete(`/gyms/community/${community._id}/members/${userId}`);
-    },
-    onSuccess: () => {
-      toast.success(`${name} was removed`);
-      setConfirm(null);
-      onChanged();
-    },
-    onError: (e) => {
-      toast.error(errMsg(e, 'Could not remove this member'));
-      setConfirm(null);
-    },
-  });
-
-  const items: MenuItem[] = [];
-  if (userId && !isSelf && !isFounderRow && viewerRole && isModRole(viewerRole)) {
-    if (viewerIsAdmin && role === 'member') items.push({ label: 'Make moderator', icon: <Shield size={18} />, onSelect: () => setRole.mutate({ role: 'moderator' }) });
-    if (viewerIsAdmin && role === 'moderator') items.push({ label: 'Remove moderator', icon: <Shield size={18} />, onSelect: () => setRole.mutate({ role: 'member' }) });
-    if (viewerIsFounder && role !== 'admin') items.push({ label: 'Make admin', icon: <Shield size={18} />, onSelect: () => setRole.mutate({ role: 'admin' }) });
-    if (viewerIsFounder && role === 'admin') items.push({ label: 'Remove admin', icon: <Shield size={18} />, onSelect: () => setRole.mutate({ role: 'member' }) });
-    if (viewerIsFounder) items.push({ label: 'Transfer ownership', description: 'They become the founder; you stay an admin.', icon: <Users size={18} />, onSelect: () => setConfirm('transfer'), divider: true });
-    const canRemove = role === 'member' || (role === 'moderator' && viewerIsAdmin) || (role === 'admin' && viewerIsFounder);
-    if (canRemove) items.push({ label: 'Remove from community', icon: <Trash size={18} />, danger: true, onSelect: () => setConfirm('remove'), divider: items.length > 0 });
-  }
-
-  const body = (
-    <>
-      <Avatar src={member.user?.avatar} name={name} size="md" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold text-text-1">
-          {name}
-          {isSelf ? <span className="ml-1.5 text-xs font-normal text-text-3">(you)</span> : null}
-        </span>
-        {member.joinedAt ? <span className="block text-xs text-text-3">Joined {ago(member.joinedAt)}</span> : null}
-      </span>
-      {isFounderRow ? <Badge tone="brand"><Shield size={12} />Founder</Badge> : <RoleBadge role={member.role === 'member' ? null : member.role} />}
-    </>
-  );
-
-  return (
-    <li className="flex items-center gap-2">
-      {userId ? (
-        <Link to={`/u/${userId}`} viewTransition className="flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-sm px-1 py-2 transition-colors dur-1 hover:bg-surface-2">
-          {body}
-        </Link>
-      ) : (
-        <div className="flex min-h-14 min-w-0 flex-1 items-center gap-3 px-1 py-2">{body}</div>
-      )}
-      {items.length ? <Menu items={items} label={`Manage ${name}`} /> : null}
-      <ConfirmDialog
-        open={confirm === 'remove'}
-        title={`Remove ${name}?`}
-        message="They leave the community immediately and can ask to join again later."
-        confirmLabel="Remove"
-        destructive
-        loading={remove.isPending}
-        onClose={() => setConfirm(null)}
-        onConfirm={() => remove.mutate()}
-      />
-      <ConfirmDialog
-        open={confirm === 'transfer'}
-        title={`Make ${name} the founder?`}
-        message="They take over the community. You keep admin rights and can leave whenever you like."
-        confirmLabel="Transfer ownership"
-        loading={setRole.isPending}
-        onClose={() => setConfirm(null)}
-        onConfirm={() => setRole.mutate({ role: 'admin', transferOwnership: true })}
-      />
-    </li>
-  );
-}
-
-/* ------------------------------------------------------------------ detail */
-
-function CommunityDetail({
-  communityId,
-  onClose,
-}: {
-  communityId: string | null;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const me = useAuth((s) => s.user);
-  const [tab, setTab] = useState<'posts' | 'members' | 'requests'>('posts');
-  const [memberPage, setMemberPage] = useState(1);
-  const [confirmLeave, setConfirmLeave] = useState(false);
-  const [composing, setComposing] = useState(false);
-
-  useEffect(() => {
-    setTab('posts');
-    setMemberPage(1);
-    setComposing(false);
-  }, [communityId]);
-
-  const detail = useQuery({
-    queryKey: ['community', communityId],
-    enabled: Boolean(communityId),
-    retry: (count, error) => (error as { response?: { status?: number } })?.response?.status !== 404 && count < 2,
-    queryFn: async () => {
-      const { data } = await api.get(`/gyms/community/${communityId}`);
-      return unwrapCommunity(data);
-    },
-  });
-
-  const community = detail.data;
-  const membership = membershipOf(community);
-  const canModerate = membership.isMember && isModRole(membership.role);
-  const notFound = (detail.error as { response?: { status?: number } } | null)?.response?.status === 404;
-
-  const members = useQuery({
-    queryKey: ['community', communityId, 'members', memberPage],
-    enabled: Boolean(communityId) && tab === 'members' && detail.isSuccess,
-    queryFn: async () => {
-      const { data } = await api.get(`/gyms/community/${communityId}/members`, {
-        params: { page: memberPage, limit: 20 },
-      });
-      return (data.data || data) as {
-        members: Member[];
-        pagination?: { currentPage: number; totalPages: number; hasNext: boolean };
-      };
-    },
-  });
-
-  const requests = useQuery({
-    queryKey: ['community', communityId, 'requests'],
-    enabled: Boolean(communityId) && canModerate,
-    retry: false,
-    queryFn: async () => {
-      const { data } = await api.get(`/gyms/community/${communityId}/membership-requests`, {
-        params: { limit: 50 },
-      });
-      return (data.requests || data.data?.requests || []) as MembershipRequest[];
-    },
-  });
-
-  const posts = useQuery({
-    queryKey: ['community', communityId, 'posts'],
-    enabled: Boolean(communityId) && tab === 'posts' && detail.isSuccess && (community?.settings?.isPublic !== false || membership.isMember),
-    retry: false,
-    queryFn: async () => {
-      const { data } = await api.get(`/posts/gym/community/posts/all/${communityId}`, {
-        params: { page: 1, limit: 20 },
-      });
-      return (data.posts || []) as CommunityPost[];
-    },
-  });
-
-  const approve = useMutation({
-    mutationFn: async (requestId: string) => {
-      await api.post(`/gyms/community/${communityId}/membership-requests/${requestId}/approve`);
-    },
-    onSuccess: () => {
-      toast.success('Member approved');
-      qc.invalidateQueries({ queryKey: ['community', communityId] });
-      qc.invalidateQueries({ queryKey: ['communities'] });
-    },
-    onError: (e) => toast.error(errMsg(e, 'Could not approve the request')),
-  });
-
-  const deny = useMutation({
-    mutationFn: async (requestId: string) => {
-      await api.delete(`/gyms/community/${communityId}/membership-requests/${requestId}`);
-    },
-    onSuccess: () => {
-      toast.success('Request declined');
-      qc.invalidateQueries({ queryKey: ['community', communityId, 'requests'] });
-    },
-    onError: (e) => toast.error(errMsg(e, 'Could not decline the request')),
-  });
-
-  const leave = useMutation({
-    mutationFn: async () => {
-      const { data } = await api.delete(`/gyms/community/${communityId}/membership`);
-      return data as { message?: string; newFounder?: string };
-    },
-    onSuccess: (data) => {
-      toast.success(data?.newFounder ? 'You left and handed the community to the next admin' : 'You left the community');
-      setConfirmLeave(false);
-      qc.invalidateQueries({ queryKey: ['communities'] });
-      qc.invalidateQueries({ queryKey: ['community', communityId] });
-      onClose();
-    },
-    onError: (e) => {
-      // The founder case comes back with the step that unblocks it; keep the
-      // dialog open so the Members tab is one tap away.
-      toast.error(errMsg(e, 'Could not leave the community'));
-      setConfirmLeave(false);
-    },
-  });
-
-  const join = useJoinMutation();
-
+function CommunityCard({ community, action }: { community: Community; action?: ReactNode }) {
   const cover = useCommunityCover(community);
-  const gallery = (community?.photos || []).slice(1, 8);
-  const pendingCount = requests.data?.length ?? 0;
-  const isPrivateToViewer = community?.settings?.isPublic === false && !membership.isMember;
-  const founderId = founderIdOf(community);
-  const viewerIsFounder = Boolean(me?._id && founderId && me._id === founderId);
-
-  const primaryAction = community ? (
-    membership.isMember ? (
-      <>
-        {/* Wave F: a contextual invite link for this community (behind features.invites; POST /invites). */}
-        <ContextualInviteButton kind="gym" targetId={communityId} targetName={community.name || 'this community'} size="sm" />
-        <Button variant="secondary" size="sm" onClick={() => setConfirmLeave(true)}>
-          Leave
-        </Button>
-      </>
-    ) : (
-      <JoinButton community={community} mutation={join} size="sm" />
-    )
-  ) : null;
-
+  const members = memberTotalOf(community);
+  const membership = membershipOf(community);
+  const place = community.vicinity?.trim();
   return (
-    <Modal
-      open={Boolean(communityId)}
-      onClose={onClose}
-      size="lg"
-      title={community?.name || 'Community'}
-      description={community?.vicinity || undefined}
-    >
-      {detail.isLoading ? (
-        <div className="space-y-4" aria-busy="true">
-          <Skeleton className="aspect-video w-full rounded-md" />
-          <SkeletonText lines={2} />
-          <SkeletonRow />
-          <SkeletonRow />
-        </div>
-      ) : null}
-      {detail.isError && notFound ? (
-        <EmptyState
-          variant="no-results"
-          title="This community is no longer available"
-          message="It may have been archived by its founder, or the link was cut short. Explore the communities that are open right now."
-          action={{ label: 'Explore communities', onClick: onClose }}
-          secondaryAction={{ label: 'Find gyms', to: '/gyms' }}
-        />
-      ) : null}
-      {detail.isError && !notFound ? <ErrorState error={detail.error} onRetry={() => detail.refetch()} /> : null}
-      {community ? (
-        <div className="space-y-5">
-          {cover ? (
-            <CardMedia ratio="16/9">
-              <img src={cover} alt={`${community.name || 'Community'} cover`} className="h-full w-full object-cover" />
-            </CardMedia>
-          ) : null}
-          {gallery.length ? (
-            <ul className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" aria-label="Community photos">
-              {gallery.map((photo, i) => (
-                <GalleryThumb key={photo.photoReference || photo.url || i} photo={photo} index={i + 2} />
-              ))}
-            </ul>
-          ) : null}
-
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-2">
-              {community.description ? (
-                <p className="prose-measure text-base text-text-1">{community.description}</p>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-1.5">
-                <MembersBadge count={community.stats?.totalMembers ?? 0} />
-                {typeof community.stats?.totalPosts === 'number' ? (
-                  <Badge tone="neutral">
-                    <span className="tabular">{community.stats.totalPosts}</span> {community.stats.totalPosts === 1 ? 'post' : 'posts'}
-                  </Badge>
-                ) : null}
-                {community.category && community.category !== 'gym' ? <Badge tone="neutral">{humanize(community.category)}</Badge> : null}
-                <VisibilityBadge community={community} />
-                {membership.isMember ? <RoleBadge role={viewerIsFounder ? 'founder' : membership.role} /> : null}
-              </div>
-              {community.founder?._id ? (
-                <p className="text-xs text-text-3">
-                  Founded {ago(community.foundedAt) || 'a while ago'} by{' '}
-                  <Link to={`/u/${community.founder._id}`} viewTransition className="font-semibold text-text-2 underline-offset-2 hover:underline">
-                    {nameOf(community.founder)}
-                  </Link>
-                </p>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">{primaryAction}</div>
-          </div>
-
-          {membership.pending ? (
-            <Callout tone="info" title="Your request is pending" icon={<Clock size={18} />}>
-              A moderator reviews new members. You will get a notification either way; cancel the request above if you change your mind.
-            </Callout>
-          ) : null}
-
-          {isPrivateToViewer ? (
-            <Callout tone="brand" title="This community is private" icon={<Lock size={18} />}>
-              Posts and the member list open up once a moderator approves your request.
-            </Callout>
-          ) : (
-            <>
-              <Tabs
-                aria-label="Community sections"
-                tabs={[
-                  { value: 'posts', label: 'Posts' },
-                  { value: 'members', label: 'Members', count: community.stats?.totalMembers },
-                  ...(canModerate ? [{ value: 'requests', label: 'Requests', count: pendingCount || undefined }] : []),
-                ]}
-                value={tab}
-                onChange={(k) => setTab(k as typeof tab)}
-              />
-
-              {tab === 'posts' ? (
-                <div className="space-y-3">
-                  {membership.isMember ? (
-                    composing ? (
-                      <CommunityComposer
-                        communityId={community._id}
-                        communityName={community.name || 'this community'}
-                        onPosted={() => setComposing(false)}
-                        onCancel={() => setComposing(false)}
-                      />
-                    ) : (
-                      <Button variant="primary" block icon={<Plus size={18} />} onClick={() => setComposing(true)}>
-                        Post to this community
-                      </Button>
-                    )
-                  ) : null}
-                  {posts.isLoading ? (
-                    <div className="space-y-3" aria-busy="true">
-                      {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="rounded-md bg-surface-2 p-3">
-                          <SkeletonRow className="py-0" />
-                          <SkeletonText lines={2} className="mt-3" />
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {posts.isError ? <ErrorState error={posts.error} onRetry={() => posts.refetch()} /> : null}
-                  {posts.isSuccess && (posts.data?.length || 0) === 0 && !composing ? (
-                    membership.isMember ? (
-                      <EmptyState
-                        size="sm"
-                        icon={<MessageCircle size={24} />}
-                        title="No posts yet"
-                        message="Be the first: share a session, a PR or a meetup and it shows up here and on your feed."
-                        action={{ label: 'Write the first post', onClick: () => setComposing(true), icon: <Plus size={16} /> }}
-                      />
-                    ) : (
-                      <EmptyState
-                        size="sm"
-                        icon={<MessageCircle size={24} />}
-                        title="No posts yet"
-                        message="Members have not posted here yet. Join to post and to hear about sessions first."
-                        action={<JoinButton community={community} mutation={join} />}
-                      />
-                    )
-                  ) : null}
-                  {(posts.data || []).map((p) => {
-                    const media = p.media?.[0] || p.medias?.[0];
-                    const src = mediaUrl(media?.uri || media?.url || '');
-                    const author = p.author;
-                    return (
-                      <article key={p._id} className="rounded-md bg-surface-2 p-3">
-                        <div className="flex items-center gap-2.5">
-                          {author?._id ? (
-                            <Link to={`/u/${author._id}`} viewTransition className="flex min-w-0 items-center gap-2.5 rounded-sm">
-                              <Avatar src={author.avatar} name={nameOf(author)} size="sm" />
-                              <span className="min-w-0">
-                                <span className="block truncate text-sm font-semibold text-text-1">{nameOf(author)}</span>
-                                <span className="block text-xs text-text-3">{ago(p.createdAt)}</span>
-                              </span>
-                            </Link>
-                          ) : (
-                            <>
-                              <Avatar name="Member" size="sm" />
-                              <span className="min-w-0">
-                                <span className="block truncate text-sm font-semibold text-text-1">Member</span>
-                                <span className="block text-xs text-text-3">{ago(p.createdAt)}</span>
-                              </span>
-                            </>
-                          )}
-                        </div>
-                        <Link to={`/p/${p._id}`} viewTransition className="mt-2 block rounded-sm">
-                          {p.content ? <p className="prose-measure whitespace-pre-wrap text-base text-text-1">{p.content}</p> : null}
-                          {src ? (
-                            <CardMedia className="mt-2 max-h-72">
-                              <img src={src} alt="" loading="lazy" className="max-h-72 w-full object-cover" />
-                            </CardMedia>
-                          ) : null}
-                        </Link>
-                        <div className="mt-2 flex items-center gap-4 text-xs text-text-2">
-                          <span className="inline-flex items-center gap-1">
-                            <Heart size={14} />
-                            <span className="tabular">{p.likes?.length ?? 0}</span>
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <MessageCircle size={14} />
-                            <span className="tabular">{p.comments?.length ?? 0}</span>
-                          </span>
-                          <Link to={`/p/${p._id}`} viewTransition className="ml-auto font-semibold text-brand-text underline-offset-2 hover:underline">
-                            Open post
-                          </Link>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              {tab === 'members' ? (
-                <div className="space-y-2">
-                  {members.isLoading ? (
-                    <div aria-busy="true">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <SkeletonRow key={i} />
-                      ))}
-                    </div>
-                  ) : null}
-                  {members.isError ? <ErrorState error={members.error} onRetry={() => members.refetch()} /> : null}
-                  {members.isSuccess && (members.data?.members?.length || 0) === 0 ? (
-                    <EmptyState size="sm" icon={<Users size={24} />} title="No members to show" message="This community has no visible members yet." />
-                  ) : null}
-                  {(members.data?.members?.length || 0) > 0 ? (
-                    <ul className="divide-y divide-line">
-                      {(members.data?.members || []).map((m, i) => (
-                        <MemberRow
-                          key={m._id || m.user?._id || i}
-                          member={m}
-                          community={community}
-                          viewerId={me?._id}
-                          viewerRole={membership.role}
-                          onChanged={() => {
-                            qc.invalidateQueries({ queryKey: ['community', communityId] });
-                            qc.invalidateQueries({ queryKey: ['communities'] });
-                          }}
-                        />
-                      ))}
-                    </ul>
-                  ) : null}
-                  <Pager
-                    page={members.data?.pagination?.currentPage ?? memberPage}
-                    totalPages={members.data?.pagination?.totalPages}
-                    hasNext={Boolean(members.data?.pagination?.hasNext)}
-                    onPrev={() => setMemberPage((p) => Math.max(1, p - 1))}
-                    onNext={() => setMemberPage((p) => p + 1)}
-                  />
-                </div>
-              ) : null}
-
-              {tab === 'requests' ? (
-                <div className="space-y-2">
-                  {requests.isLoading ? (
-                    <div aria-busy="true">
-                      {Array.from({ length: 3 }).map((_, i) => (
-                        <SkeletonRow key={i} />
-                      ))}
-                    </div>
-                  ) : null}
-                  {requests.isError ? (
-                    <ErrorState
-                      error={requests.error}
-                      title="Requests are unavailable"
-                      message={errMsg(requests.error, 'Only moderators can review membership requests.')}
-                      onRetry={() => requests.refetch()}
-                    />
-                  ) : null}
-                  {requests.isSuccess && pendingCount === 0 ? (
-                    <EmptyState
-                      size="sm"
-                      icon={<Check size={24} />}
-                      title="No pending requests"
-                      message="New requests to join appear here for you to approve or decline."
-                    />
-                  ) : null}
-                  {pendingCount > 0 ? (
-                    <ul className="divide-y divide-line">
-                      {(requests.data || []).map((r) => {
-                        const name = nameOf(r.user);
-                        return (
-                          <li key={r._id} className="flex flex-wrap items-center gap-3 py-2">
-                            <Avatar src={r.user?.avatar} name={name} size="md" />
-                            <div className="min-w-0 flex-1">
-                              {r.user?._id ? (
-                                <Link to={`/u/${r.user._id}`} viewTransition className="block truncate text-sm font-semibold text-text-1 hover:underline">
-                                  {name}
-                                </Link>
-                              ) : (
-                                <p className="truncate text-sm font-semibold text-text-1">{name}</p>
-                              )}
-                              {r.requestedAt ? <p className="text-xs text-text-3">Requested {ago(r.requestedAt)}</p> : null}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                icon={<Check size={16} />}
-                                loading={approve.isPending && approve.variables === r._id}
-                                disabled={approve.isPending || deny.isPending}
-                                onClick={() => approve.mutate(r._id)}
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                icon={<X size={16} />}
-                                loading={deny.isPending && deny.variables === r._id}
-                                disabled={approve.isPending || deny.isPending}
-                                onClick={() => deny.mutate(r._id)}
-                              >
-                                Decline
-                              </Button>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-      ) : null}
-
-      <ConfirmDialog
-        open={confirmLeave}
-        title="Leave this community?"
-        description={
-          viewerIsFounder
-            ? 'You founded this community. Ownership passes to the longest-serving other admin; if there is none, make someone an admin in the Members tab first.'
-            : 'You will stop seeing its posts and members. You can ask to join again later.'
-        }
-        confirmLabel="Leave community"
-        destructive
-        loading={leave.isPending}
-        onClose={() => setConfirmLeave(false)}
-        onConfirm={() => leave.mutate()}
+    <Card padded={false} container interactive className="relative flex flex-col p-3">
+      <Link
+        to={communityHref(community._id)}
+        state={communityLinkState(community, cover)}
+        viewTransition
+        aria-label={`Open ${community.name || 'community'}`}
+        className="absolute inset-0 z-[1] rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       />
-    </Modal>
-  );
-}
-
-function GalleryThumb({ photo, index }: { photo: { photoReference?: string; url?: string }; index: number }) {
-  const src = useCommunityCover({ photos: [photo] });
-  if (!src) return null;
-  return (
-    <li className="h-20 w-28 shrink-0 overflow-hidden rounded-md bg-surface-2">
-      <img src={src} alt={`Community photo ${index}`} loading="lazy" className="h-full w-full object-cover" />
-    </li>
+      <CardMedia ratio="16/9">
+        {cover ? (
+          <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center text-text-3">
+            <Users size={28} />
+          </span>
+        )}
+      </CardMedia>
+      <div className="mt-3 flex-1 space-y-1 px-1">
+        <h2 className="truncate text-md font-semibold text-text-1">{community.name || 'Community'}</h2>
+        {place ? (
+          <p className="flex min-w-0 items-center gap-1 truncate text-xs text-text-2">
+            <MapPin size={13} className="shrink-0 text-text-3" />
+            <span className="truncate">{place}</span>
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          {members ? (
+            <Badge tone="neutral">
+              <Users size={12} />
+              <span className="tabular">{memberCountLabel(members)}</span>
+            </Badge>
+          ) : null}
+          {community.category && community.category !== 'gym' ? <Badge tone="neutral">{humanize(community.category)}</Badge> : null}
+          <VisibilityBadge community={community} />
+          {membership.isMember ? <RoleBadge role={membership.role} /> : null}
+          {membership.pending ? (
+            <Badge tone="info">
+              <Clock size={12} />
+              Request pending
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+      {action ? <div className="relative z-[2] mt-3 border-t border-line pt-3">{action}</div> : null}
+    </Card>
   );
 }
 
@@ -1119,7 +379,13 @@ function GalleryThumb({ photo, index }: { photo: { photoReference?: string; url?
 
 type LocationChoice = 'current' | 'place' | 'global';
 
-function CreateCommunityModal({
+/**
+ * The create form. API.md §10: the place id is echoed verbatim, `vicinity` is
+ * passed through unchanged, the creator auto-joins as admin, and a 409 on a
+ * create that carried a placeId means someone else got there first — re-query
+ * the place and open theirs instead of retrying.
+ */
+export function CreateCommunityModal({
   open,
   preset,
   onClose,
@@ -1132,6 +398,7 @@ function CreateCommunityModal({
 }) {
   const toast = useToast();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -1153,7 +420,7 @@ function CreateCommunityModal({
     setVisibility('public');
     setRequireApproval(false);
     setMaxMembers('1000');
-    setLocationChoice(preset?.location ? 'place' : 'global');
+    setLocationChoice(preset?.placeId || preset?.location ? 'place' : 'global');
     setCoords(null);
     setLocateError(null);
     setCover(null);
@@ -1163,6 +430,7 @@ function CreateCommunityModal({
   const nameError = touched ? communityNameError(name) : null;
   const membersError = maxMembersError(maxMembers);
   const canSubmit = !communityNameError(name) && !membersError && !uploading && !(locationChoice === 'current' && !coords);
+  const atPlace = locationChoice === 'place' && Boolean(preset?.placeId || preset?.location);
 
   const locate = () => {
     if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
@@ -1227,9 +495,13 @@ function CreateCommunityModal({
       const location =
         locationChoice === 'current' && coords
           ? coords
-          : locationChoice === 'place' && preset?.location
+          : atPlace && preset?.location
             ? preset.location
             : undefined;
+      const placeId = atPlace ? preset?.placeId : undefined;
+      // vicinity travels verbatim from the place search (API.md §10a): the
+      // server stores exactly what it is sent and never derives one.
+      const vicinity = atPlace ? preset?.vicinity?.trim() : undefined;
       const body: Record<string, unknown> = {
         name: name.trim(),
         description: description.trim(),
@@ -1239,17 +511,36 @@ function CreateCommunityModal({
           maxMembers: Number(maxMembers),
         },
         ...(location ? { location } : {}),
-        ...(locationChoice === 'place' && preset?.placeId ? { placeId: preset.placeId } : {}),
-        ...(locationChoice === 'place' && preset?.vicinity ? { vicinity: preset.vicinity } : {}),
+        ...(placeId ? { placeId } : {}),
+        ...(vicinity ? { vicinity } : {}),
         ...(cover ? { photos: [{ photoReference: cover.key, ...(cover.width ? { width: cover.width } : {}), ...(cover.height ? { height: cover.height } : {}) }] } : {}),
       };
-      const { data } = await api.post('/gyms/community/join', body);
-      return unwrapCommunity(data);
+      try {
+        const { data } = await api.post('/gyms/community/join', body);
+        return { kind: 'created' as const, community: unwrapCommunity(data) };
+      } catch (e) {
+        // Keyed on the call we made (a create with a placeId), never on the
+        // message text: one community per place, first commit wins.
+        if (statusOf(e) === 409 && placeId) {
+          const { data } = await api.get(`/gyms/community/place/${encodeURIComponent(placeId)}`);
+          const existing = unwrapCommunity(data);
+          if (existing && isObjectId(existing._id)) return { kind: 'exists' as const, community: existing };
+        }
+        throw e;
+      }
     },
-    onSuccess: (community) => {
-      toast.success(`${community.name || 'Your community'} is live`);
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['communities'] });
-      onCreated(community);
+      if (result.kind === 'exists') {
+        qc.setQueryData(['community', 'place', preset?.placeId], result.community);
+        toast.info(`${result.community.name || 'A community'} already exists here — you can join it`);
+        onClose();
+        navigate(communityHref(result.community._id), { viewTransition: true });
+        return;
+      }
+      qc.invalidateQueries({ queryKey: ['community', 'place'] });
+      toast.success(`${result.community.name || 'Your community'} is live`);
+      onCreated(result.community);
     },
     onError: (e) => toast.error(errMsg(e, 'Could not create the community')),
   });
@@ -1265,7 +556,7 @@ function CreateCommunityModal({
       open={open}
       onClose={onClose}
       size="md"
-      title="Start a community"
+      title={preset?.name ? `Start the community at ${preset.name}` : 'Start a community'}
       description="A home for the people you train with. You become its first admin."
       footer={
         <>
@@ -1335,14 +626,14 @@ function CreateCommunityModal({
           onChange={(v) => setVisibility(v as 'public' | 'private')}
           options={[
             { value: 'public', label: 'Public', description: 'Anyone on Vybe can find it and see posts.' },
-            { value: 'private', label: 'Private', description: 'Hidden from Explore; people request to join and moderators approve.' },
+            { value: 'private', label: 'Private', description: 'Hidden from Explore; people request to join and admins approve.' },
           ]}
         />
         {visibility === 'public' ? (
           <div className="flex items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-2.5">
             <div className="min-w-0 text-sm">
               <p className="font-semibold text-text-1">Approve new members</p>
-              <p className="text-xs text-text-2">Requests wait for a moderator instead of joining instantly.</p>
+              <p className="text-xs text-text-2">Requests wait for an admin instead of joining instantly.</p>
             </div>
             <Switch checked={requireApproval} onChange={setRequireApproval} label="Approve new members" />
           </div>
@@ -1358,7 +649,7 @@ function CreateCommunityModal({
           onChange={(e) => setMaxMembers(e.target.value)}
           error={touched && membersError ? membersError : undefined}
           hint={touched && membersError ? undefined : 'Between 2 and 10,000. You can raise it later.'}
-          containerClassName="max-w-[12rem]"
+          containerClassName="max-w-48"
         />
 
         <RadioGroup
@@ -1366,8 +657,8 @@ function CreateCommunityModal({
           value={locationChoice}
           onChange={(v) => setLocationChoice(v as LocationChoice)}
           options={[
-            ...(preset?.location
-              ? [{ value: 'place', label: preset.name ? `At ${preset.name}` : 'At the selected place', description: preset.vicinity || 'From the place you picked on the Gyms page.' }]
+            ...(preset?.placeId || preset?.location
+              ? [{ value: 'place', label: preset.name ? `At ${preset.name}` : 'At the selected place', description: preset.vicinity || 'The place you picked on the Gyms page — people searching for it find this community.' }]
               : []),
             { value: 'current', label: 'My current position', description: 'Puts the community on the map for people training nearby.' },
             { value: 'global', label: 'Global', description: 'No fixed place; anyone anywhere can join.' },
@@ -1396,65 +687,48 @@ function CreateCommunityModal({
 /* ------------------------------------------------------------------ page */
 
 export default function GymCommunity() {
-  const [tab, setTab] = useState<ListTab>('explore');
+  const [params, setParams] = useSearchParams();
+  const tabParam = params.get('tab');
+  const tab: ListTab = tabParam === 'mine' ? 'mine' : 'explore';
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const debounced = useDebounced(search.trim(), 400);
   const location = useLocation();
   const navigate = useNavigate();
-  // Share links from the app land as /communities?community=<id>: the detail
-  // opens for it and the parameter is dropped when it closes.
-  const [params, setParams] = useSearchParams();
-  const [openId, setOpenId] = useState<string | null>(() => {
-    const id = params.get('community');
-    return id && isObjectId(id) ? id : null;
-  });
-  useEffect(() => {
-    const id = params.get('community');
-    if (id && isObjectId(id)) setOpenId(id);
-  }, [params]);
-  const openCommunity = useCallback(
-    (id: string) => {
-      setOpenId(id);
-      const next = new URLSearchParams(params);
-      next.set('community', id);
-      setParams(next, { replace: true });
-    },
-    [params, setParams],
-  );
-  const closeCommunity = useCallback(() => {
-    setOpenId(null);
-    if (params.has('community')) {
-      const next = new URLSearchParams(params);
-      next.delete('community');
-      setParams(next, { replace: true });
-    }
-  }, [params, setParams]);
 
   // "Start a community here" from the Gyms page arrives with a preset in
   // router state; the form opens with it and the state is cleared so a reload
   // does not reopen the form.
   const preset = (location.state as { startCommunity?: CommunityPreset } | null)?.startCommunity || null;
   const [creating, setCreating] = useState<boolean>(() => Boolean(preset));
+  const [presetForForm, setPresetForForm] = useState<CommunityPreset | null>(preset);
   useEffect(() => {
     if (preset) {
+      setPresetForForm(preset);
       setCreating(true);
       navigate(location.pathname + location.search, { replace: true, state: null });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset]);
-  const [presetForForm, setPresetForForm] = useState<CommunityPreset | null>(preset);
-  useEffect(() => {
-    if (preset) setPresetForForm(preset);
-  }, [preset]);
 
-  const changeTab = (next: ListTab) => {
-    setTab(next);
+  const changeTab = (next: string) => {
     setPage(1);
+    setParams(
+      (prev) => {
+        if (next === 'mine') prev.set('tab', 'mine');
+        else prev.delete('tab');
+        return prev;
+      },
+      { replace: true },
+    );
   };
   const changeSearch = (value: string) => {
     setSearch(value);
     setPage(1);
+  };
+  const startCommunity = (withPreset: CommunityPreset | null = null) => {
+    setPresetForForm(withPreset);
+    setCreating(true);
   };
 
   const explore = useQuery({
@@ -1497,50 +771,59 @@ export default function GymCommunity() {
   const communities = useMemo(() => active.data?.gymCommunities || [], [active.data]);
   const pagination = active.data?.pagination;
 
-  const startAction = (
-    <Button variant="primary" icon={<Plus size={18} />} onClick={() => { setPresetForForm(null); setCreating(true); }}>
-      Start a community
-    </Button>
-  );
+  // Share links from the app land as /communities?community=<id>; the detail is a route now.
+  const shared = params.get('community');
+  if (shared && isObjectId(shared)) return <Navigate to={communityHref(shared)} replace />;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Communities"
-        subtitle="Join the crews training at your gym and follow what they post."
-        actions={startAction}
+        subtitle="The crews built around a gym. Join one, or start the first."
+        band={{
+          context: 'Crews built around a gym',
+          action: (
+            <Button variant="primary" size="lg" icon={<Plus size={18} />} onClick={() => startCommunity()}>
+              Start a community
+            </Button>
+          ),
+        }}
         mobileActions={
-          <IconButton label="Start a community" variant="primary" onClick={() => { setPresetForForm(null); setCreating(true); }}>
+          <IconButton label="Start a community" onClick={() => startCommunity()}>
             <Plus size={22} />
           </IconButton>
         }
       />
 
-      <Tabs
-        variant="segmented"
-        aria-label="Community lists"
-        tabs={[
-          { value: 'explore', label: 'Explore' },
-          { value: 'mine', label: 'My communities' },
-        ]}
-        value={tab}
-        onChange={(k) => changeTab(k as ListTab)}
-      />
-
-      <SearchField
-        label={tab === 'mine' ? 'Search my communities' : 'Search communities'}
-        hideLabel
-        placeholder={tab === 'mine' ? 'Search your communities' : 'Search by gym or community name'}
-        value={search}
-        onChange={(e) => changeSearch(e.target.value)}
-      />
+      <div className="@container">
+        <div className="flex flex-col gap-3 @md:flex-row @md:items-center">
+        <SegmentedControl
+          aria-label="Community lists"
+          tabs={[
+            { value: 'explore', label: 'Explore' },
+            { value: 'mine', label: 'My communities' },
+          ]}
+          value={tab}
+          onChange={changeTab}
+          className="@md:w-72"
+        />
+        <SearchField
+          label={tab === 'mine' ? 'Search my communities' : 'Search communities'}
+          hideLabel
+          placeholder={tab === 'mine' ? 'Search your communities' : 'Search by gym or community name'}
+          value={search}
+          onChange={(e) => changeSearch(e.target.value)}
+          containerClassName="flex-1"
+        />
+        </div>
+      </div>
 
       {active.isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading communities">
+        <CardGrid min="18rem" aria-busy="true" aria-label="Loading communities">
           {Array.from({ length: 6 }).map((_, i) => (
             <CommunityCardSkeleton key={i} />
           ))}
-        </div>
+        </CardGrid>
       ) : null}
 
       {active.isError ? <ErrorState error={active.error} onRetry={() => active.refetch()} /> : null}
@@ -1556,11 +839,11 @@ export default function GymCommunity() {
             />
           ) : (
             <EmptyState
-              icon={<Globe size={26} />}
-              title="You have not joined a community yet"
-              message="Communities are built around gyms and crews. Join one that is already going, or start your own in a minute."
-              action={{ label: 'Explore communities', onClick: () => changeTab('explore') }}
-              secondaryAction={{ label: 'Start a community', onClick: () => { setPresetForForm(null); setCreating(true); }, icon: <Plus size={16} /> }}
+              family="community"
+              title="Join the crew at your gym"
+              message="Communities are built around gyms. Find yours on the Gyms page and join its community, or start the first one there."
+              action={{ label: 'Find your gym', to: '/gyms', variant: 'secondary', icon: <MapPin size={18} /> }}
+              secondaryAction={{ label: 'Explore communities', onClick: () => changeTab('explore') }}
             />
           )
         ) : debounced ? (
@@ -1568,57 +851,41 @@ export default function GymCommunity() {
             variant="no-results"
             title={`No communities match “${debounced}”`}
             message="Check the spelling, or start a community with that name — you become its first admin."
-            action={{ label: 'Start a community', onClick: () => { setPresetForForm({ name: debounced }); setCreating(true); }, icon: <Plus size={16} /> }}
+            action={{ label: `Start “${debounced}”`, onClick: () => startCommunity({ name: debounced }), variant: 'secondary', icon: <Plus size={16} /> }}
             secondaryAction={{ label: 'Clear search', onClick: () => changeSearch('') }}
           />
         ) : mineCount.isSuccess && mineCount.data > 0 ? (
           <EmptyState
             icon={<Check size={26} />}
             title="You have joined every community we could find"
-            message={`You are in ${pluralize(mineCount.data, 'community', 'communities')}. Start a new one for a gym that has none yet, or invite friends to yours.`}
-            action={{ label: 'Go to My communities', onClick: () => changeTab('mine') }}
-            secondaryAction={{ label: 'Start a community', onClick: () => { setPresetForForm(null); setCreating(true); }, icon: <Plus size={16} /> }}
+            message={`You are in ${pluralize(mineCount.data, 'community', 'communities')}. Start one for a gym that has none yet, or invite friends to yours.`}
+            action={{ label: 'Go to My communities', onClick: () => changeTab('mine'), variant: 'secondary' }}
+            secondaryAction={{ label: 'Find a gym', to: '/gyms' }}
           />
         ) : mineCount.isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading communities">
+          <CardGrid min="18rem" aria-busy="true" aria-label="Loading communities">
             {Array.from({ length: 3 }).map((_, i) => (
               <CommunityCardSkeleton key={i} />
             ))}
-          </div>
+          </CardGrid>
         ) : (
           <EmptyState
-            icon={<Globe size={26} />}
-            title="No communities yet"
-            message="Nobody has started one around a gym near you. Be the first: it takes a name and a minute, and you become its admin."
-            action={{ label: 'Start a community', onClick: () => { setPresetForForm(null); setCreating(true); }, icon: <Plus size={16} /> }}
-            secondaryAction={{ label: 'Find gyms', to: '/gyms' }}
+            family="community"
+            title="Start the first community at your gym"
+            message="Search for the place you train at, pick it from the map, and its community is live in a minute — you are its first admin."
+            action={{ label: 'Search for your gym', to: '/gyms', variant: 'secondary', icon: <MapPin size={18} /> }}
           />
         )
       ) : null}
 
       {communities.length > 0 ? (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <CardGrid min="18rem">
             {communities.map((c) => {
               const membership = membershipOf(c);
-              return (
-                <CommunityCard
-                  key={c._id}
-                  community={c}
-                  onOpen={() => openCommunity(c._id)}
-                  action={
-                    !membership.isMember ? (
-                      <JoinButton community={c} mutation={join} block />
-                    ) : (
-                      <Button block variant="secondary" onClick={() => openCommunity(c._id)}>
-                        Open
-                      </Button>
-                    )
-                  }
-                />
-              );
+              return <CommunityCard key={c._id} community={c} action={!membership.isMember ? <JoinButton community={c} mutation={join} block /> : null} />;
             })}
-          </div>
+          </CardGrid>
           <Pager
             page={pagination?.currentPage ?? page}
             totalPages={pagination?.totalPages}
@@ -1629,23 +896,15 @@ export default function GymCommunity() {
         </>
       ) : null}
 
-      <CommunityDetail communityId={openId} onClose={closeCommunity} />
       <CreateCommunityModal
         open={creating}
         preset={presetForForm}
         onClose={() => setCreating(false)}
         onCreated={(community) => {
           setCreating(false);
-          if (community?._id) {
-            setTab('mine');
-            setPage(1);
-            openCommunity(community._id);
-          }
+          if (community?._id) navigate(communityHref(community._id), { viewTransition: true });
         }}
       />
     </div>
   );
 }
-
-// Referenced by tests: canonical community link used by cards and share links.
-export { communityPath };

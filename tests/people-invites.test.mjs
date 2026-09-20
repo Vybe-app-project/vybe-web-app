@@ -541,10 +541,13 @@ test('the invite surfaces hide behind features.invites, treat 404 FEATURE_DISABL
   assert.match(sheet, /if \(isFeatureDisabledError\(e\)\) \{\s*void qc\.invalidateQueries\(\{ queryKey: \['capabilities'\] \}\);\s*return;/);
   assert.match(sheet, /toast\.error\(contextualInviteMessage\(e, kind\)\)/);
   assert.match(sheet, /export function ContextualInviteButton\(/);
-  const gym = read('src/pages/GymCommunity.tsx');
+  // Gym First: the community detail is its own route (src/pages/CommunityDetail.tsx); Invite sits in the
+  // members-only "Your membership" card beside Leave.
+  const gym = read('src/pages/CommunityDetail.tsx');
   assert.match(gym, /import \{ ContextualInviteButton \} from '\.\/InviteLinkSheet';/);
-  assert.match(gym, /<ContextualInviteButton kind="gym" targetId=\{communityId\} targetName=\{community\.name \|\| 'this community'\} size="sm" \/>\s*<Button variant="secondary" size="sm" onClick=\{\(\) => setConfirmLeave\(true\)\}>\s*Leave/, 'Invite sits beside Leave, for members only');
+  assert.match(gym, /<ContextualInviteButton kind="gym" targetId=\{communityId\} targetName=\{name\} size="sm" \/>\s*<Button variant="ghost" size="sm" onClick=\{\(\) => setConfirmLeave\(true\)\}>\s*Leave/, 'Invite sits beside Leave, for members only');
   assert.doesNotMatch(gym, /from '\.\.\/lib\/capabilities'|\/invites'/, 'the page itself reads no flag and calls no invite route');
+  assert.doesNotMatch(read('src/pages/GymCommunity.tsx'), /from '\.\.\/lib\/capabilities'|\/invites'/, 'the list page reads no flag and calls no invite route');
   const challenges = read('src/pages/Challenges.tsx');
   assert.match(challenges, /import \{ ContextualInviteButton \} from '\.\/InviteLinkSheet';/);
   assert.match(challenges, /\{\(joined \|\| isOwner\) && !legacy && !archived && challenge\.isPublic !== false \? \(\s*<ContextualInviteButton kind="challenge" targetId=\{challenge\._id\} targetName=\{challenge\.title\} \/>/);
