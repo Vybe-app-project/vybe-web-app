@@ -23,7 +23,9 @@ const page = read('src/pages/WorkoutProgress.tsx');
 const sheet = read('src/pages/progress/ExerciseTrendSheet.tsx');
 const settings = read('src/pages/settings/WorkoutSettingsSection.tsx');
 const prefs = read('src/pages/SettingsPreferences.tsx');
-const logs = read('src/pages/WorkoutLogs.tsx');
+const logs = read('src/pages/WorkoutHistory.tsx');
+const sessions = read('src/pages/workouts/sessions.ts');
+const sessionForm = read('src/pages/workouts/SessionForm.tsx');
 const caps = read('src/lib/capabilities.ts');
 const types = read('src/lib/accountTypes.ts');
 const calendar = read('src/pages/progress/TrainingCalendar.tsx');
@@ -50,7 +52,9 @@ test('the route and its entry points are registered, and every one hides behind 
   assert.doesNotMatch(logs, /progressionEnabled/);
   assert.match(logs, /<ButtonLink to="\/workouts\/progress" variant="secondary" icon=\{<TrendingUp size=\{18\} \/>\}>\s*View progress\s*<\/ButtonLink>/, 'View progress shows with the flag off');
   // Both writers of the log invalidate the hub: the save path and the delete path (the hub's queries carry a 60 s staleTime).
-  assert.equal(count(logs, /qc\.invalidateQueries\(\{ queryKey: \['workout-progress'\] \}\);/g), 2, 'save and delete both invalidate the hub');
+  // Save lives in the session form (the /workouts/history/:logId route); delete stays on History. Both invalidate the hub.
+  assert.equal(count(logs, /qc\.invalidateQueries\(\{ queryKey: \['workout-progress'\] \}\);/g), 1, 'delete invalidates the hub');
+  assert.equal(count(sessionForm, /qc\.invalidateQueries\(\{ queryKey: \['workout-progress'\] \}\);/g), 1, 'save invalidates the hub');
   assert.match(logs, /\^day-\\d\{4\}-\\d\{2\}-\\d\{2\}\$/, 'the #day-<date> deep link from a calendar cell');
   // A #day- target the loaded window does not reach gets an honest line instead of a silent landing at the top.
   assert.match(logs, /const missingDay = useMemo\(/);
@@ -58,10 +62,12 @@ test('the route and its entry points are registered, and every one hides behind 
   assert.match(logs, /Boolean\(data\.hasNextPage\) && !!oldest && day < startOfDay\(oldest\)/);
   assert.match(logs, /data-testid="log-day-missing"/);
   assert.match(logs, /is further back than the latest \$\{formatStat\(logs\.length\)\} sessions shown here\./);
-  assert.match(logs, /No sessions on \$\{missingDay\.label\} in this log\./);
+  assert.match(logs, /No sessions on \$\{missingDay\.label\} in this history\./);
   // Today's stats stay as they were.
-  assert.match(logs, /qc\.invalidateQueries\(\{ queryKey: \['workout-logs'\] \}\);/);
-  assert.match(logs, /api\.get<LogsResponse>\('\/workouts\/logs', \{ params: \{ page: 1, limit: 100 \} \}\)/);
+  assert.match(logs, /qc\.invalidateQueries\(\{ queryKey: LOGS_KEY \}\);/);
+  assert.match(sessions, /export const LOGS_KEY = \['workout-logs'\] as const;/);
+  assert.match(sessions, /export const LOGS_LIMIT = 100;/);
+  assert.match(sessions, /api\.get<LogsResponse>\('\/workouts\/logs', \{ params: \{ page: 1, limit: LOGS_LIMIT \} \}\)/);
 });
 
 test('the page waits for the capabilities answer; the summary is not flag-gated, the Year calendar is', () => {
@@ -101,7 +107,9 @@ test('each records route is called once, with the API\'s raw timezone offset; th
   assert.match(page, /rangeLabel=\{heatRangeLabel\}/);
   // The heatmap: a non-colour cue on every trained level, 24 px-clear targets under a coarse pointer, and the newest week in view.
   assert.match(calendar, /0: 'border border-line bg-surface-2',/);
-  for (const level of ['1', '2', '3']) assert.match(calendar, new RegExp(`${level}: 'border border-brand-text bg-brand`), `level ${level} carries the outline cue`);
+  // The ramp is the ink token, never the action colour (the accent is for the one action on a screen).
+  for (const level of ['1', '2', '3']) assert.match(calendar, new RegExp(`${level}: 'border border-text-2 bg-text-1`), `level ${level} carries the outline cue`);
+  assert.doesNotMatch(calendar, /bg-brand/, 'no accent fill on the heatmap');
   assert.match(calendar, /const CELL = 'size-3 pointer-coarse:size-5 rounded-\[3px\]';/);
   assert.match(calendar, /const GAP = 'gap-1 pointer-coarse:gap-1\.5';/);
   assert.match(calendar, /const COLS = 'auto-cols-\[0\.75rem\] pointer-coarse:auto-cols-\[1\.25rem\]';/);

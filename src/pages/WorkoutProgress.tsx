@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth';
 import { useFeatureGate } from '../lib/capabilities';
 import { localDayParams } from '../lib/timezone';
 import { useUnits, weightUnit } from '../lib/units';
-import { EmptyState, ErrorState, PageHeader, PageSkeleton, SkeletonCard, Tabs } from './ui';
+import { CardGrid, EmptyState, ErrorState, PageHeader, PageSkeleton, SkeletonCard, Tabs } from './ui';
 import { Plus } from './icons';
 import {
   PERIODS,
@@ -27,6 +27,7 @@ import { MuscleGroups } from './progress/MuscleGroups';
 import { Movements } from './progress/Movements';
 import { RecordsList } from './progress/RecordsList';
 import { ExerciseTrendSheet } from './progress/ExerciseTrendSheet';
+import { TRAIN, useSheetNav } from './workouts/sheet';
 
 /**
  * The progression hub at /workouts/progress (design-progression-hub.md §3.8)
@@ -59,6 +60,7 @@ export default function WorkoutProgress() {
   const preferences = useMemo(() => workoutPreferencesOf(user), [user]);
   const [showAllMuscles, setShowAllMuscles] = useState(false);
   const [showAllRecords, setShowAllRecords] = useState(false);
+  const { state: sheetState } = useSheetNav();
 
   const periodParam = params.get('period');
   const period: ProgressPeriod = isProgressPeriod(periodParam) ? periodParam : 'month';
@@ -144,7 +146,7 @@ export default function WorkoutProgress() {
   const exerciseRow = exerciseId ? data?.exercises?.find((row) => row.exerciseId === exerciseId) : undefined;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader title={PROGRESS_STRINGS.title} subtitle={PROGRESS_STRINGS.subtitle} />
 
       <div className="space-y-2">
@@ -164,35 +166,36 @@ export default function WorkoutProgress() {
 
       {summary.isError ? (
         <ErrorState error={summary.error} title={PROGRESS_STRINGS.cardError} onRetry={() => summary.refetch()} />
+      ) : nothingLogged ? (
+        // Nothing in the window: one prompt with a verb instead of a strip of zeros and a blank calendar.
+        <EmptyState family="train" title={PROGRESS_STRINGS.emptyTitle} message={PROGRESS_STRINGS.emptyBody} action={{ label: PROGRESS_STRINGS.emptyCta, to: TRAIN.newSession(), state: sheetState, icon: <Plus size={18} /> }} />
       ) : (
-        <ProgressTiles summary={data} unit={unit} days={range.days} loading={summary.isPending} />
-      )}
+        <>
+          <ProgressTiles summary={data} unit={unit} days={range.days} loading={summary.isPending} />
 
-      {calendarLoading ? (
-        <SkeletonCard media={false} />
-      ) : calendarFailed ? (
-        <ErrorState error={calendar.error} title="Could not load your training days" onRetry={() => calendar.refetch()} />
-      ) : heatDays || !summary.isError ? (
-        <TrainingCalendar range={heatRange} days={heatDays} rangeLabel={heatRangeLabel} note={calendarNote} />
-      ) : null}
+          {calendarLoading ? (
+            <SkeletonCard media={false} />
+          ) : calendarFailed ? (
+            <ErrorState error={calendar.error} title="Could not load your training days" onRetry={() => calendar.refetch()} />
+          ) : (
+            <TrainingCalendar range={heatRange} days={heatDays} rangeLabel={heatRangeLabel} note={calendarNote} />
+          )}
 
-      {summary.isPending ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <SkeletonCard media={false} />
-          <SkeletonCard media={false} />
-        </div>
-      ) : summary.isError ? null : nothingLogged ? (
-        <EmptyState
-          title={PROGRESS_STRINGS.emptyTitle}
-          message={PROGRESS_STRINGS.emptyBody}
-          action={{ label: PROGRESS_STRINGS.emptyCta, to: '/workouts/logs?log=1', icon: <Plus size={18} /> }}
-        />
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <MuscleGroups groups={data?.muscleGroups} showAll={showAllMuscles} onToggle={() => setShowAllMuscles((v) => !v)} />
-          <Movements exercises={data?.exercises} system={system} onOpen={openExercise} />
-          <RecordsList className="lg:col-span-2" prs={data?.prs} system={system} showAll={showAllRecords} onToggle={() => setShowAllRecords((v) => !v)} />
-        </div>
+          {summary.isPending ? (
+            <CardGrid min="22rem">
+              <SkeletonCard media={false} />
+              <SkeletonCard media={false} />
+            </CardGrid>
+          ) : (
+            <>
+              <CardGrid min="22rem">
+                <MuscleGroups groups={data?.muscleGroups} showAll={showAllMuscles} onToggle={() => setShowAllMuscles((v) => !v)} />
+                <Movements exercises={data?.exercises} system={system} onOpen={openExercise} />
+              </CardGrid>
+              <RecordsList prs={data?.prs} system={system} showAll={showAllRecords} onToggle={() => setShowAllRecords((v) => !v)} />
+            </>
+          )}
+        </>
       )}
 
       <ExerciseTrendSheet exerciseId={exerciseId} name={exerciseRow?.name} measure={exerciseRow?.measure} system={system} preferences={preferences} onClose={closeExercise} />

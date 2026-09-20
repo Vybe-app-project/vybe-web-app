@@ -6,15 +6,15 @@ import { MONTHS_SHORT, PROGRESS_STRINGS, calendarGrid, countLabel, parseDateKey,
 
 /**
  * "Training days": one cell per local day of the window, Monday-first week
- * columns, intensity on the brand ramp (0 · 1 · 2 · 3+ sessions). The ramp is
- * the brand token at three opacities, so light and dark both read from
- * tokens and nothing here is red or green. Colour is never the only cue: a
- * rest day is a hollow surface-2 cell on the hairline, and any trained day
- * carries a brand-text border, so a 1-session day is told apart from a rest
- * day by its outline before its fill (WCAG 1.4.11; the 45% fill alone is
- * about 1.4:1 against an empty cell in light mode). A day with sessions links
- * to that day's section of the log (`/workouts/logs#day-<date>`, the ids
- * WorkoutLogs already renders). Cells sit on a 12 px box at a 16 px pitch
+ * columns, intensity on a neutral ramp (0 · 1 · 2 · 3+ sessions). The ramp is
+ * the ink token at three opacities — the accent colour is for the one action
+ * on a screen, never a fill — so light and dark both read from tokens and
+ * nothing here is red or green. Colour is never the only cue: a rest day is a
+ * hollow surface-2 cell on the hairline, and any trained day carries an ink
+ * border, so a 1-session day is told apart from a rest day by its outline
+ * before its fill (WCAG 1.4.11). A day with sessions links to that day's
+ * section of History (`/workouts/history#day-<date>`, the ids WorkoutHistory
+ * renders). Cells sit on a 12 px box at a 16 px pitch
  * under a fine pointer and grow to 20 px at a 26 px pitch under a coarse one,
  * so touch targets clear WCAG 2.5.8's 24 px spacing. The grid scrolls to its
  * newest week on mount and whenever the range changes. Pure otherwise: the
@@ -23,9 +23,9 @@ import { MONTHS_SHORT, PROGRESS_STRINGS, calendarGrid, countLabel, parseDateKey,
 
 const RAMP: Record<RampLevel, string> = {
   0: 'border border-line bg-surface-2',
-  1: 'border border-brand-text bg-brand/45',
-  2: 'border border-brand-text bg-brand/75',
-  3: 'border border-brand-text bg-brand',
+  1: 'border border-text-2 bg-text-1/35',
+  2: 'border border-text-2 bg-text-1/65',
+  3: 'border border-text-2 bg-text-1',
 };
 
 const CELL = 'size-3 pointer-coarse:size-5 rounded-[3px]';
@@ -107,7 +107,7 @@ export function TrainingCalendar({
                     <li key={cell.date} data-level={cell.level} title={cell.label} className={cx(CELL, RAMP[cell.level])}>
                       {cell.sessions > 0 ? (
                         <Link
-                          to={`/workouts/logs#day-${cell.date}`}
+                          to={`/workouts/history#day-${cell.date}`}
                           viewTransition
                           className="block size-full rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
                         >
