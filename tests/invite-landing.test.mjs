@@ -491,3 +491,24 @@ test('the failure body: the title, the sentence as an alert, Try again only wher
   assert.ok(selected.includes(lib.CODE_SELECTED));
   assert.ok(selected.includes('id="invite-code"'));
 });
+
+test('while the invites flag is off the landing keeps the code but hides the app call-to-action', async () => {
+  const lib = await import('../src/lib/invites.ts');
+  assert.deepEqual(lib.classifyInviteFailure({ response: { status: 404, data: { code: 'FEATURE_DISABLED', message: 'x' } } }), { kind: 'unavailable' });
+  assert.deepEqual(lib.classifyInviteFailure({ response: { status: 404, data: { code: 'INVITE_NOT_FOUND' } } }), { kind: 'unknown-code' });
+  assert.equal(lib.inviteFailureMessage({ kind: 'unavailable' }), lib.UNAVAILABLE_COPY);
+  assert.equal(lib.canRetryInvite({ kind: 'unavailable' }), false);
+  assert.equal(lib.showsCodeOnFailure({ kind: 'unavailable' }), true);
+  const page = fs.readFileSync(new URL('../src/pages/JoinInvite.tsx', import.meta.url), 'utf8');
+  assert.match(page, /const invitesEnabled = useFeature\('invites'\);/);
+  assert.match(page, /handheld && invitesEnabled \? \(/);
+  const { createElement: h } = await import('react');
+  const { renderToString } = await import('react-dom/server');
+  const { MemoryRouter } = await import('react-router-dom');
+  const { InvitePreviewBody } = await import('../src/pages/JoinInvite.tsx');
+  const preview = { kind: 'general', inviter: { firstName: 'Sam' }, storeUrls: { ios: 'https://apps.apple.com/app/id1', android: null } };
+  const off = renderToString(h(MemoryRouter, null, h(InvitePreviewBody, { code: 'ABCDEFGH', preview, signedIn: false, handheld: true, invitesEnabled: false, copyState: 'idle', from: '/join/ABCDEFGH' })));
+  assert.ok(!off.includes('invite-open-app') && off.includes('invite-not-open') && off.includes('ABCD'), 'flag off: no app CTA, note shown, code kept');
+  const on = renderToString(h(MemoryRouter, null, h(InvitePreviewBody, { code: 'ABCDEFGH', preview, signedIn: false, handheld: true, invitesEnabled: true, copyState: 'idle', from: '/join/ABCDEFGH' })));
+  assert.ok(on.includes('invite-open-app') && !on.includes('invite-not-open'));
+});

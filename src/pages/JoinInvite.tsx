@@ -34,6 +34,7 @@ import {
   type InvitePreview,
 } from '../lib/invites';
 import { appDeepLink, isHandheld } from '../lib/shareLinks';
+import { useFeature } from '../lib/capabilities';
 import { Avatar, Badge, Button, ButtonLink, Callout, Spinner, buttonClass } from './ui';
 import { Copy, ExternalLink, Link as LinkIcon, User } from './icons';
 
@@ -175,6 +176,7 @@ export function InvitePreviewBody({
   code,
   signedIn,
   handheld,
+  invitesEnabled = true,
   copyState,
   onCopy,
   from,
@@ -183,6 +185,8 @@ export function InvitePreviewBody({
   code: string;
   signedIn: boolean | null;
   handheld: boolean;
+  /** features.invites from /api/capabilities; while false the app cannot redeem, so the app call-to-action hides and the code is kept for later. */
+  invitesEnabled?: boolean;
   copyState: CopyState;
   onCopy?: () => void;
   /** Router location state for the sign-in link, so it bounces back here. */
@@ -211,7 +215,7 @@ export function InvitePreviewBody({
           </div>
         </div>
         <div className="mt-5 space-y-3">
-          {handheld ? (
+          {handheld && invitesEnabled ? (
             <a href={appDeepLink('invite', code)} className={buttonClass({ variant: 'primary', size: 'lg', block: true })} data-testid="invite-open-app">
               {OPEN_IN_APP}
             </a>
@@ -220,6 +224,9 @@ export function InvitePreviewBody({
         </div>
       </div>
 
+      {!invitesEnabled ? (
+        <p className="text-sm text-text-2" data-testid="invite-not-open">Invites are not open on Vybe yet. Keep this code; it will work once they are.</p>
+      ) : null}
       <InviteCodeBlock code={code} copyState={copyState} onCopy={onCopy} />
 
       <AccountRow code={code} signedIn={signedIn} from={from} primary={!handheld} />
@@ -294,6 +301,7 @@ export function JoinInviteOutcome({
   onCopy,
   onRetry,
   from,
+  invitesEnabled = true,
 }: {
   state: JoinInviteState;
   signedIn: boolean | null;
@@ -302,6 +310,7 @@ export function JoinInviteOutcome({
   onCopy?: () => void;
   onRetry?: () => void;
   from?: unknown;
+  invitesEnabled?: boolean;
 }) {
   const loading = state.status === 'loading';
   // One role="status" node at one tree position for the life of the page
@@ -326,7 +335,7 @@ export function JoinInviteOutcome({
         <InviteFailureBody failure={state.failure} code={state.code} signedIn={signedIn} copyState={copyState} onCopy={onCopy} onRetry={onRetry} from={from} />
       ) : null}
       {state.status === 'ready' ? (
-        <InvitePreviewBody preview={state.preview} code={state.code} signedIn={signedIn} handheld={handheld} copyState={copyState} onCopy={onCopy} from={from} />
+        <InvitePreviewBody preview={state.preview} code={state.code} signedIn={signedIn} handheld={handheld} invitesEnabled={invitesEnabled} copyState={copyState} onCopy={onCopy} from={from} />
       ) : null}
     </div>
   );
@@ -339,6 +348,7 @@ export default function JoinInvite() {
   const user = useAuth((s) => s.user);
   const loading = useAuth((s) => s.loading);
   const [handheld] = useState(isHandheld);
+  const invitesEnabled = useFeature('invites');
   const [copyState, setCopyState] = useState<CopyState>(null);
 
   const q = useQuery({
@@ -388,6 +398,7 @@ export default function JoinInvite() {
     <PublicShell title={INVITE_PAGE_TITLE}>
       <JoinInviteOutcome
         state={state}
+        invitesEnabled={invitesEnabled}
         signedIn={loading ? null : !!user}
         handheld={handheld}
         copyState={copyState}

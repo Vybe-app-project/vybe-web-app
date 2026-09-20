@@ -190,6 +190,7 @@ export function invitePreviewView(preview: InvitePreview): InvitePreviewView {
 export type InviteFailure =
   | { kind: 'malformed' }
   | { kind: 'unknown-code' }
+  | { kind: 'unavailable' }
   | { kind: 'revoked' }
   | { kind: 'rate-limited'; retryAfterSec: number | null }
   | { kind: 'network' }
@@ -246,7 +247,12 @@ export function classifyInviteFailure(error: unknown, { online = true }: { onlin
   if (!status && (online === false || failure.code === 'ECONNABORTED' || failure.code === 'ETIMEDOUT')) {
     return { kind: 'network' };
   }
-  if (status === 404) return { kind: 'unknown-code' };
+  if (status === 404) {
+    // While the invites flag is off for the inviter the API answers 404 FEATURE_DISABLED (services/invites.js featureDisabled).
+    const data = failure.response?.data as { code?: unknown } | undefined;
+    if (data?.code === 'FEATURE_DISABLED') return { kind: 'unavailable' };
+    return { kind: 'unknown-code' };
+  }
   if (status === 410) return { kind: 'revoked' };
   if (status === 429) {
     const data = failure.response?.data as { retryAfterSec?: unknown; retryAfter?: unknown } | undefined;
@@ -259,6 +265,7 @@ export function classifyInviteFailure(error: unknown, { online = true }: { onlin
 export const INVITE_FAILURE_TITLE: Record<InviteFailure['kind'], string> = {
   malformed: 'That code is not one we know',
   'unknown-code': 'That code is not one we know',
+  unavailable: 'Invites are not open yet',
   revoked: 'This link was turned off',
   'rate-limited': 'Too many requests',
   network: 'Could not reach Vybe',
@@ -267,6 +274,7 @@ export const INVITE_FAILURE_TITLE: Record<InviteFailure['kind'], string> = {
 
 export const UNKNOWN_CODE_COPY = 'That code isn’t one we know. Check the letters and try again.';
 export const REVOKED_COPY = 'This link was turned off by the person who made it.';
+export const UNAVAILABLE_COPY = 'Invites are not open on Vybe yet. Keep this code; it will work once they are.';
 export const NETWORK_COPY = 'Could not reach Vybe. Check your connection and try again.';
 export const FAILED_COPY = 'Could not load this invite. Try again in a moment.';
 
@@ -280,6 +288,8 @@ export function inviteFailureMessage(failure: InviteFailure): string {
     case 'malformed':
     case 'unknown-code':
       return UNKNOWN_CODE_COPY;
+    case 'unavailable':
+      return UNAVAILABLE_COPY;
     case 'revoked':
       return REVOKED_COPY;
     case 'rate-limited':
@@ -299,7 +309,7 @@ export const canRetryInvite = (failure: InviteFailure): boolean => failure.kind 
  * rate-limited or offline recipient can type it into the app after sign-up.
  */
 export const showsCodeOnFailure = (failure: InviteFailure): boolean =>
-  failure.kind === 'rate-limited' || failure.kind === 'network' || failure.kind === 'failed';
+  failure.kind === 'rate-limited' || failure.kind === 'network' || failure.kind === 'failed' || failure.kind === 'unavailable';
 
 /* ------------------------------------------------------------------ page copy */
 
