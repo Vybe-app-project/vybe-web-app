@@ -1,6 +1,7 @@
 /// <reference types="vite-plugin-pwa/react" />
-import { lazy, Suspense, useCallback, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef } from 'react';
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
 import { PublicShell } from './components/PublicShell';
@@ -15,6 +16,8 @@ import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './compon
 import { useAuth, useSessionRefresh } from './lib/auth';
 import { AccountPreferencesSync } from './lib/accountPreferences';
 import { lazyPage } from './lib/navigation';
+import { SHEET_MEDIA, backgroundLocationOf } from './components/RouteSheet';
+import { useMediaQuery } from './components/ui';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
@@ -41,7 +44,10 @@ const Messages = lazyPage('/messages', () => import('./pages/Messages'));
 const Friends = lazyPage('/friends', () => import('./pages/Friends'));
 const Stories = lazyPage('/stories', () => import('./pages/Stories'));
 const Gyms = lazyPage('/gyms', () => import('./pages/Gyms'));
+// Gym page (P6): the band's full expression, with the gym-scoped tabs on the band.
+const GymDetail = lazyPage(null, () => import('./pages/GymDetail'));
 const GymCommunity = lazyPage('/communities', () => import('./pages/GymCommunity'));
+const CommunityDetail = lazyPage(null, () => import('./pages/CommunityDetail'));
 const Livestreams = lazyPage('/live', () => import('./pages/Livestreams'));
 const Support = lazyPage('/support', () => import('./pages/Support'));
 const OpenHandoff = lazyPage(null, () => import('./pages/OpenHandoff'));
@@ -55,7 +61,13 @@ const JoinInvite = lazyPage(null, () => import('./pages/JoinInvite'));
 const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
 const WorkoutDetail = lazyPage(null, () => import('./pages/WorkoutDetail'));
 const WorkoutPlanDetail = lazyPage(null, () => import('./pages/WorkoutPlanDetail'));
-const WorkoutLogs = lazyPage('/workouts/logs', () => import('./pages/WorkoutLogs'));
+// Train › History (was "Workout log"; P4 renames the module to WorkoutHistory). /workouts/logs redirects here.
+const WorkoutHistory = lazyPage('/workouts/history', () => import('./pages/WorkoutLogs'));
+// Detail/editor routes presented through RouteSheet (a sheet over the parent on lg+, a page on phones).
+const WorkoutEditor = lazyPage(null, () => import('./pages/workouts/WorkoutEditor'));
+const PlanEditor = lazyPage(null, () => import('./pages/workouts/PlanEditor'));
+const ActiveWorkout = lazyPage(null, () => import('./pages/workouts/ActiveWorkout'));
+const MealLog = lazyPage(null, () => import('./pages/MealLog'));
 const WorkoutProgress = lazyPage('/workouts/progress', () => import('./pages/WorkoutProgress'));
 const Meals = lazyPage('/meals', () => import('./pages/Meals'));
 const MealDetail = lazyPage(null, () => import('./pages/MealDetail'));
@@ -182,12 +194,42 @@ function PostGate() {
   return <PublicPost />;
 }
 
-/** Route changes should start at the top rather than inherit scroll. */
+/**
+ * Route changes should start at the top rather than inherit scroll — except a
+ * sheet opening or closing over its parent, which must leave the parent where
+ * it was.
+ */
 function ScrollToTop() {
-  const { pathname } = useLocation();
-  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  const location = useLocation();
+  const sheet = !!backgroundLocationOf(location);
+  const wasSheet = useRef(false);
+  useEffect(() => {
+    if (!sheet && !wasSheet.current) window.scrollTo(0, 0);
+    wasSheet.current = sheet;
+  }, [location.pathname, sheet]);
   return null;
 }
+
+/** /workouts/logs → /workouts/history, keeping ?log=1 and #day-… anchors that shipped in links. */
+function RedirectHistory() {
+  const { search, hash } = useLocation();
+  return <Navigate to={`/workouts/history${search}${hash}`} replace />;
+}
+
+/**
+ * Detail routes that present as a sheet over their parent on lg+ (RouteSheet).
+ * Listed once: the main <Routes> renders them as pages inside the shell; when a
+ * link opened one with `sheetState(location)`, the main <Routes> keeps showing
+ * the background location and this list renders the sheet on top.
+ */
+const SHEET_ROUTES: Array<{ path: string; element: ReactNode }> = [
+  { path: 'workouts/new', element: <WorkoutEditor /> },
+  { path: 'workouts/:workoutId/edit', element: <WorkoutEditor /> },
+  { path: 'workouts/plans/new', element: <PlanEditor /> },
+  { path: 'workouts/plans/:planId/edit', element: <PlanEditor /> },
+  { path: 'workouts/active', element: <ActiveWorkout /> },
+  { path: 'meals/log', element: <MealLog /> },
+];
 
 /** Legacy paths that shipped in links: keep them working while pages migrate. */
 function RedirectPost() {
@@ -220,6 +262,160 @@ function PwaUpdates() {
     setNeedRefresh(false);
   }, [needRefresh, setNeedRefresh, toast, updateServiceWorker]);
   return null;
+}
+
+/** Every route, in one place, so AppRoutes can render it against a background location too. */
+const ROUTE_TREE = (
+  <>
+    {/* Public auth */}
+    <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
+    <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
+    <Route path="/forgot-password" element={<GuestOnly><ForgotPassword /></GuestOnly>} />
+    <Route path="/reset-password" element={<ResetPassword />} />
+
+    {/* Public help: works signed out, wears the app shell when signed in */}
+    <Route path="/support" element={<SupportGate />} />
+    {/* The API's transactional emails link to support.html (the old static page). */}
+    <Route path="/support.html" element={<Navigate to="/support" replace />} />
+    {/* One-click email unsubscribe. No account: the token in the path (or ?token=) is the credential; the page POSTs it to /api/email/unsubscribe after one confirm. */}
+    <Route path="/unsubscribe/:token" element={<EmailUnsubscribe />} />
+    <Route path="/unsubscribe" element={<EmailUnsubscribe />} />
+    <Route path="/email/unsubscribe/:token" element={<EmailUnsubscribe />} />
+    <Route path="/email/unsubscribe" element={<EmailUnsubscribe />} />
+
+    {/* Shared post links work signed out (public preview) and wear the shell when signed in */}
+    <Route path="/p/:postId" element={<PostGate />} />
+
+    {/* Together-session invite landing: works signed out (sign-in hand-off), wears the shell when signed in. The param is a session id or the API's invite token. */}
+    <Route path="/session/:id" element={<SessionGate />} />
+    <Route path="/session/invite/:token" element={<SessionGate />} />
+
+    {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
+    <Route path="/open.html" element={<OpenHandoff />} />
+    <Route path="/open" element={<OpenHandoff />} />
+
+    {/* Invite landing: /join/<code> is the universal link an inviter shares (AASA /join/*); /join?code= is the hand-built form. Public: GET /api/public/invites/:code needs no account, and the code is shown in plain text for the app. */}
+    <Route path="/join/:code" element={<JoinInvite />} />
+    <Route path="/join" element={<JoinInvite />} />
+
+    {/* Admin: the three signed-out surfaces sit outside RequireAdmin */}
+    <Route path="/admin/login" element={<AdminLogin />} />
+    <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
+    <Route path="/admin/reset-password" element={<AdminResetPassword />} />
+    <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+      <Route index element={<AdminDashboard />} />
+      <Route path="users" element={<AdminUsers />} />
+      <Route path="posts" element={<AdminPosts />} />
+      <Route path="reports" element={<AdminReports />} />
+      <Route path="support" element={<AdminSupport />} />
+      <Route path="trainers" element={<AdminTrainers />} />
+      {/* Premade workout / plan catalog: list, then one editor route per kind ("new" or an id). */}
+      <Route path="catalog" element={<AdminCatalog />} />
+      <Route path="catalog/workouts/new" element={<AdminCatalogWorkout />} />
+      <Route path="catalog/workouts/:workoutId" element={<AdminCatalogWorkout />} />
+      <Route path="catalog/plans/new" element={<AdminCatalogPlan />} />
+      <Route path="catalog/plans/:planId" element={<AdminCatalogPlan />} />
+      <Route path="admins" element={<AdminAdmins />} />
+      <Route path="audit" element={<AdminAudit />} />
+      <Route path="system" element={<AdminSystem />} />
+      <Route path="flags" element={<AdminFlags />} />
+      {/* Unknown console URLs stay in the console. */}
+      <Route path="*" element={<Navigate to="/admin" replace />} />
+    </Route>
+
+    {/* Authenticated app. The first-run sheet answers /?welcome=1 on any route. */}
+    <Route element={<RequireAuth><Layout /><WelcomeSheet /></RequireAuth>}>
+      <Route index element={<Feed />} />
+      <Route path="discover" element={<Discover />} />
+      <Route path="search" element={<Search />} />
+      <Route path="stories" element={<Stories />} />
+      <Route path="profile" element={<Profile />} />
+      <Route path="u/:id" element={<UserProfile />} />
+      {/* Followers / Following lists: your own under /profile, anyone else's under their profile. */}
+      <Route path="profile/:kind" element={<Connections />} />
+      <Route path="u/:id/:kind" element={<Connections />} />
+      <Route path="settings" element={<Settings />} />
+      <Route path="notifications" element={<Notifications />} />
+      <Route path="messages" element={<Messages />} />
+      <Route path="messages/:roomId" element={<Messages />} />
+      <Route path="friends" element={<Friends />} />
+      <Route path="gyms" element={<Gyms />} />
+      <Route path="gyms/:gymId" element={<GymDetail />} />
+      <Route path="communities" element={<GymCommunity />} />
+      <Route path="communities/:communityId" element={<CommunityDetail />} />
+      <Route path="live" element={<Livestreams />} />
+      <Route path="live/:streamId" element={<Livestreams />} />
+
+      <Route path="workouts" element={<Workouts />} />
+      <Route path="workouts/history" element={<WorkoutHistory />} />
+      <Route path="workouts/logs" element={<RedirectHistory />} />
+      <Route path="workouts/progress" element={<WorkoutProgress />} />
+      {/* Detail and editor routes (RouteSheet); static paths before the :param routes below. */}
+      {SHEET_ROUTES.map((r) => (
+        <Route key={r.path} path={r.path} element={r.element} />
+      ))}
+      <Route path="workouts/plans/:planId" element={<WorkoutPlanDetail />} />
+      <Route path="workouts/:workoutId" element={<WorkoutDetail />} />
+      <Route path="meals" element={<Meals />} />
+      {/* Community meals live on the Meals page as a tab; keep the noun URL working. */}
+      <Route path="meals/community" element={<Navigate to="/meals?tab=community" replace />} />
+      <Route path="meals/templates" element={<MealTemplates />} />
+      <Route path="meals/plans" element={<WeeklyPlans />} />
+      <Route path="meals/shared/:token" element={<SharedMeal />} />
+      <Route path="meals/:id" element={<MealDetail />} />
+      <Route path="health" element={<Health />} />
+      <Route path="health/goals" element={<HealthGoals />} />
+      <Route path="health/water" element={<Water />} />
+      <Route path="health/photos" element={<ProgressPhotos />} />
+      <Route path="challenges" element={<Challenges />} />
+      <Route path="achievements" element={<Achievements />} />
+      {/* Weekly and monthly recaps; /recaps/:id is also the mobile deep link. */}
+      <Route path="recaps" element={<Recaps />} />
+      <Route path="recaps/:id" element={<RecapDetail />} />
+
+      {/* Aliases and legacy paths → canonical routes */}
+      <Route path="create" element={<Navigate to="/?compose=1" replace />} />
+      <Route path="post/:postId" element={<RedirectPost />} />
+      <Route path="feed" element={<Navigate to="/" replace />} />
+      <Route path="explore" element={<Navigate to="/discover" replace />} />
+      <Route path="inbox" element={<Navigate to="/messages" replace />} />
+      <Route path="meal-templates" element={<Navigate to="/meals/templates" replace />} />
+      <Route path="health-goals" element={<Navigate to="/health/goals" replace />} />
+      <Route path="water" element={<Navigate to="/health/water" replace />} />
+      <Route path="workout-logs" element={<Navigate to="/workouts/history" replace />} />
+      <Route path="livestreams" element={<Navigate to="/live" replace />} />
+      <Route path="livestreams/:streamId" element={<RedirectLive />} />
+    </Route>
+
+    <Route path="*" element={<NotFound />} />
+  </>
+);
+
+/**
+ * The route tree against the real location, or against the background
+ * location while a sheet is open on a wide screen (the sheet's own route then
+ * renders on top, outside the shell). On phones the background is ignored and
+ * the sheet route is an ordinary page.
+ */
+function AppRoutes() {
+  const location = useLocation();
+  const wide = useMediaQuery(SHEET_MEDIA);
+  const background = wide ? backgroundLocationOf(location) : null;
+  return (
+    <>
+      <Routes location={background ? { ...background, state: null, key: 'background' } : location}>{ROUTE_TREE}</Routes>
+      {background ? (
+        <RequireAuth>
+          <Routes>
+            {SHEET_ROUTES.map((r) => (
+              <Route key={r.path} path={r.path} element={r.element} />
+            ))}
+            <Route path="*" element={null} />
+          </Routes>
+        </RequireAuth>
+      ) : null}
+    </>
+  );
 }
 
 export default function App() {
@@ -255,122 +451,7 @@ export default function App() {
       <AccountPreferencesSync />
       <Suspense fallback={<FullPageSpinner />}>
         <RouteErrorBoundary>
-          <Routes>
-            {/* Public auth */}
-            <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
-            <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
-            <Route path="/forgot-password" element={<GuestOnly><ForgotPassword /></GuestOnly>} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-
-            {/* Public help: works signed out, wears the app shell when signed in */}
-            <Route path="/support" element={<SupportGate />} />
-            {/* The API's transactional emails link to support.html (the old static page). */}
-            <Route path="/support.html" element={<Navigate to="/support" replace />} />
-            {/* One-click email unsubscribe. No account: the token in the path (or ?token=) is the credential; the page POSTs it to /api/email/unsubscribe after one confirm. */}
-            <Route path="/unsubscribe/:token" element={<EmailUnsubscribe />} />
-            <Route path="/unsubscribe" element={<EmailUnsubscribe />} />
-            <Route path="/email/unsubscribe/:token" element={<EmailUnsubscribe />} />
-            <Route path="/email/unsubscribe" element={<EmailUnsubscribe />} />
-
-            {/* Shared post links work signed out (public preview) and wear the shell when signed in */}
-            <Route path="/p/:postId" element={<PostGate />} />
-
-            {/* Together-session invite landing: works signed out (sign-in hand-off), wears the shell when signed in. The param is a session id or the API's invite token. */}
-            <Route path="/session/:id" element={<SessionGate />} />
-            <Route path="/session/invite/:token" element={<SessionGate />} />
-
-            {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
-            <Route path="/open.html" element={<OpenHandoff />} />
-            <Route path="/open" element={<OpenHandoff />} />
-
-            {/* Invite landing: /join/<code> is the universal link an inviter shares (AASA /join/*); /join?code= is the hand-built form. Public: GET /api/public/invites/:code needs no account, and the code is shown in plain text for the app. */}
-            <Route path="/join/:code" element={<JoinInvite />} />
-            <Route path="/join" element={<JoinInvite />} />
-
-            {/* Admin: the three signed-out surfaces sit outside RequireAdmin */}
-            <Route path="/admin/login" element={<AdminLogin />} />
-            <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
-            <Route path="/admin/reset-password" element={<AdminResetPassword />} />
-            <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
-              <Route index element={<AdminDashboard />} />
-              <Route path="users" element={<AdminUsers />} />
-              <Route path="posts" element={<AdminPosts />} />
-              <Route path="reports" element={<AdminReports />} />
-              <Route path="support" element={<AdminSupport />} />
-              <Route path="trainers" element={<AdminTrainers />} />
-              {/* Premade workout / plan catalog: list, then one editor route per kind ("new" or an id). */}
-              <Route path="catalog" element={<AdminCatalog />} />
-              <Route path="catalog/workouts/new" element={<AdminCatalogWorkout />} />
-              <Route path="catalog/workouts/:workoutId" element={<AdminCatalogWorkout />} />
-              <Route path="catalog/plans/new" element={<AdminCatalogPlan />} />
-              <Route path="catalog/plans/:planId" element={<AdminCatalogPlan />} />
-              <Route path="admins" element={<AdminAdmins />} />
-              <Route path="audit" element={<AdminAudit />} />
-              <Route path="system" element={<AdminSystem />} />
-              <Route path="flags" element={<AdminFlags />} />
-              {/* Unknown console URLs stay in the console. */}
-              <Route path="*" element={<Navigate to="/admin" replace />} />
-            </Route>
-
-            {/* Authenticated app. The first-run sheet answers /?welcome=1 on any route. */}
-            <Route element={<RequireAuth><Layout /><WelcomeSheet /></RequireAuth>}>
-              <Route index element={<Feed />} />
-              <Route path="discover" element={<Discover />} />
-              <Route path="search" element={<Search />} />
-              <Route path="stories" element={<Stories />} />
-              <Route path="profile" element={<Profile />} />
-              <Route path="u/:id" element={<UserProfile />} />
-              {/* Followers / Following lists: your own under /profile, anyone else's under their profile. */}
-              <Route path="profile/:kind" element={<Connections />} />
-              <Route path="u/:id/:kind" element={<Connections />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="notifications" element={<Notifications />} />
-              <Route path="messages" element={<Messages />} />
-              <Route path="messages/:roomId" element={<Messages />} />
-              <Route path="friends" element={<Friends />} />
-              <Route path="gyms" element={<Gyms />} />
-              <Route path="communities" element={<GymCommunity />} />
-              <Route path="live" element={<Livestreams />} />
-              <Route path="live/:streamId" element={<Livestreams />} />
-
-              <Route path="workouts" element={<Workouts />} />
-              <Route path="workouts/logs" element={<WorkoutLogs />} />
-              <Route path="workouts/progress" element={<WorkoutProgress />} />
-              <Route path="workouts/plans/:planId" element={<WorkoutPlanDetail />} />
-              <Route path="workouts/:workoutId" element={<WorkoutDetail />} />
-              <Route path="meals" element={<Meals />} />
-              {/* Community meals live on the Meals page as a tab; keep the noun URL working. */}
-              <Route path="meals/community" element={<Navigate to="/meals?tab=community" replace />} />
-              <Route path="meals/templates" element={<MealTemplates />} />
-              <Route path="meals/plans" element={<WeeklyPlans />} />
-              <Route path="meals/shared/:token" element={<SharedMeal />} />
-              <Route path="meals/:id" element={<MealDetail />} />
-              <Route path="health" element={<Health />} />
-              <Route path="health/goals" element={<HealthGoals />} />
-              <Route path="health/water" element={<Water />} />
-              <Route path="health/photos" element={<ProgressPhotos />} />
-              <Route path="challenges" element={<Challenges />} />
-              <Route path="achievements" element={<Achievements />} />
-              {/* Weekly and monthly recaps; /recaps/:id is also the mobile deep link. */}
-              <Route path="recaps" element={<Recaps />} />
-              <Route path="recaps/:id" element={<RecapDetail />} />
-
-              {/* Aliases and legacy paths → canonical routes */}
-              <Route path="create" element={<Navigate to="/?compose=1" replace />} />
-              <Route path="post/:postId" element={<RedirectPost />} />
-              <Route path="feed" element={<Navigate to="/" replace />} />
-              <Route path="explore" element={<Navigate to="/discover" replace />} />
-              <Route path="inbox" element={<Navigate to="/messages" replace />} />
-              <Route path="meal-templates" element={<Navigate to="/meals/templates" replace />} />
-              <Route path="health-goals" element={<Navigate to="/health/goals" replace />} />
-              <Route path="water" element={<Navigate to="/health/water" replace />} />
-              <Route path="workout-logs" element={<Navigate to="/workouts/logs" replace />} />
-              <Route path="livestreams" element={<Navigate to="/live" replace />} />
-              <Route path="livestreams/:streamId" element={<RedirectLive />} />
-            </Route>
-
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <AppRoutes />
         </RouteErrorBoundary>
       </Suspense>
     </ToastProvider>
