@@ -60,12 +60,18 @@ export type RouteSheetProps = {
   /** Sticky footer in the sheet presentation. */
   footer?: ReactNode;
   className?: string;
+  /**
+   * Called instead of popping history when the sheet closes. Page modules that
+   * opened without a parent (a deep link, a reload) use this to replace to a
+   * sensible destination rather than leaving the browser on a dead entry.
+   */
+  onClose?: () => void;
   children: ReactNode;
 };
 
-function SheetPresentation({ title, description, size = 'lg', footer, className, children }: RouteSheetProps) {
+function SheetPresentation({ title, description, size = 'lg', footer, className, onClose, children }: RouteSheetProps) {
   const navigate = useNavigate();
-  const close = useCallback(() => navigate(-1), [navigate]);
+  const close = useCallback(() => (onClose ? onClose() : navigate(-1)), [onClose, navigate]);
   return (
     <Modal open onClose={close} presentation="dialog" size={size} title={title} description={description} footer={footer} className={className}>
       {children}

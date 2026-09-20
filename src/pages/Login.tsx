@@ -53,7 +53,7 @@ export function AuthShell({
       <aside className="dark safe-top relative flex flex-col bg-bg text-text-1 lg:min-h-dvh lg:justify-between lg:px-14 lg:py-12">
         {/* Mobile band: mark + wordmark + the line */}
         <div className="flex flex-col items-center px-6 pb-8 pt-10 text-center lg:hidden">
-          <BrandMark size={56} title="Vybe" className="text-brand" />
+          <BrandMark size={56} title="Vybe" className="text-mark" />
           <p className="type-display mt-4 text-xl text-text-1">{headline}</p>
         </div>
 
@@ -62,7 +62,7 @@ export function AuthShell({
           <Brand size="md" tone="brand" />
         </Link>
         <div className="hidden lg:block">
-          <BrandMark size={200} className="text-brand" />
+          <BrandMark size={200} className="text-mark" />
           <h2 className="type-display mt-10 text-display text-text-1">{headline}</h2>
           <p className="mt-5 max-w-md text-md text-text-2">{tagline}</p>
         </div>

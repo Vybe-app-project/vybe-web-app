@@ -61,12 +61,12 @@ const JoinInvite = lazyPage(null, () => import('./pages/JoinInvite'));
 const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
 const WorkoutDetail = lazyPage(null, () => import('./pages/WorkoutDetail'));
 const WorkoutPlanDetail = lazyPage(null, () => import('./pages/WorkoutPlanDetail'));
-// Train › History (was "Workout log"; P4 renames the module to WorkoutHistory). /workouts/logs redirects here.
-const WorkoutHistory = lazyPage('/workouts/history', () => import('./pages/WorkoutLogs'));
+// Train › History (was "Workout log"). /workouts/logs redirects here, query and hash preserved.
+const WorkoutHistory = lazyPage('/workouts/history', () => import('./pages/WorkoutHistory'));
 // Detail/editor routes presented through RouteSheet (a sheet over the parent on lg+, a page on phones).
 const WorkoutEditor = lazyPage(null, () => import('./pages/workouts/WorkoutEditor'));
 const PlanEditor = lazyPage(null, () => import('./pages/workouts/PlanEditor'));
-const ActiveWorkout = lazyPage(null, () => import('./pages/workouts/ActiveWorkout'));
+const SessionDetail = lazyPage(null, () => import('./pages/workouts/SessionDetail'));
 const MealLog = lazyPage(null, () => import('./pages/MealLog'));
 const WorkoutProgress = lazyPage('/workouts/progress', () => import('./pages/WorkoutProgress'));
 const Meals = lazyPage('/meals', () => import('./pages/Meals'));
@@ -227,7 +227,7 @@ const SHEET_ROUTES: Array<{ path: string; element: ReactNode }> = [
   { path: 'workouts/:workoutId/edit', element: <WorkoutEditor /> },
   { path: 'workouts/plans/new', element: <PlanEditor /> },
   { path: 'workouts/plans/:planId/edit', element: <PlanEditor /> },
-  { path: 'workouts/active', element: <ActiveWorkout /> },
+  { path: 'workouts/history/:logId', element: <SessionDetail /> },
   { path: 'meals/log', element: <MealLog /> },
 ];
 

@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F9F8" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#04101B" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000" />
     <meta name="robots" content="noindex" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>You're offline · Vybe</title>
     <style>
-      :root { color-scheme: light; --bg: #f6f9f8; --surface: #ffffff; --line: #dce5e1; --text-1: #0b1e2b; --text-2: #4b6470; --brand: #00b08e; --on-brand: #04101b; }
+      :root { color-scheme: light; --bg: #ffffff; --surface: #ffffff; --line: #dbdbdb; --text-1: #000000; --text-2: #666666; --brand: #0077d9; --on-brand: #ffffff; }
       /* Dark: the stored in-app choice (set by /offline.js) wins; the system
          preference applies only when the script did not run. */
-      html[data-theme="dark"] { color-scheme: dark; --bg: #04101b; --surface: #071a2a; --line: rgba(255,255,255,.08); --text-1: #f2f7f5; --text-2: #a9bcc6; --brand: #00d4aa; }
+      html[data-theme="dark"] { color-scheme: dark; --bg: #000000; --surface: #1a1a1a; --line: rgba(255,255,255,.1); --text-1: #f5f5f5; --text-2: #a8a8a8; --brand: #0077d9; }
       @media (prefers-color-scheme: dark) {
-        html:not([data-theme]) { color-scheme: dark; --bg: #04101b; --surface: #071a2a; --line: rgba(255,255,255,.08); --text-1: #f2f7f5; --text-2: #a9bcc6; --brand: #00d4aa; }
+        html:not([data-theme]) { color-scheme: dark; --bg: #000000; --surface: #1a1a1a; --line: rgba(255,255,255,.1); --text-1: #f5f5f5; --text-2: #a8a8a8; --brand: #0077d9; }
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; min-height: 100%; }

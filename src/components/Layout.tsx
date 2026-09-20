@@ -136,7 +136,7 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/achievements', title: 'Achievements', tab: 'workouts', nav: '/achievements', hub: 'train' },
   // Detail and editor routes (RouteSheet): a sheet over the parent on lg+, a page with a back chevron on phones.
   { pattern: '/workouts/new', title: 'New workout', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
-  { pattern: '/workouts/active', title: 'Active session', tab: 'workouts', nav: '/workouts', parent: '/workouts', hideTabs: true },
+  { pattern: '/workouts/history/:logId', title: 'Session', tab: 'workouts', nav: '/workouts/history', parent: '/workouts/history', hideTabs: true },
   { pattern: '/workouts/plans/new', title: 'New plan', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
   { pattern: '/workouts/plans/:planId/edit', title: 'Edit plan', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
   { pattern: '/workouts/plans/:planId', title: 'Plan', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
