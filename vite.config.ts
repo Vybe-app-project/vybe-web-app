@@ -121,12 +121,15 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     chunkSizeWarningLimit: 1200,
-    // No <link rel="modulepreload"> hints. The service worker precaches every
-    // chunk and claims the page mid-load (clientsClaim), so Chrome fetched the
-    // hinted chunk once outside the worker and once through it and logged
-    // "preload … not used because of a cross-world service worker resource
-    // mismatch" on every navigation. Module graphs still load in parallel per
-    // depth; the SW serves repeat visits from cache regardless of hints.
-    modulePreload: false,
+    // Module preload hints stay on; only the polyfill is dropped (every target
+    // browser has native <link rel="modulepreload">). Without the hints a
+    // route's dependency chunks loaded one depth per round trip, which is what
+    // made the first visit to a hub slow. The worker only re-fetches a hinted
+    // chunk when a NEW worker takes the page over mid-load (clientsClaim; Chrome
+    // logs "preload … not used because of a cross-world service worker
+    // resource mismatch") — once per deploy per client, not per navigation: a
+    // page that already has a controlling worker requests hint and module
+    // through the same worker, and a first visit has no worker at all.
+    modulePreload: { polyfill: false },
   },
 });
