@@ -3,26 +3,35 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ------------------------------------------------------------------ *
- * Vybe design tokens — Instagram palette on the Gym First layout.
+ * Vybe design tokens — the Instagram register.
  *
- * Instagram's neutrals (page white / page black, #fafafa / #efefef steps,
- * #dbdbdb hairlines), Instagram blue for the one action on a screen and for
- * links, and the yellow→pink→purple gradient for story rings and the rare
- * highlight. The Vybe mint survives ONLY as `--mark` (the logo) and inside
- * the gym band's navy cover art; a warm ember stays reserved for effort.
- * Where an Instagram value misses WCAG AA the nearest passing neighbour is
- * used and the ratio is noted beside it. Components consume ONLY the
- * semantic tokens below; primitives exist so the sets can be re-tuned
- * without touching components. docs/DESIGN.md › Palette has the table.
+ * One register, one accent. Page white / page black, Instagram's #fafafa and
+ * #efefef washes, #dbdbdb hairlines, black and #666 text; ONE interactive
+ * blue (--brand) for the single primary action on a screen, links, the active
+ * tab and the focus ring; red and green only where they mean something; the
+ * yellow→pink→purple gradient on story rings, Instagram's one flourish. The
+ * Vybe mint survives as `--mark` (the logo) and inside `--cover-art`, the
+ * gym-page banner fallback; ember (`--accent`) is for effort — a PR badge —
+ * never for chrome. Where an Instagram value misses WCAG AA the nearest
+ * passing neighbour is used and the ratio is noted beside it. Components
+ * consume ONLY the semantic tokens below; primitives exist so the sets can be
+ * re-tuned without touching components. docs/DESIGN.md has the tables.
  * ------------------------------------------------------------------ */
 
-/* Size-adjusted local fallback so text does not reflow when Archivo arrives. */
+/* Size-adjusted local fallback so text does not reflow when Archivo arrives.
+   Arial (Windows, macOS), Roboto (Android, ChromeOS — which have no Arial, so
+   before it was listed the fallback there was the browser default and every
+   title reflowed), Segoe UI, then the Helveticas. Measured in Chrome at 100 px:
+   Archivo's advance width is 0.98× Arial's at 400 and at 700, so the fallback
+   is drawn at 98 % and Archivo's metrics (ascent 0.878 em, descent 0.210 em,
+   no line gap) are divided by the same factor. Roboto and Segoe UI average
+   within 1 % of Arial's width, so one rule serves all three. */
 @font-face {
   font-family: 'Archivo Fallback';
-  src: local('Arial'), local('Helvetica Neue'), local('Helvetica');
-  size-adjust: 96%;
-  ascent-override: 92%;
-  descent-override: 22%;
+  src: local('Arial'), local('Roboto'), local('Segoe UI'), local('Helvetica Neue'), local('Helvetica');
+  size-adjust: 98%;
+  ascent-override: 89.6%;
+  descent-override: 21.4%;
   line-gap-override: 0%;
 }
 
@@ -30,8 +39,8 @@
   color-scheme: light;
   accent-color: #0077d9;
 
-  /* primitives. Mint and navy stay for the mark and the band's cover art only;
-     the Instagram set feeds the semantic tokens below. */
+  /* primitives. Mint and navy feed the mark and the cover art; the Instagram
+     set feeds the semantic tokens below. */
   --mint-50: #e6fff8; --mint-100: #c2ffee; --mint-200: #8df7dc; --mint-300: #4defc8; --mint-400: #1de5b6;
   --mint-500: #00d4aa; --mint-600: #00b08e; --mint-700: #008a71; --mint-800: #036554; --mint-900: #044a3f;
   --navy-50: #f6f9f8; --navy-100: #eef3f1; --navy-200: #dce5e1; --navy-300: #b9c9c4; --navy-400: #8aa0a9;
@@ -52,9 +61,9 @@
      surface-3, 5.74:1 on white) and #6c6c6c (4.57:1 / 5.25:1). */
   --text-1: #000000; --text-2: #666666; --text-3: #6c6c6c;
   /* brand is the action colour. Instagram blue #0095f6 is 3.17:1 under a white
-     label, so the fill is #0077d9 (4.53:1 with white, 3.51:1 on the navy band)
-     and the true Instagram blue is the hover/active fill. brand-text is
-     Instagram's link blue (11.9:1 on white, 10.6:1 on brand-soft). */
+     label, so the fill is #0077d9 (4.53:1 with white) and the true Instagram
+     blue is the hover/active fill. brand-text is Instagram's link blue
+     (11.9:1 on white, 10.6:1 on brand-soft). */
   --brand: #0077d9; --brand-hover: #0095f6; --on-brand: #ffffff; --brand-soft: #e7f3ff; --brand-text: #00376b;
   --accent: #ff7a45; --accent-soft: #ffe7da; --accent-text: #a63e15;
   /* success left the mint family: #137a3f is 5.41:1 on white and 4.76:1 on its soft. */
@@ -65,19 +74,19 @@
      2026-09-18). #b3261e is 5.28:1 on the soft and 6.54:1 on white. */
   --warning-text: #7a5200; --info-text: #1d4f8a; --danger-text: #b3261e;
   --focus: #0077d9; --scrim: rgba(0, 0, 0, 0.6);
-  /* the Vybe mint, for the logo mark and the gym band ONLY (Brand.tsx, .gym-band) */
+  /* the Vybe mint: the logo mark (Brand.tsx) and, through --cover-art, the gym-page banner */
   --mark: #00b08e; --mark-on-navy: #00d4aa;
   /* Instagram's story gradient: story rings (.story-ring) and the rare highlight (.ig-gradient-text) */
   --ig-gradient: linear-gradient(45deg, #f9ce34 0%, #ee2a7b 50%, #6228d7 100%);
   --story-ring: var(--ig-gradient);
   /* data-viz — fixed in both themes; plain vars so charts can read them from JS */
   --viz-kcal: var(--brand); --viz-protein: #4fb3ff; --viz-carbs: #f5b841; --viz-fat: #ff7a45; --viz-alt: #b48cff;
-  /* Level-1 cards are tonal in light (surface-1 on bg + shadow-1, no line);
-     dark rebinds this to the hairline because a shadow cannot lift a dark
-     surface off a darker one. On page white the card and the page are the same
-     colour, so shadow-1 carries a 5% ring: nearly flat, still an edge. */
-  --card-border-light: transparent;
-  --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.04);
+  /* Level-1 cards: surface-1 with a 1 px hairline in BOTH themes — Instagram
+     web boxes its modules with #dbdbdb on white. The 5 % ring that used to be
+     the light card's only edge was 1.12:1, invisible; the shadow is now just a
+     whisper of lift under the segmented thumb, the switch knob and toasts. */
+  --card-border-light: var(--line);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-2: 0 8px 24px -12px rgba(0, 0, 0, 0.14);
   --shadow-3: 0 24px 48px -16px rgba(0, 0, 0, 0.2);
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -86,34 +95,17 @@
   --nav-h: 56px;
   --topbar-h: 48px;
 
-  /* fluid scale (Gym First). Space and type grow with the viewport between the
-     phone and desktop stops instead of jumping at breakpoints. */
-  --gutter: clamp(1rem, 0.6rem + 1.2vw, 2rem);
-  --section-gap: clamp(1rem, 0.8rem + 0.8vw, 1.75rem);
-  --text-h1: clamp(1.5rem, 1.1rem + 1.4vw, 2.125rem);
-  --text-stat: clamp(1.75rem, 1.2rem + 2vw, 2.75rem);
+  /* space and measure — fixed, as Instagram's: 16 px gutters on phones and
+     24 px from lg (the media query below), 24 px between sections. Type has no
+     fluid scale any more; the hero metric (.t-metric) is the one clamp. */
+  --gutter: 16px;
+  --section-gap: 24px;
+  --text-stat: clamp(2rem, 1.5rem + 1.5vw, 2.75rem);
   --text-stat-sm: calc(var(--text-stat) * 0.62);
-  --text-band: clamp(1.75rem, 1.1rem + 2.6vw, 3rem);
-  --text-figure: clamp(2.25rem, 1.5rem + 3vw, 4rem);
   --content-max: min(90rem, 100% - 2 * var(--gutter));
 
-  /* gym band (GymBand.tsx). Dark in both themes: the band is scoped .dark and
-     reads the semantic set, these are the few values that are band-only. The
-     band stays navy on the Instagram neutrals: --band-bg is what the cover
-     fades to in the collapsed bar, and the pin, the live dot and the cover art
-     keep the mint through --mark-on-navy / --cover-art. */
-  --band-h-full: clamp(248px, 30vw + 120px, 360px);
-  --band-h-hub: clamp(132px, 12vw + 84px, 196px);
-  --band-bar-h: 56px;
-  --band-bg: var(--navy-900);
-  --band-ink: #fff;
-  --band-ink-2: rgba(255, 255, 255, 0.8);
-  --band-ink-3: rgba(255, 255, 255, 0.6);
-  --band-scrim: linear-gradient(to top, rgba(4, 16, 27, 0.9), rgba(4, 16, 27, 0));
-  --band-scrim-h: 200px;
-  --band-chip: rgba(255, 255, 255, 0.14);
-  --band-chip-line: rgba(255, 255, 255, 0.22);
-  --band-ring: rgba(255, 255, 255, 0.7);
+  /* cover art: the gym-page banner when a gym has no photo (GymHeader) and the
+     signed-out hero (Login's AuthShell). Navy → mint with two soft circles. */
   --band-geo: rgba(255, 255, 255, 0.06);
   --band-geo-2: rgba(255, 255, 255, 0.05);
   --cover-art:
@@ -121,25 +113,24 @@
     radial-gradient(55% 60% at 5% 95%, color-mix(in oklab, var(--mint-500) 25%, transparent), transparent 70%),
     linear-gradient(140deg, var(--navy-800), var(--navy-600) 55%, var(--mint-800));
 
-  /* generated identity: five gradient pairs picked by hashing the id/handle,
-     one ink each. The dark stop lands at 60% so the centred initials sit on
-     the deep end (white >= 8.5:1 at the glyph); sand/ember takes the dark ink.
-     Pair 1 was mint/navy; it is Instagram pink/navy now so avatars stop
-     carrying the old brand colour. */
-  --identity-1: linear-gradient(135deg, var(--ig-pink), var(--navy-700) 60%);
-  --identity-2: linear-gradient(135deg, var(--lilac-500), var(--navy-700) 60%);
-  --identity-3: linear-gradient(135deg, var(--sky-500), var(--navy-700) 60%);
-  --identity-4: linear-gradient(135deg, var(--sand-500) 20%, var(--ember-700));
-  --identity-5: linear-gradient(135deg, var(--navy-500), var(--navy-800) 60%);
-  --identity-1-ink: #fff; --identity-2-ink: #fff; --identity-3-ink: #fff; --identity-4-ink: var(--navy-950); --identity-5-ink: #fff;
+  /* generated identity: one neutral disc with initials — Instagram's #efefef /
+     #666 (surface-3 / text-2, 4.99:1). The five slots stay for identityStyle()
+     and the admin console's rebinding; every slot resolves to the one pair. */
+  --identity: var(--surface-3); --identity-ink: var(--text-2);
+  --identity-1: var(--identity); --identity-2: var(--identity); --identity-3: var(--identity); --identity-4: var(--identity); --identity-5: var(--identity);
+  --identity-1-ink: var(--identity-ink); --identity-2-ink: var(--identity-ink); --identity-3-ink: var(--identity-ink); --identity-4-ink: var(--identity-ink); --identity-5-ink: var(--identity-ink);
 
-  /* radius, motion — declared here as plain custom properties so they are
-     always emitted (the @theme copies below only feed Tailwind utilities).
-     Controls sit at 8 px, Instagram's button and field radius. */
-  --radius-xs: 6px; --radius-sm: 8px; --radius-md: 14px; --radius-lg: 20px; --radius-xl: 28px;
+  /* radius by role: chips 6 · controls 8 · inner media 10 · cards and dialogs
+     12 · sheets 16 (Instagram web sits at 8–12). Declared here as plain custom
+     properties so they are always emitted; the @theme copies feed Tailwind. */
+  --radius-xs: 6px; --radius-sm: 8px; --radius-md: 10px; --radius-lg: 12px; --radius-xl: 16px;
+  /* motion tiers (docs/DESIGN.md › Motion): press 80 · enter 180 · exit 140 ms;
+     the numbered set stays for the dur-* utilities and the older classes. */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-in: cubic-bezier(0.4, 0, 1, 1); --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --duration-1: 120ms; --duration-2: 200ms; --duration-3: 320ms; --duration-4: 480ms;
+  --duration-press: 80ms; --duration-in: 180ms; --duration-out: 140ms;
 }
+@media (min-width: 64rem) { :root { --gutter: 24px; } }
 
 .dark {
   color-scheme: dark;
@@ -154,9 +145,8 @@
   --line: rgba(255, 255, 255, 0.1); --line-strong: rgba(255, 255, 255, 0.18); --control-border: #737373;
   /* text-2 is Instagram's #a8a8a8 (5.01:1 on surface-3); its #8e8e8e tertiary is 3.63:1 there, #a0a0a0 is 4.5:1. */
   --text-1: #f5f5f5; --text-2: #a8a8a8; --text-3: #a0a0a0;
-  /* Same action blue as light so the band's CTA (always dark-scoped) matches the
-     page's: 4.53:1 under white, 4.64:1 on black, 3.17:1 on surface-2 as UI.
-     Instagram blue is the hover and the focus ring (6.63:1 on black). */
+  /* Same action blue as light: 4.53:1 under white, 4.64:1 on black, 3.17:1 on
+     surface-2 as UI. Instagram blue is the hover and the focus ring (6.63:1 on black). */
   --brand: #0077d9; --brand-hover: #0095f6; --on-brand: #ffffff; --brand-soft: rgba(0, 149, 246, 0.16); --brand-text: #e0f1ff;
   --accent: #ff7a45; --accent-soft: rgba(255, 122, 69, 0.16); --accent-text: #ffb38a;
   --success: #3ddc84; --warning: #f5b841; --danger: #ff6b7a; --info: #4fb3ff;
@@ -164,6 +154,8 @@
   --warning-text: #f5b841; --info-text: #4fb3ff; --danger-text: #ff8a96; /* 9.3:1 on danger-soft over surface-2 */
   --focus: #0095f6; --scrim: rgba(0, 0, 0, 0.7);
   --mark: #00d4aa;
+  /* identity disc: Instagram's #2a2a2a / #a8a8a8 (surface-2 / text-2, 5.9:1) */
+  --identity: var(--surface-2); --identity-ink: var(--text-2);
   --card-border-light: var(--line);
   --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 8px 24px -12px rgba(0, 0, 0, 0.7);
@@ -193,40 +185,60 @@
 
   --font-sans: 'Archivo Variable', 'Archivo Fallback', ui-sans-serif, system-ui, sans-serif;
 
-  /* type scale: 15 px base, ~1.2 ratio, display clamps */
-  --text-2xs: 0.75rem; --text-2xs--line-height: 1rem;
-  --text-xs: 0.8125rem; --text-xs--line-height: 1.25rem;
-  --text-sm: 0.875rem; --text-sm--line-height: 1.25rem;
-  --text-base: 0.9375rem; --text-base--line-height: 1.5rem;
-  --text-md: 1.0625rem; --text-md--line-height: 1.5rem;
-  --text-lg: 1.25rem; --text-lg--line-height: 1.75rem;
-  --text-xl: 1.5rem; --text-xl--line-height: 1.875rem;
-  --text-2xl: 1.875rem; --text-2xl--line-height: 2.25rem;
-  --text-3xl: 2.375rem; --text-3xl--line-height: 2.5rem;
+  /* type scale on the 15 px root, in whole pixels — 11 · 12 · 14 · 15 · 16 ·
+     20 · 24 · 28 · 36 (Instagram's) — with line heights on the 4 px grid. The
+     roles below (.t-*) name the six that carry the hierarchy. */
+  --text-2xs: 0.7333rem; --text-2xs--line-height: 1.0667rem;
+  --text-xs: 0.8rem; --text-xs--line-height: 1.0667rem;
+  --text-sm: 0.9333rem; --text-sm--line-height: 1.3333rem;
+  --text-base: 1rem; --text-base--line-height: 1.3333rem;
+  --text-md: 1.0667rem; --text-md--line-height: 1.3333rem;
+  --text-lg: 1.3333rem; --text-lg--line-height: 1.6rem;
+  --text-xl: 1.6rem; --text-xl--line-height: 1.8667rem;
+  --text-2xl: 1.8667rem; --text-2xl--line-height: 2.1333rem;
+  --text-3xl: 2.4rem; --text-3xl--line-height: 2.6667rem;
   --text-display: clamp(2.75rem, 2rem + 3vw, 4.5rem); --text-display--line-height: 1;
-  /* fluid roles (text-h1 / text-stat / text-band / text-figure utilities) */
-  --text-h1: var(--text-h1); --text-h1--line-height: 1.15;
-  --text-stat: var(--text-stat); --text-stat--line-height: 1.05;
+  /* the hero metric (text-stat / text-stat-sm utilities; .t-metric is the role) */
+  --text-stat: var(--text-stat); --text-stat--line-height: 1;
   --text-stat-sm: var(--text-stat-sm); --text-stat-sm--line-height: 1.1;
-  --text-band: var(--text-band); --text-band--line-height: 1;
-  --text-figure: var(--text-figure); --text-figure--line-height: 1;
-  /* fluid space: p-gutter / px-gutter / gap-gutter, gap-section / space-y-section */
+  /* space: p-gutter / px-gutter / gap-gutter, gap-section / space-y-section */
   --spacing-gutter: var(--gutter); --spacing-section: var(--section-gap);
   --container-content: var(--content-max);
-  --color-band-ink: var(--band-ink); --color-band-ink-2: var(--band-ink-2); --color-band-ink-3: var(--band-ink-3); --color-band-chip: var(--band-chip);
 
-  /* radius by role: chips 6 · controls 8 · inner media 14 · cards 20 · sheets 28 */
-  --radius-xs: 6px; --radius-sm: 8px; --radius-md: 14px; --radius-lg: 20px; --radius-xl: 28px; --radius-2xl: 32px; --radius-3xl: 40px;
+  /* radius by role: chips 6 · controls 8 · inner media 10 · cards 12 · sheets 16 */
+  --radius-xs: 6px; --radius-sm: 8px; --radius-md: 10px; --radius-lg: 12px; --radius-xl: 16px; --radius-2xl: 24px; --radius-3xl: 32px;
   --shadow-1: var(--shadow-1); --shadow-2: var(--shadow-2); --shadow-3: var(--shadow-3);
 
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-in: cubic-bezier(0.4, 0, 1, 1); --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --duration-1: 120ms; --duration-2: 200ms; --duration-3: 320ms; --duration-4: 480ms;
+  --duration-press: 80ms; --duration-in: 180ms; --duration-out: 140ms;
 
   --spacing: 4px;
-  --container-feed: 37.5rem; --container-rail: 20rem; --container-sidebar: 15rem; --container-form: 40rem;
+  /* the feed column is 540 px (Threads); the sidebar 244 px (Instagram); rail and form as before. rem here is the 15 px root. */
+  --container-feed: 36rem; --container-rail: 20rem; --container-sidebar: 16.2667rem; --container-form: 40rem;
 }
 
-/* ------------------------------------------------------------------ type roles */
+/* ------------------------------------------------------------------ type roles
+ * Six roles carry the hierarchy (Instagram's scale on Archivo): size, line
+ * height and weight travel together, everything on the 4 px grid. They sit in
+ * the components layer so a text-* utility can still override one property.
+ * The `type-*` faces further down tune the variable width axis and set no size.
+ */
+@layer components {
+  /* 20/24 · 600 — the page title (one per page, drawn by the shell header) */
+  .t-title { font-size: var(--text-lg); line-height: 1.6rem; font-weight: 600; letter-spacing: -0.01em; }
+  /* 16/20 · 600 — section, card and rail titles */
+  .t-section { font-size: var(--text-md); line-height: 1.3333rem; font-weight: 600; letter-spacing: -0.005em; }
+  /* 15/20 · 400 — body */
+  .t-body { font-size: var(--text-base); line-height: 1.3333rem; font-weight: 400; }
+  /* 15/20 · 700 — a username or a gym name: bolder than the body beside it */
+  .t-name { font-size: var(--text-base); line-height: 1.3333rem; font-weight: 700; }
+  /* 12/16 · 400 · text-2 — timestamps, counts, captions under numbers */
+  .t-meta { font-size: var(--text-xs); line-height: 1.0667rem; font-weight: 400; color: var(--text-2); }
+  /* 32–44 · 700 · tabular — the hero metric, ~3× body: the one place type gets big */
+  .t-metric { font-size: var(--text-stat); line-height: 1; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums lining-nums; font-variation-settings: 'wdth' 88; }
+}
+
 .type-display { font-variation-settings: 'wdth' 112; font-weight: 800; letter-spacing: -0.02em; }
 .type-heading { font-variation-settings: 'wdth' 100; font-weight: 700; letter-spacing: -0.01em; }
 .type-stat { font-variation-settings: 'wdth' 75; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums lining-nums; }
@@ -241,9 +253,16 @@ html {
   font-family: var(--font-sans);
   font-size: 15px;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
   -webkit-text-size-adjust: 100%;
+  /* A classic scrollbar keeps its gutter while a sheet locks the page, so
+     opening one never shoves the page 15 px sideways. */
+  scrollbar-gutter: stable;
+  /* Anchors and focus targets land clear of the sticky chrome: the 48 px phone
+     header plus the status bar; the 56 px desktop header from lg. SectionTabs
+     stick at the same offsets. */
+  scroll-padding-top: calc(48px + env(safe-area-inset-top));
 }
+@media (min-width: 64rem) { html { scroll-padding-top: 56px; } }
 html, body, #root { min-height: 100%; }
 body { margin: 0; }
 
@@ -253,6 +272,11 @@ body { margin: 0; }
 }
 
 button, [role='button'], a { -webkit-tap-highlight-color: transparent; }
+/* Instagram's press: on touch a control dims while the finger is down. That is
+   the whole feedback — nothing moves. (.pressable adds the hover/press wash.) */
+@media (hover: none) {
+  :where(a, button, [role='button']):active { opacity: 0.6; transition: opacity var(--duration-press) var(--ease-out); }
+}
 /* Unlayered rules beat every @layer rule, so an unlayered `color: inherit`
    here silently overrode `.btn-primary { color: var(--on-brand) }` and every
    primary button rendered body text (white on mint in dark mode, 1.76:1).
@@ -301,26 +325,28 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
 
 @media (prefers-reduced-motion: reduce) {
   :root { --duration-1: 1ms; --duration-2: 1ms; --duration-3: 1ms; --duration-4: 1ms; }
+  :root { --duration-press: 1ms; --duration-in: 1ms; --duration-out: 1ms; }
 }
 /* Account accessibility flags (Settings > Accessibility, lib/accessibility.ts): the same
    rules as the OS preference, keyed on <html data-reduce-motion> / <html data-large-text>.
    Larger text is an absolute step from the 15px base above (a percentage here would resolve
    against the browser default instead), and the rem-based type scale follows it. */
 :root[data-reduce-motion='true'] { --duration-1: 1ms; --duration-2: 1ms; --duration-3: 1ms; --duration-4: 1ms; }
+:root[data-reduce-motion='true'] { --duration-press: 1ms; --duration-in: 1ms; --duration-out: 1ms; }
 :root[data-large-text='true'] { font-size: 17px; }
 
 /* ------------------------------------------------------------------ utilities */
 @utility card {
   background: var(--surface-1);
-  /* transparent in light (tonal card), the hairline in dark; the 1 px stays so nothing shifts between themes */
+  /* the hairline in both themes (--card-border-light is var(--line) everywhere now; the indirection is kept for the admin console's rebinding) */
   border: 1px solid var(--card-border-light, var(--line));
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
 }
-/* Card grids reflow by the space they have: 22 rem columns that fill the row and never overflow at 320 px. */
+/* Card grids reflow by the space they have: 22 rem columns that fill the row and never overflow at 320 px. 16 px between siblings. */
 @utility card-grid {
   display: grid;
-  gap: var(--section-gap);
+  gap: 16px;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card-min, 22rem)), 1fr));
 }
 @utility card-interactive {
@@ -329,8 +355,28 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
   &:active { transform: scale(0.995); }
 }
 
-/* Instagram register. Feed items are separated by a hairline, not boxed: on
-   page white a card and the page are one colour, so the rule does the work. */
+/* State layer for rows, tabs, icon buttons and chips: a 6 % ink wash under a
+   mouse, 10 % while pressed, 80 ms. A pseudo-element follows the element's
+   own radius, so the element needs no background of its own. (Ink rather
+   than a surface-2 wash: surface-2 at 10 % on page white is invisible; ink
+   reads in both themes.) */
+@utility pressable {
+  position: relative;
+  &::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: var(--text-1); opacity: 0;
+    transition: opacity var(--duration-press) var(--ease-out);
+  }
+  @media (hover: hover) { &:hover::after { opacity: 0.06; } }
+  &:active::after { opacity: 0.1; }
+  &:disabled::after, &[aria-disabled='true']::after { opacity: 0; }
+}
+
+/* Feed items below the fold skip layout and paint until they near the
+   viewport; the intrinsic size keeps the scrollbar honest meanwhile. */
+@utility cv-auto { content-visibility: auto; contain-intrinsic-size: auto 320px; }
+
+/* Instagram register. Feed items are separated by a hairline, not boxed. */
 @utility feed-rule { border-bottom: 1px solid var(--line); }
 /* Story ring: the classic construction — a 2 px gradient ring, a 2 px gap in the
    surface colour, then the circular avatar. Wrap the <Avatar>/<img> in it. */
@@ -350,7 +396,7 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: var(--btn-h, 40px); padding: 0 16px;
   border-radius: var(--radius-sm); border: 1px solid transparent;
-  font-weight: 600; font-size: var(--text-sm); line-height: 1.25rem;
+  font-weight: 600; font-size: var(--text-sm); line-height: 1.3333rem;
   cursor: pointer; user-select: none; white-space: nowrap;
   transition: background-color var(--duration-1) var(--ease-out), color var(--duration-1) var(--ease-out),
     border-color var(--duration-1) var(--ease-out), transform var(--duration-1) var(--ease-out),
@@ -384,9 +430,9 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
 @utility btn-link { background: transparent; color: var(--brand-text); padding: 0 4px; min-height: 0; }
 .btn-link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
 
-/* Ink fill: the "do this next" control where the page's brand blue is already
-   spent (empty states, a recent workout's Start). Unlayered like the other
-   .btn-* state rules so it wins over .btn-secondary's hover. */
+/* Ink fill. Legacy: a black button is no longer a variant in this register
+   (the one primary action on a screen is --brand); this stays only until the
+   last caller (Workouts' recent Start) is on `variant="primary"`. */
 .btn.btn-ink, .btn.btn-ink:hover:not(:disabled) { border-color: transparent; color: var(--bg); }
 .btn.btn-ink { background: var(--text-1); }
 .btn.btn-ink:hover:not(:disabled) { background: color-mix(in oklab, var(--text-1) 88%, var(--bg)); }
@@ -455,25 +501,27 @@ input[type='range'] { accent-color: var(--brand); }
 @utility mask-fade-b { mask-image: linear-gradient(to top, transparent, #000 40px); }
 @utility mask-fade-y { mask-image: linear-gradient(to bottom, transparent, #000 40px, #000 calc(100% - 40px), transparent); }
 
-@utility snap-row { scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+/* Horizontal rails (stories, chips, tabs): snap, and never hand a horizontal rubber-band to the page. */
+@utility snap-row { scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
 @utility snap-item { scroll-snap-align: start; }
 
 @utility prose-measure { max-width: 68ch; }
 
-/* ------------------------------------------------------------------ motion */
+/* ------------------------------------------------------------------ motion
+ * Tiers (Material 3 / NN/g): press 80 ms · in-screen 150–250 ms ease-out ·
+ * route 200 ms. Only transform and opacity ever animate; nothing frequent
+ * runs over 320 ms. Overlays ENTER on a transition from @starting-style and
+ * LEAVE on the matching -out class, so one mechanism owns each panel and an
+ * inline transform (the sheet drag) is never overridden by a keyframe fill.
+ */
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes sheet-out { from { transform: translateY(0); } to { transform: translateY(100%); } }
-@keyframes dialog-in { from { opacity: 0; transform: scale(0.98) translateY(8px); } to { opacity: 1; transform: none; } }
-@keyframes dialog-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.98) translateY(8px); } }
 @keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
-@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes pulse-spring { 0% { transform: scale(1); } 40% { transform: scale(1.25); } 100% { transform: scale(1); } }
 @keyframes count-roll { from { opacity: 0; transform: translateY(0.4em); } to { opacity: 1; transform: none; } }
 @keyframes vt-out { to { opacity: 0; } }
-@keyframes vt-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes vt-in { from { opacity: 0; } }
 @keyframes draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 /* Route-loading bar (Layout → NavProgress): a third-width segment sweeping the top edge. */
 @keyframes nav-progress { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
@@ -484,14 +532,23 @@ input[type='range'] { accent-color: var(--brand); }
 
 .anim-fade-in { animation: fade-in var(--duration-2) var(--ease-out) both; }
 .anim-fade-out { animation: fade-out var(--duration-2) var(--ease-in) both; }
-.anim-sheet-in { animation: sheet-in var(--duration-3) var(--ease-out) both; }
-.anim-sheet-out { animation: sheet-out var(--duration-3) var(--ease-in) both; }
-.anim-dialog-in { animation: dialog-in var(--duration-3) var(--ease-out) both; }
-.anim-dialog-out { animation: dialog-out var(--duration-2) var(--ease-in) both; }
 .anim-pop-in { animation: pop-in var(--duration-2) var(--ease-out) both; }
-.anim-toast-in { animation: toast-in var(--duration-2) var(--ease-out) both; }
 .motion-pulse { animation: pulse-spring var(--duration-3) var(--ease-spring); }
 .motion-count { animation: count-roll var(--duration-2) var(--ease-out) both; }
+
+/* Dialog: fade + scale .98 → 1, 180 ms in / 140 ms out. Sheet: slides up,
+   200 ms both ways. Toast: rises 8 px, 200 ms in / 140 ms out. */
+.anim-dialog-in { opacity: 1; transform: none; transition: opacity var(--duration-in) var(--ease-out), transform var(--duration-in) var(--ease-out); }
+.anim-dialog-out { opacity: 0; transform: scale(0.98) translateY(8px); transition: opacity var(--duration-out) var(--ease-in), transform var(--duration-out) var(--ease-in); }
+.anim-sheet-in { transform: translateY(0); transition: transform var(--duration-2) var(--ease-out); }
+.anim-sheet-out { transform: translateY(100%); transition: transform var(--duration-2) var(--ease-in); }
+.anim-toast-in { opacity: 1; transform: none; transition: opacity var(--duration-2) var(--ease-out), transform var(--duration-2) var(--ease-out); }
+.anim-toast-out { opacity: 0; transform: translateY(8px); transition: opacity var(--duration-out) var(--ease-in), transform var(--duration-out) var(--ease-in); }
+@starting-style {
+  .anim-dialog-in { opacity: 0; transform: scale(0.98) translateY(8px); }
+  .anim-sheet-in { transform: translateY(100%); }
+  .anim-toast-in { opacity: 0; transform: translateY(8px); }
+}
 
 /* Chat typing indicator: three dots breathing in turn (delays set inline). */
 @keyframes typing-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-3px); opacity: 1; } }
@@ -501,208 +558,55 @@ input[type='range'] { accent-color: var(--brand); }
 }
 :root[data-reduce-motion='true'] .typing-dot { animation: none; opacity: 0.7; }
 
-/* Route transitions (document.startViewTransition). The shell keeps its own
-   snapshot names so only the page content fades and slides. */
+/* Route transitions (document.startViewTransition). <main> cross-fades under
+   the root name — both layers 200 ms, out ease-in / in ease-out; the UA's
+   plus-lighter blend keeps their sum at 1, so the fade never flashes. The
+   header, sidebar and bottom nav carry their own names and hold still: only
+   their NEW snapshot is shown, blended normally. (With both layers up and no
+   animation, the default plus-lighter blend brightened them for a frame on
+   every navigation.) */
 ::view-transition-old(root) { animation: vt-out var(--duration-2) var(--ease-in) both; }
-::view-transition-new(root) { animation: vt-in var(--duration-3) var(--ease-out) both; }
-::view-transition-old(shell-header), ::view-transition-new(shell-header),
-::view-transition-old(shell-sidebar), ::view-transition-new(shell-sidebar),
-::view-transition-old(shell-nav), ::view-transition-new(shell-nav) { animation: none; }
+::view-transition-new(root) { animation: vt-in var(--duration-2) var(--ease-out) both; }
+::view-transition-old(shell-header), ::view-transition-old(shell-sidebar), ::view-transition-old(shell-nav) { display: none; }
+::view-transition-new(shell-header), ::view-transition-new(shell-sidebar), ::view-transition-new(shell-nav) { animation: none; mix-blend-mode: normal; }
 .vt-header { view-transition-name: shell-header; }
 .vt-sidebar { view-transition-name: shell-sidebar; }
 .vt-nav { view-transition-name: shell-nav; }
 
+/* Reduced motion — the OS preference, and the account flag lib/accessibility
+   sets on <html>. Opacity stays (at the 1 ms durations above a fade is a cut);
+   every translate and scale is dropped; route changes do not animate at all,
+   and the old snapshot is hidden so nothing double-exposes for a frame. */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  ::view-transition-old(*) { display: none; }
+  .anim-dialog-out, .anim-toast-out { transform: none; }
+  .anim-sheet-in, .anim-sheet-out { transition: none; }
+  .motion-count { animation: none; }
+  .btn:active:not(:disabled), .card-interactive:active { transform: none; }
 }
 :root[data-reduce-motion='true']::view-transition-group(*),
 :root[data-reduce-motion='true']::view-transition-old(*),
 :root[data-reduce-motion='true']::view-transition-new(*) { animation: none !important; }
+:root[data-reduce-motion='true']::view-transition-old(*) { display: none; }
+:root[data-reduce-motion='true'] :is(.anim-dialog-out, .anim-toast-out) { transform: none; }
+:root[data-reduce-motion='true'] :is(.anim-sheet-in, .anim-sheet-out) { transition: none; }
+:root[data-reduce-motion='true'] .motion-count { animation: none; }
+:root[data-reduce-motion='true'] :is(.btn:active:not(:disabled), .card-interactive:active) { transform: none; }
 
-/* ------------------------------------------------------------------ gym band
- * GymBand.tsx. One number, --band-p (0 open .. 1 the 56 px bar), drives every
- * change; the band is sticky with a negative top so its bottom 56 px stay
- * pinned and nothing animates layout — only opacity, transform and colour.
- * The section is scoped .dark, so --surface-1 here is the navy set in both
- * themes; copy uses the band inks and sits on the bottom scrim.
+/* ------------------------------------------------------------------ gym cover
+ * GymHeader's optional 3:1 banner when a gym has no photo: the cover art and
+ * two soft circles seeded from the gym id (coverGeometry), so a gym always
+ * looks like itself. It scrolls away with the page; nothing sticks or collapses.
  */
-@property --band-p { syntax: '<number>'; inherits: true; initial-value: 0; }
-@keyframes band-collapse { from { --band-p: 0; } to { --band-p: 1; } }
-
-.gym-band {
-  --band-h: var(--band-h-hub);
-  --band-open: clamp(0, calc(1 - var(--band-p) * 1.6), 1);
-  position: sticky;
-  top: calc(var(--band-bar-h) - var(--band-measured, var(--band-h)));
-  z-index: 30;
-  isolation: isolate;
-  overflow: hidden;
-  min-height: var(--band-h);
-  display: flex;
-  flex-direction: column;
-  background: var(--band-bg);
-  color: var(--band-ink);
-  view-transition-name: gym-band;
-}
-.gym-band[data-variant='full'] { --band-h: var(--band-h-full); }
-/* No gym yet: the "find your gym" prompt is an empty state, not a hero. It keeps
-   the cover so the shell reads the same, but at hub height, so the page's own
-   content (composer, feed, hubs) is above the fold on a laptop. */
-.gym-band[data-variant='full'][data-empty='true'] { --band-h: var(--band-h-hub); }
-@media (min-width: 64rem) {
-  .gym-band[data-variant='full'][data-empty='true'] { --band-h: clamp(148px, 10vw + 96px, 200px); }
-}
-/* CSS owns the number where scroll-driven animations exist (lib/gymBand.ts sets the mode). */
-.gym-band[data-collapse='css'] {
-  animation: band-collapse linear both;
-  animation-timeline: scroll();
-  animation-range: var(--band-start, 0px) calc(var(--band-start, 0px) + var(--band-measured, var(--band-h)) - var(--band-bar-h));
-}
-/* Reduced motion: no animation, the band flips to its bar once scrolled past. */
-.gym-band[data-collapse='none'][data-collapsed='true'] { --band-p: 1; }
-
-.gym-band-cover {
-  position: absolute; inset: 0; z-index: 0;
-  background: var(--cover-art);
-  opacity: calc(1 - var(--band-p));
-}
-.gym-band-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.gym-band-geo { position: absolute; border-radius: 50%; pointer-events: none; }
-.gym-band-geo-1 { left: var(--geo1-x); top: var(--geo1-y); width: var(--geo1-d); height: var(--geo1-d); border: calc(var(--geo1-d) * 0.16) solid var(--band-geo); }
-.gym-band-geo-2 { left: var(--geo2-x); top: var(--geo2-y); width: var(--geo2-d); height: var(--geo2-d); background: var(--band-geo-2); }
-.gym-band-scrim {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
-  height: min(var(--band-scrim-h), 100%);
-  background: var(--band-scrim);
-  opacity: calc(1 - var(--band-p));
-}
-
-/* Chrome row: brand / search / inbox / Log. It rides down with the collapse so
-   it reads as fixed while the band scrolls away beneath it. */
-.gym-band-chrome {
-  position: absolute; left: 0; right: 0; top: 0; z-index: 3;
-  height: var(--band-bar-h);
-  display: flex; align-items: center; gap: 4px;
-  padding: 0 var(--gutter);
-  transform: translateY(calc((var(--band-measured, var(--band-h)) - var(--band-bar-h)) * var(--band-p)));
-  will-change: transform;
-}
-/* The bar title takes the brand's place: the shell marks its wordmark
-   .gym-band-brand, which fades out as the title fades in at the same left
-   edge, so on a 320 px phone the title never fights the action cluster.
-   --band-actions-w is the width the shell's right-hand controls need. */
-.gym-band-bar-title {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  left: var(--gutter); right: calc(var(--gutter) + var(--band-actions-w, 11rem));
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-weight: 700; letter-spacing: -0.01em;
-  opacity: clamp(0, calc((var(--band-p) - 0.6) / 0.4), 1);
-  pointer-events: none;
-}
-.gym-band[data-collapsed='true'] .gym-band-bar-title { pointer-events: auto; }
-.gym-band .gym-band-brand { opacity: var(--band-open); }
-.gym-band[data-collapsed='true'] .gym-band-brand { visibility: hidden; pointer-events: none; }
-
-.gym-band-body {
-  position: relative; z-index: 2;
-  flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
-  min-height: var(--band-h);
-  padding: calc(var(--band-bar-h) + 4px) var(--gutter) 10px;
-}
-.gym-band-main, .gym-band-tabs { opacity: var(--band-open); }
-.gym-band[data-collapsed='true'] .gym-band-main,
-.gym-band[data-collapsed='true'] .gym-band-tabs { visibility: hidden; pointer-events: none; }
-
-.gym-band-main-full { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; align-items: end; }
-.gym-band-main-hub { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px var(--section-gap); }
-.gym-band-hub-text { flex: 1 1 14rem; min-width: 0; }
-
-.gym-band-kicker {
-  display: flex; align-items: center; gap: 6px;
-  font-size: var(--text-xs); line-height: 1.25rem; font-weight: 600; color: var(--band-ink-2);
-}
-.gym-band-kicker svg { flex: none; color: var(--mark-on-navy); }
-.gym-band-kicker-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gym-band-title { margin-top: 2px; color: var(--band-ink); font-variation-settings: 'wdth' 108; letter-spacing: -0.025em; overflow-wrap: anywhere; }
-.gym-band-meta { margin-top: 6px; font-size: var(--text-sm); color: var(--band-ink-2); }
-.gym-band-meta b { color: var(--band-ink); font-weight: 700; }
-.gym-band-context { margin-top: 4px; font-size: var(--text-sm); color: var(--band-ink-2); }
-.gym-band-context-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 600; color: var(--band-ink); border-radius: var(--radius-xs); }
-.gym-band-context-link svg { color: var(--mark-on-navy); }
-.gym-band-context-link:hover { text-decoration: underline; text-underline-offset: 3px; }
-.gym-band-body-copy { margin-top: 8px; max-width: 34ch; font-size: var(--text-base); line-height: 1.45; color: var(--band-ink-2); }
-/* The empty band is one row: copy left, the action right, both bottom-aligned. */
-.gym-band[data-empty='true'] .gym-band-main-full { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
-.gym-band[data-empty='true'] .gym-band-title { font-size: var(--text-h1); }
-.gym-band[data-empty='true'] .gym-band-body-copy { margin-top: 4px; font-size: var(--text-sm); }
-.gym-band[data-empty='true'] .gym-band-actions { margin-top: 10px; }
-@media (min-width: 40rem) {
-  .gym-band[data-empty='true'] .gym-band-main-full > .min-w-0 { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--section-gap); align-items: end; }
-  .gym-band[data-empty='true'] .gym-band-main-full > .min-w-0 > :not(.gym-band-actions) { grid-column: 1; }
-  .gym-band[data-empty='true'] .gym-band-actions { grid-column: 2; grid-row: 1 / span 3; margin-top: 0; align-self: end; }
-}
-/* A glass button on the band: secondary controls there sit on navy, where the
-   light surface-2 fill read as a disabled control. */
-.gym-band .btn-secondary, .gym-band .btn-ghost {
-  background: var(--band-chip); border-color: var(--band-chip-line); color: var(--band-ink);
-  backdrop-filter: blur(8px);
-}
-.gym-band .btn-secondary:hover:not(:disabled), .gym-band .btn-ghost:hover:not(:disabled) { background: color-mix(in oklab, var(--band-chip) 100%, white 10%); }
-
-.gym-band-now { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: var(--text-sm); font-weight: 600; color: var(--band-ink); }
-.gym-band-stack { display: inline-flex; align-items: center; gap: 8px; }
-.gym-band-stack .ring-bg { --tw-ring-color: var(--navy-800); }
-.gym-band-now-label { color: var(--band-ink-2); }
-.gym-band-live { display: inline-flex; align-items: center; gap: 6px; }
-.gym-band-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--mark-on-navy); box-shadow: 0 0 0 3px color-mix(in oklab, var(--mark-on-navy) 25%, transparent); }
-
-.gym-band-map {
-  display: block; border-radius: var(--radius-md); overflow: hidden;
-  border: 2px solid var(--band-ring); box-shadow: var(--shadow-2);
-  margin-bottom: 2px; line-height: 0;
-  transition: transform var(--duration-1) var(--ease-out);
-}
-.gym-band-map:hover { transform: translateY(-1px); }
-.gym-band-map:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-@media (min-width: 64rem) { .gym-band-map-art { width: 104px; height: 104px; } }
-
-.gym-band-figure { display: flex; flex-direction: column; align-items: flex-start; color: var(--band-ink); line-height: 1; }
-.gym-band-figure-unit { margin-left: 6px; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0; color: var(--band-ink-2); font-variation-settings: 'wdth' 100; }
-.gym-band-figure-label { margin-top: 4px; font-size: var(--text-xs); font-weight: 600; color: var(--band-ink-2); }
-.gym-band-next { flex: 1 1 16rem; min-width: 0; color: var(--band-ink); }
-.gym-band-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; margin-left: auto; }
-.gym-band-main-hub .gym-band-actions { margin-top: 0; }
-
-/* Gym-scoped tabs on the band (Feed · Today · Members · About): the row the
-   shell passes in; these rules only style .gym-band-tab children. */
-.gym-band-tabs { display: flex; gap: 4px; margin: 8px calc(var(--gutter) * -0.25) 0; overflow-x: auto; scrollbar-width: none; }
-.gym-band-tabs::-webkit-scrollbar { display: none; }
-.gym-band-tab {
-  display: inline-flex; align-items: center; gap: 6px; flex: none;
-  min-height: 36px; padding: 0 12px; border-radius: var(--radius-sm);
-  font-size: var(--text-sm); font-weight: 600; color: var(--band-ink-2);
-  font-variant-numeric: tabular-nums;
-  transition: background-color var(--duration-1) var(--ease-out), color var(--duration-1) var(--ease-out);
-  @media (pointer: coarse) { min-height: 44px; }
-}
-.gym-band-tab:hover { color: var(--band-ink); background: color-mix(in oklab, var(--band-chip) 60%, transparent); }
-.gym-band-tab[aria-current], .gym-band-tab[aria-selected='true'], .gym-band-tab[data-active='true'] {
-  color: var(--band-ink); background: var(--band-chip); box-shadow: inset 0 0 0 1px var(--band-chip-line);
-}
-.gym-band-tab small { font-size: var(--text-2xs); color: var(--band-ink-3); font-weight: 600; }
-
-/* Chrome helpers for whatever the shell places on the band. */
-.gym-band-chip { background: var(--band-chip); color: var(--band-ink); box-shadow: inset 0 0 0 1px var(--band-chip-line); }
-.gym-band .btn-quiet { color: var(--band-ink); }
-.gym-band .btn-quiet:hover:not(:disabled) { background: var(--band-chip); color: var(--band-ink); }
-.gym-band .skeleton { background: var(--band-chip); }
-.gym-band .skeleton::after { background: linear-gradient(90deg, transparent, var(--band-chip-line), transparent); }
-
-::view-transition-old(gym-band), ::view-transition-new(gym-band) { animation: none; }
+.gym-cover { background: var(--cover-art); }
+.gym-cover-geo { position: absolute; border-radius: 50%; pointer-events: none; }
+.gym-cover-geo-1 { left: var(--geo1-x); top: var(--geo1-y); width: var(--geo1-d); height: var(--geo1-d); border: calc(var(--geo1-d) * 0.16) solid var(--band-geo); }
+.gym-cover-geo-2 { left: var(--geo2-x); top: var(--geo2-y); width: var(--geo2-d); height: var(--geo2-d); background: var(--band-geo-2); }
 
 /* ------------------------------------------------------------------ auth hero
- * Login.tsx AuthShell. The signed-out left panel wears the same navy cover art
- * as the gym band, so the app's two dark surfaces read as one brand.
+ * Login.tsx AuthShell. The signed-out left panel wears the cover art, so the
+ * app's two dark surfaces read as one brand.
  */
 .auth-hero { background: var(--cover-art); }
 .auth-hero-geo { position: absolute; border-radius: 50%; pointer-events: none; }
