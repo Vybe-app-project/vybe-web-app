@@ -165,3 +165,85 @@ export const REACTION_ICONS = {
   wow: Wow,
 } as const;
 export type ReactionKey = keyof typeof REACTION_ICONS;
+
+/* ------------------------------------------------------------------ empty-state illustrations
+ * Drawn on a 48 grid (the icon grid doubled) at the same 1.8 stroke, so at 96 px
+ * they read as one family with the icons above. `currentColor` carries the
+ * line; the one mint accent is the `text-brand` group. Decorative: aria-hidden.
+ */
+export type IllustrationFamily = 'train' | 'fuel' | 'body' | 'community' | 'social';
+
+function illustration(name: string, children: React.ReactNode) {
+  const Art = ({ size = 96, className, ...rest }: Omit<IconProps, 'filled'>) => (
+    <svg
+      viewBox="0 0 48 48"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      className={className}
+      {...rest}
+    >
+      {children}
+    </svg>
+  );
+  Art.displayName = name;
+  return Art;
+}
+
+/** A loaded bar on the floor, one plate still to slide on. */
+export const IllustrationTrain = illustration('IllustrationTrain', <>
+  <path d="M6 27h36" />
+  <rect x="11" y="19" width="5" height="16" rx="1.5" />
+  <rect x="16" y="21" width="3.5" height="12" rx="1.2" />
+  <rect x="32" y="19" width="5" height="16" rx="1.5" />
+  <rect x="28.5" y="21" width="3.5" height="12" rx="1.2" />
+  <path d="M4 40h40" strokeDasharray="3 4" />
+  <g className="text-brand" stroke="currentColor"><circle cx="40" cy="10.5" r="3.5" /></g>
+</>);
+
+/** A bowl, steam, and a leaf on the rim. */
+export const IllustrationFuel = illustration('IllustrationFuel', <>
+  <path d="M8 24h32a16 16 0 0 1-32 0z" />
+  <path d="M15 40h18M20 36v4M28 36v4" />
+  <path d="M18 17c0-3 2-3 2-6M24 17c0-3 2-3 2-6M30 17c0-3 2-3 2-6" />
+  <g className="text-brand" stroke="currentColor"><path d="M38 22c3-6 8-6 8-6s-1 6-8 6z" /><path d="M38 22l5-3" /></g>
+</>);
+
+/** A scale face with the needle at rest and a quiet trend underneath. */
+export const IllustrationBody = illustration('IllustrationBody', <>
+  <rect x="9" y="6" width="30" height="30" rx="7" />
+  <path d="M16 21a8 8 0 0 1 16 0" />
+  <path d="M24 21l4-5" />
+  <path d="M19 30h10" />
+  <g className="text-brand" stroke="currentColor"><path d="M6 44l9-6 8 3 9-8 10 4" /></g>
+</>);
+
+/** The gym as a building, the door lit. */
+export const IllustrationCommunity = illustration('IllustrationCommunity', <>
+  <rect x="8" y="10" width="32" height="30" rx="2.5" />
+  <path d="M8 40h32M14 17h4M22 17h4M30 17h4M14 24h4M22 24h4M30 24h4" />
+  <path d="M4 10l20-6 20 6" />
+  <g className="text-brand" stroke="currentColor"><path d="M20 40v-8a4 4 0 0 1 8 0v8" /></g>
+</>);
+
+/** Two voices in one conversation. */
+export const IllustrationSocial = illustration('IllustrationSocial', <>
+  <path d="M6 12a4 4 0 0 1 4-4h16a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4H14l-6 5v-5a4 4 0 0 1-2-3.5z" />
+  <path d="M34 18h4a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-2v5l-6-5H22a4 4 0 0 1-4-4v-1" />
+  <path d="M12 14h12M12 19h8" />
+  <g className="text-brand" stroke="currentColor"><path d="M33 33.5s-3.5-2.2-3.5-4.7a2 2 0 0 1 3.5-1.3 2 2 0 0 1 3.5 1.3c0 2.5-3.5 4.7-3.5 4.7z" /></g>
+</>);
+
+export const ILLUSTRATIONS: Record<IllustrationFamily, ReturnType<typeof illustration>> = {
+  train: IllustrationTrain,
+  fuel: IllustrationFuel,
+  body: IllustrationBody,
+  community: IllustrationCommunity,
+  social: IllustrationSocial,
+};
