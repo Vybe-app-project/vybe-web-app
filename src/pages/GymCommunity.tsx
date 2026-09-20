@@ -76,6 +76,7 @@ import {
   Users,
   X,
 } from './icons';
+import { ContextualInviteButton } from './InviteLinkSheet';
 
 /* ------------------------------------------------------------------ types */
 
@@ -768,9 +769,13 @@ function CommunityDetail({
 
   const primaryAction = community ? (
     membership.isMember ? (
-      <Button variant="secondary" size="sm" onClick={() => setConfirmLeave(true)}>
-        Leave
-      </Button>
+      <>
+        {/* Wave F: a contextual invite link for this community (behind features.invites; POST /invites). */}
+        <ContextualInviteButton kind="gym" targetId={communityId} targetName={community.name || 'this community'} size="sm" />
+        <Button variant="secondary" size="sm" onClick={() => setConfirmLeave(true)}>
+          Leave
+        </Button>
+      </>
     ) : (
       <JoinButton community={community} mutation={join} size="sm" />
     )

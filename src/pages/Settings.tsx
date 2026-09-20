@@ -55,6 +55,8 @@ import { DataLifecycleSection } from './settings/DataLifecycleSection';
 import { EmailPreferencesSection } from './settings/EmailPreferencesSection';
 import { HydrationTimesEditor } from './settings/HydrationTimesEditor';
 import { LegalSection } from './settings/LegalSection';
+import InviteCodeSection from './settings/InviteCodeSection';
+import InviteFriendsSection from './settings/InviteFriendsSection';
 
 /* ------------------------------------------------------------------ pieces */
 
@@ -948,10 +950,12 @@ export default function Settings() {
       />
       <div className="w-full max-w-form space-y-4">
         <AccountSection />
+        <InviteCodeSection />
         <AppearanceSection />
         <UnitsSection />
         <PrivacySection />
         <AccountPreferenceSections />
+        <InviteFriendsSection />
         <CoachingSection />
         <PasswordSection />
         <SessionsSection />

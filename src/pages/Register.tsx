@@ -6,6 +6,7 @@ import { API_BASE, api, errMsg, installClientInterceptors, tokenStore } from '..
 import { useAuth } from '../lib/auth';
 import { postLoginTarget, type FromLocation } from '../lib/authRedirect';
 import { registerInviteLine } from '../lib/invites';
+import { rememberPendingInvite } from '../lib/pendingInvite';
 import {
   clearRegisterDraft,
   markWelcomePending,
@@ -167,6 +168,11 @@ export default function Register() {
   // A person who arrived from /join/<code> keeps the code in view. The API
   // redeems it in the app after sign-up; the register request is unchanged.
   const inviteLine = registerInviteLine(new URLSearchParams(location.search).get('invite'));
+  // GuestOnly's redirect after sign-up drops ?invite=, so the code is kept in
+  // the tab (lib/pendingInvite) and offered on the welcome sheet once signed in.
+  useEffect(() => {
+    rememberPendingInvite(sessionStorage, new URLSearchParams(location.search).get('invite'));
+  }, [location.search]);
 
   // Progress survives a reload or a trip to Mail for the code (see authDrafts).
   const [draft] = useState(() => readRegisterDraft(sessionStorage));

@@ -25,6 +25,7 @@ import {
 import { Check, Compass, MessageCircle, User, UserPlus, Users, X } from './icons';
 import { PrivateMark, ROW_LINK, UserBadges } from './UserRow';
 import PeopleSearch, { type Person } from './PeopleSearch';
+import { SuggestionList } from './SuggestionRow';
 
 type FriendRequest = {
   _id: string;
@@ -355,6 +356,23 @@ export default function Friends() {
               </Button>
             );
           }}
+        />
+      </Card>
+
+      {/* People to follow, with the reason next to every name (GET /searching/suggest). */}
+      <Card className="space-y-3">
+        <SuggestionList
+          limit={5}
+          heading="For you"
+          emptyState={
+            <EmptyState
+              variant="first-run"
+              size="sm"
+              title="Follow people from your gym or contacts"
+              message="Suggestions appear here as people you may know join Vybe."
+              action={{ label: 'Explore people', to: '/discover', variant: 'secondary', icon: <Compass size={18} /> }}
+            />
+          }
         />
       </Card>
 

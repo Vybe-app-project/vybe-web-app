@@ -33,6 +33,7 @@ import {
   type InviteFailure,
   type InvitePreview,
 } from '../lib/invites';
+import { USE_ON_WEB, settingsInvitePath } from '../lib/inviteRedeem';
 import { appDeepLink, isHandheld } from '../lib/shareLinks';
 import { useFeature } from '../lib/capabilities';
 import { Avatar, Badge, Button, ButtonLink, Callout, Spinner, buttonClass } from './ui';
@@ -149,11 +150,36 @@ function StoreLinks({ storeUrls }: { storeUrls: InvitePreview['storeUrls'] }) {
  * ?invite=<CODE> in the URL, or sign-in that bounces back here. `signedIn`
  * is null while the session is still being restored, so the row waits rather
  * than flipping mid-read; a signed-in member reads the note instead, since
- * the code is used in the app and nothing is redeemed on the web.
+ * the code is used in the app and nothing is redeemed on this page. While
+ * the invites flag is on, the note is followed by the way to Settings ›
+ * Have a code?, where the web redeems it.
  */
-function AccountRow({ code, signedIn, from, primary }: { code: string; signedIn: boolean | null; from?: unknown; primary: boolean }) {
+function AccountRow({
+  code,
+  signedIn,
+  from,
+  primary,
+  invitesEnabled = false,
+}: {
+  code: string;
+  signedIn: boolean | null;
+  from?: unknown;
+  primary: boolean;
+  invitesEnabled?: boolean;
+}) {
   if (signedIn === null) return null;
-  if (signedIn) return <Callout tone="info">{SIGNED_IN_NOTE}</Callout>;
+  if (signedIn) {
+    return (
+      <div className="space-y-3">
+        <Callout tone="info">{SIGNED_IN_NOTE}</Callout>
+        {invitesEnabled ? (
+          <ButtonLink to={settingsInvitePath(code)} variant="secondary" data-testid="invite-use-web">
+            {USE_ON_WEB}
+          </ButtonLink>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-2">
       <ButtonLink to={registerWithInvitePath(code)} variant={primary ? 'primary' : 'secondary'} data-testid="invite-register">
@@ -229,7 +255,7 @@ export function InvitePreviewBody({
       ) : null}
       <InviteCodeBlock code={code} copyState={copyState} onCopy={onCopy} />
 
-      <AccountRow code={code} signedIn={signedIn} from={from} primary={!handheld} />
+      <AccountRow code={code} signedIn={signedIn} from={from} primary={!handheld} invitesEnabled={invitesEnabled} />
     </div>
   );
 }
@@ -248,6 +274,7 @@ export function InviteFailureBody({
   onCopy,
   onRetry,
   from,
+  invitesEnabled = false,
 }: {
   failure: InviteFailure;
   code: string | null;
@@ -256,6 +283,7 @@ export function InviteFailureBody({
   onCopy?: () => void;
   onRetry?: () => void;
   from?: unknown;
+  invitesEnabled?: boolean;
 }) {
   const retry = canRetryInvite(failure) && onRetry;
   return (
@@ -286,7 +314,7 @@ export function InviteFailureBody({
       {code && showsCodeOnFailure(failure) ? (
         <>
           <InviteCodeBlock code={code} copyState={copyState} onCopy={onCopy} />
-          <AccountRow code={code} signedIn={signedIn} from={from} primary={false} />
+          <AccountRow code={code} signedIn={signedIn} from={from} primary={false} invitesEnabled={invitesEnabled} />
         </>
       ) : null}
     </div>
@@ -332,7 +360,7 @@ export function JoinInviteOutcome({
         )}
       </div>
       {state.status === 'failed' ? (
-        <InviteFailureBody failure={state.failure} code={state.code} signedIn={signedIn} copyState={copyState} onCopy={onCopy} onRetry={onRetry} from={from} />
+        <InviteFailureBody failure={state.failure} code={state.code} signedIn={signedIn} copyState={copyState} onCopy={onCopy} onRetry={onRetry} from={from} invitesEnabled={invitesEnabled} />
       ) : null}
       {state.status === 'ready' ? (
         <InvitePreviewBody preview={state.preview} code={state.code} signedIn={signedIn} handheld={handheld} invitesEnabled={invitesEnabled} copyState={copyState} onCopy={onCopy} from={from} />
