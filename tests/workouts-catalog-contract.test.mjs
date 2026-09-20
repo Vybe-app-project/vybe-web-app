@@ -108,10 +108,10 @@ test('challenge copy: readable time, named custom units, honest delete, closed i
 });
 
 test('achievement tiles read from the always-loaded personal set, and progress never exceeds the target', () => {
-  assert.match(achievements, /queryKey: \['achievements', 'user', 'summary'\]/);
+  assert.match(read('src/lib/useMyAchievements.ts'), /queryKey: \['achievements', 'user', 'summary'\]/);
   assert.match(achievements, /unit=\{`of \$\{summary\.length\}`\}/);
   assert.doesNotMatch(achievements, /unit=\{`of \$\{items\.length\}`\}/);
-  assert.match(achievements, /const shown = Math\.min\(current, required\)/);
+  assert.match(read('src/pages/AchievementCard.tsx'), /const shown = Math\.min\(current, required\)/);
   assert.match(achievements, /formatStat\(Math\.min\(data\.current, data\.required\)\)/);
 });
 
