@@ -9,7 +9,11 @@ import {
   draftFromRow,
   isEmptyPatch,
   readDraft,
+  readsInline,
+  rolloutChanged,
+  serverFieldError,
   type AdminFlagRow,
+  type EditorField,
   type FlagDraft,
   type FlagGroup,
   type FlagListEntry,
@@ -88,9 +92,11 @@ function StateBadges({ state }: { state: FlagRowState }) {
 
 function LiveCell({ live, known }: { live: boolean | null; known: boolean }) {
   if (live === null) {
+    // Visible dash plus sr-only text: aria-label on a role-less span is not announced.
     return (
-      <span className="text-xs text-text-3" aria-label={known ? 'Not reported by GET /api/capabilities' : 'Capabilities not loaded yet'}>
-        —
+      <span className="text-xs text-text-3">
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">{known ? 'Not reported by GET /api/capabilities' : 'Capabilities not loaded yet'}</span>
       </span>
     );
   }
@@ -102,8 +108,13 @@ function LiveCell({ live, known }: { live: boolean | null; known: boolean }) {
   );
 }
 
-function RowError({ error }: { error: FlagSaveError | null }) {
-  if (!error || error.field) return null;
+/**
+ * The row's sentence beside the switch. A field error reads inline in an
+ * open editor instead; with the editor closed, or for `enabled` (which the
+ * editor never shows), it reads here so no refusal is silent.
+ */
+function RowError({ error, editorOpen }: { error: FlagSaveError | null; editorOpen: boolean }) {
+  if (!error || readsInline(error, editorOpen)) return null;
   return (
     <p role="alert" className="mt-1.5 text-xs text-danger">
       {error.message}
@@ -129,15 +140,24 @@ export function FlagEditor({
   staysFalseNote?: ReactNode;
 }) {
   const [draft, setDraft] = useState<FlagDraft>(() => draftFromRow(row));
+  // The row the draft was seeded from. The editor is not remounted when the
+  // row changes underneath it (a switch save, a Refresh), so the draft
+  // survives; the difference is shown instead of discarded.
+  const [seed, setSeed] = useState<AdminFlagRow>(row);
+  // The draft as last sent, so the API's field error stays inline only while that field still reads as sent.
+  const [submitted, setSubmitted] = useState<FlagDraft | null>(null);
+  // The patch is always the diff against the row the API holds now.
   const read = readDraft(row, draft);
   const baseId = useId();
-  // The API's field error wins over the local check for the same field until the draft changes.
-  const serverField = error?.field ?? null;
-  const fieldError = (field: 'percentage' | 'allowlist' | 'note') =>
-    read.errors[field] ?? (serverField === field ? error?.message ?? null : null);
+  const fieldError = (field: EditorField) => read.errors[field] ?? serverFieldError(error, field, submitted, draft);
   const canSave = !pending && read.values !== null && !isEmptyPatch(read.patch);
+  const changedUnderneath = rolloutChanged(seed, row);
 
   const set = (field: keyof FlagDraft) => (value: string) => setDraft((d) => ({ ...d, [field]: value }));
+  const loadNewer = () => {
+    setDraft(draftFromRow(row));
+    setSeed(row);
+  };
 
   return (
     <form
@@ -145,9 +165,26 @@ export function FlagEditor({
       aria-label={`Edit ${row.name}`}
       onSubmit={(e) => {
         e.preventDefault();
-        if (canSave) onSave(read.patch);
+        if (!canSave) return;
+        setSubmitted(draft);
+        onSave(read.patch);
       }}
     >
+      {changedUnderneath ? (
+        <div className="md:col-span-2">
+          <Callout
+            tone="info"
+            title="This flag changed while you were editing"
+            action={
+              <Button size="sm" variant="secondary" onClick={loadNewer}>
+                Load the newer values
+              </Button>
+            }
+          >
+            Save sends your percentage, allowlist and note over the newer values. Load them to start from what is stored now.
+          </Callout>
+        </div>
+      ) : null}
       <div className="space-y-4">
         <Input
           id={`${baseId}-percentage`}
@@ -160,8 +197,7 @@ export function FlagEditor({
           value={draft.percentage}
           onChange={(e) => set('percentage')(e.target.value)}
           error={fieldError('percentage')}
-          hint="Members outside the allowlist see the flag when their stable bucket is below this. Signed-out readers see it only at 100."
-          trailing={<span className="text-xs text-text-3">%</span>}
+          hint="Members outside the allowlist see the flag when their stable bucket is below this. Signed-out readers see it only at 100 %."
           className="max-w-32"
           disabled={pending}
         />
@@ -241,7 +277,7 @@ function FlagRow({
 
   return (
     <>
-      <tr data-flag={entry.name} data-testid="admin-flag-row" className={cx(!editable && 'opacity-70')}>
+      <tr data-flag={entry.name} data-testid="admin-flag-row">
         <td className="max-w-[26rem] align-top">
           <p className="admin-code font-semibold text-text-1">{entry.name}</p>
           <p className="mt-0.5 text-xs text-text-2">{entry.note}</p>
@@ -257,7 +293,7 @@ function FlagRow({
             <div className="flex items-center gap-2">
               <Switch
                 checked={row.enabled}
-                disabled={pending}
+                busy={pending}
                 label={`Enable ${entry.name}`}
                 onChange={(next) => onToggle(entry.name, next)}
               />
@@ -268,7 +304,7 @@ function FlagRow({
           ) : (
             <span className="text-xs text-text-3">No controls</span>
           )}
-          <RowError error={error} />
+          <RowError error={error} editorOpen={expanded} />
         </td>
         <td className="num align-top">
           {row ? (
@@ -315,8 +351,8 @@ function FlagRow({
         <tr id={editorId} data-testid="admin-flag-editor">
           <td colSpan={COLUMNS} className="bg-surface-2/60">
             <FlagEditor
-              // A saved row carries a new updatedAt, so the editor reseeds from the API's answer.
-              key={`${row.name}:${row.updatedAt ?? ''}:${row.percentage}:${row.allowlist.length}:${row.note}`}
+              // No value-based key: a switch save or a Refresh that changes the row must not wipe the
+              // draft. The editor compares its seed with the row and says what changed; a form save closes it.
               row={row}
               error={error}
               pending={pending}
@@ -388,7 +424,7 @@ export function FlagsTable({
         {sections.map((section) => (
           <tbody key={section.key} className={cx(fetching && 'admin-fetching')} data-group={section.key}>
             <tr className="bg-surface-2">
-              <th scope="colgroup" colSpan={COLUMNS} className="px-4 py-2 text-left">
+              <th scope="rowgroup" colSpan={COLUMNS} className="px-4 py-2 text-left">
                 <span className="type-label text-text-2">{section.title}</span>
                 <span className="ml-2 text-xs font-normal text-text-3">{section.description}</span>
                 <span className="sr-only">, {plural(section.rows.length, 'flag')}</span>

@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '../../lib/api';
 import { apiErrorDetails, describeAdminError, parseApiError } from '../../lib/apiError';
 import {
   featuresOf,
   groupEntries,
+  isFormPatch,
   mapFlagError,
   mergeWithRegistry,
   normalizeFlagRow,
   normalizeFlagRows,
   publicFeatureState,
+  readsInline,
   searchEntries,
   staysFalseDecision,
   summarizeFlags,
@@ -59,6 +61,11 @@ export default function AdminFlags() {
   const [errors, setErrors] = useState<Record<string, FlagSaveError>>({});
   const [unregistered, setUnregistered] = useState<ReadonlySet<string>>(() => new Set());
   const [confirm, setConfirm] = useState<{ name: string; decision: string; reason: string } | null>(null);
+  // Read by the mutation callbacks, which may settle after the row's editor closed or moved.
+  const expandedRef = useRef(expanded);
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
 
   // GET /api/admin/flags -> { flags: [...] } for every registered name.
   const flags = useQuery<AdminFlagRow[]>({
@@ -78,6 +85,21 @@ export default function AdminFlags() {
     queryFn: async () => (await adminApi.get('/capabilities')).data ?? {},
     staleTime: 60_000,
   });
+
+  // A fresh GET is the API's word on what is registered: a name it returns
+  // drops the FLAG_NOT_FOUND lock, so a row is not left without controls once
+  // the build that registers it is deployed. dataUpdatedAt is in the deps
+  // because structural sharing keeps the same `data` for an identical answer.
+  useEffect(() => {
+    const returned = flags.data;
+    if (!returned) return;
+    setUnregistered((prev) => {
+      if (prev.size === 0) return prev;
+      const names = new Set(returned.map((r) => r.name));
+      const next = new Set([...prev].filter((name) => !names.has(name)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [flags.data, flags.dataUpdatedAt]);
 
   const markPending = (name: string, on: boolean) =>
     setPendingNames((prev) => {
@@ -111,10 +133,11 @@ export default function AdminFlags() {
       const mapped = mapFlagError(parseApiError(e), name);
       setErrors((prev) => ({ ...prev, [name]: mapped }));
       if (mapped.kind === 'not-found') setUnregistered((prev) => new Set(prev).add(name));
-      // Field errors read inline in the editor; everything else also gets the operator's toast.
-      if (!mapped.field) toast.error(describeAdminError(e, mapped.message));
+      // A field error the open editor shows reads inline there; everything else (row-level,
+      // `enabled`, or a field error with the editor closed) reads beside the row and toasts.
+      if (!readsInline(mapped, expandedRef.current === name)) toast.error(describeAdminError(e, mapped.message));
     },
-    onSuccess: (row, { name }) => {
+    onSuccess: (row, { name, patch }) => {
       if (row) {
         qc.setQueryData<AdminFlagRow[]>(FLAGS_KEY, (prev) => (prev ? prev.map((r) => (r.name === name ? row : r)) : [row]));
         setUnregistered((prev) => {
@@ -124,7 +147,8 @@ export default function AdminFlags() {
           return next;
         });
       }
-      setExpanded((current) => (current === name ? null : current));
+      // Only a form save closes the editor. A switch toggle while the editor is open leaves the draft alone.
+      if (isFormPatch(patch)) setExpanded((current) => (current === name ? null : current));
       toast.success(`${name} saved`);
     },
     onSettled: (_row, _err, { name }) => {
@@ -173,6 +197,7 @@ export default function AdminFlags() {
 
   const status = apiErrorDetails(flags.error).status;
   const routeMissing = flags.isError && status === 404;
+  const refreshing = flags.isFetching || caps.isFetching;
 
   return (
     <div className="space-y-5">
@@ -190,13 +215,16 @@ export default function AdminFlags() {
           <IconButton
             label="Refresh flags"
             variant="secondary"
-            disabled={flags.isFetching || caps.isFetching}
+            // Stays focusable while fetching (a disabled button drops keyboard focus); the click is a no-op meanwhile.
+            aria-busy={refreshing || undefined}
+            className={cx(refreshing && 'cursor-progress')}
             onClick={() => {
+              if (refreshing) return;
               void flags.refetch();
               void caps.refetch();
             }}
           >
-            <Refresh size={18} className={cx((flags.isFetching || caps.isFetching) && 'animate-spin')} />
+            <Refresh size={18} className={cx(refreshing && 'animate-spin')} />
           </IconButton>
         }
       />

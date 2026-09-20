@@ -303,6 +303,8 @@ export type FlagPatch = { enabled?: boolean; percentage?: number; allowlist?: st
 
 export type FlagField = 'enabled' | 'percentage' | 'allowlist' | 'note';
 export type FlagFieldErrors = Partial<Record<FlagField, string>>;
+/** The fields the editor shows; `enabled` belongs to the row's switch. */
+export type EditorField = Exclude<FlagField, 'enabled'>;
 
 /** What the editor holds while a row is being edited: text, so a half-typed value never snaps. */
 export type FlagDraft = { percentage: string; allowlist: string; note: string };
@@ -367,6 +369,18 @@ export function buildFlagPatch(row: AdminFlagRow, values: FlagValues): FlagPatch
 }
 
 export const isEmptyPatch = (patch: FlagPatch): boolean => Object.keys(patch).length === 0;
+
+/** True when the body carries a field the editor owns; a switch-only body ({ enabled }) is not the form's. */
+export const isFormPatch = (patch: FlagPatch): boolean => Object.keys(patch).some((k) => k !== 'enabled');
+
+/**
+ * True when the percentage, allowlist or note of `row` differ from `seed`:
+ * the values an open editor seeded from `seed` would overwrite on Save.
+ * `enabled` is left out because the editor never sends it.
+ */
+export function rolloutChanged(seed: AdminFlagRow, row: AdminFlagRow): boolean {
+  return seed.percentage !== row.percentage || !sameSet(seed.allowlist, row.allowlist) || seed.note.trim() !== row.note.trim();
+}
 
 export type ReadDraft = {
   values: FlagValues | null;
@@ -505,6 +519,27 @@ export function mapFlagError(input: FlagErrorInput, name: string): FlagSaveError
     message: server ? sentence(server) : 'Could not save the flag.',
     retryAfterSec: null,
   };
+}
+
+/**
+ * True when a failed PUT's error reads inline in an open editor: it names a
+ * field the editor shows and the editor is open. Otherwise the sentence is
+ * the row's (beside the switch) and the operator also gets a toast. An
+ * error on `enabled` is always the row's, because the switch sent it.
+ */
+export function readsInline(error: FlagSaveError | null, editorOpen: boolean): boolean {
+  return !!error && !!error.field && error.field !== 'enabled' && editorOpen;
+}
+
+/**
+ * The API's message for `field`, while that field still reads as it was
+ * submitted; once the operator edits the field the local check takes over.
+ * With no submitted draft (the error predates this editor) the message shows.
+ */
+export function serverFieldError(error: FlagSaveError | null, field: EditorField, submitted: FlagDraft | null, draft: FlagDraft): string | null {
+  if (!error || error.field !== field) return null;
+  if (submitted && submitted[field] !== draft[field]) return null;
+  return error.message;
 }
 
 /* --------------------------------------------------------- live effect */

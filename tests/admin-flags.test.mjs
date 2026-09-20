@@ -321,6 +321,16 @@ test('the page makes exactly the two contract calls as staff, re-reads capabilit
   assert.match(page, /const CAPABILITIES_KEY = \['system', 'capabilities'\] as const;/, 'the same key AdminSystem reads');
   assert.match(page, /mapFlagError\(parseApiError\(e\), name\)/);
   assert.match(page, /if \(mapped\.kind === 'not-found'\) setUnregistered/);
+  // A field error the open editor cannot show (enabled, or the editor is closed) still toasts.
+  assert.match(page, /if \(!readsInline\(mapped, expandedRef\.current === name\)\) toast\.error/);
+  // Only a form save closes the editor; a switch toggle leaves an open draft alone.
+  assert.match(page, /if \(isFormPatch\(patch\)\) setExpanded\(\(current\) => \(current === name \? null : current\)\);/);
+  // A fresh GET clears the FLAG_NOT_FOUND lock for any name it returns.
+  assert.match(page, /\}, \[flags\.data, flags\.dataUpdatedAt\]\);/);
+  assert.match(page, /const next = new Set\(\[\.\.\.prev\]\.filter\(\(name\) => !names\.has\(name\)\)\);/);
+  // Refresh stays focusable while fetching.
+  assert.doesNotMatch(page, /disabled=\{flags\.isFetching/);
+  assert.match(page, /aria-busy=\{refreshing \|\| undefined\}/);
 
   // A stays-false flag asks first.
   assert.match(page, /const decision = staysFalseDecision\(name\);/);
@@ -345,5 +355,53 @@ test('the table is prop-driven and imports nothing the Node loader cannot read',
   assert.match(table, /maxLength=\{NOTE_MAX\}/);
   assert.match(table, /aria-expanded=\{expanded\}/);
   assert.match(table, /aria-controls=\{editorId\}/);
-  assert.match(table, /<th scope="colgroup" colSpan=\{COLUMNS\}/);
+  assert.match(table, /<th scope="rowgroup" colSpan=\{COLUMNS\}/, 'the group heading heads rows, not columns');
+  // The switch stays focusable during a PUT; rows are never dimmed (12 px text would fall under 4.5:1).
+  assert.match(table, /busy=\{pending\}/);
+  assert.doesNotMatch(table, /opacity-70/);
+  // The percentage unit is in the copy, not a detached trailing adornment.
+  assert.doesNotMatch(table, /trailing=/);
+  // The editor is not remounted on row values; it compares seed and row instead.
+  assert.doesNotMatch(table, /key=\{`\$\{row\.name\}:/);
+  assert.match(table, /const changedUnderneath = rolloutChanged\(seed, row\);/);
+  assert.match(table, /serverFieldError\(error, field, submitted, draft\)/);
+});
+
+/* ------------------------------------------------ editor and row helpers */
+
+test('readsInline: only a field the open editor shows reads inline; enabled and a closed editor are the row\'s', () => {
+  const invalid = (field) => ({ kind: 'invalid', field, message: 'x', retryAfterSec: null });
+  assert.equal(flags.readsInline(invalid('allowlist'), true), true);
+  assert.equal(flags.readsInline(invalid('percentage'), true), true);
+  assert.equal(flags.readsInline(invalid('note'), true), true);
+  assert.equal(flags.readsInline(invalid('allowlist'), false), false, 'editor closed: the row shows it');
+  assert.equal(flags.readsInline(invalid('enabled'), true), false, 'the editor never shows enabled');
+  assert.equal(flags.readsInline(invalid(null), true), false, 'row-level');
+  assert.equal(flags.readsInline(null, true), false);
+});
+
+test('serverFieldError: the API\'s message stays only while the field still reads as submitted', () => {
+  const err = { kind: 'invalid', field: 'allowlist', message: 'Allowlist entries must be 24-character hex user ids, at most 200.', retryAfterSec: null };
+  const sent = { percentage: '25', allowlist: 'nope', note: '' };
+  assert.equal(flags.serverFieldError(err, 'allowlist', sent, sent), err.message);
+  assert.equal(flags.serverFieldError(err, 'allowlist', sent, { ...sent, allowlist: ID_A }), null, 'edited: the local check takes over');
+  assert.equal(flags.serverFieldError(err, 'allowlist', sent, { ...sent, note: 'other field edited' }), err.message, 'another field does not clear it');
+  assert.equal(flags.serverFieldError(err, 'percentage', sent, sent), null, 'not that field');
+  assert.equal(flags.serverFieldError(err, 'allowlist', null, sent), err.message, 'no submit recorded: the message shows');
+  assert.equal(flags.serverFieldError(null, 'allowlist', sent, sent), null);
+});
+
+test('isFormPatch and rolloutChanged: a switch-only body is not the form\'s; only percentage, allowlist and note count as changed underneath', () => {
+  assert.equal(flags.isFormPatch({ enabled: true }), false);
+  assert.equal(flags.isFormPatch({}), false);
+  assert.equal(flags.isFormPatch({ percentage: 10 }), true);
+  assert.equal(flags.isFormPatch({ enabled: true, note: 'x' }), true);
+  const seed = row({ percentage: 25, allowlist: [ID_A], note: 'a' });
+  assert.equal(flags.rolloutChanged(seed, seed), false);
+  assert.equal(flags.rolloutChanged(seed, row({ ...seed, enabled: true, updatedAt: '2026-09-20T12:00:00.000Z' })), false, 'a switch save is not a rollout change');
+  assert.equal(flags.rolloutChanged(seed, row({ ...seed, percentage: 50 })), true);
+  assert.equal(flags.rolloutChanged(seed, row({ ...seed, allowlist: [ID_A, ID_B] })), true);
+  assert.equal(flags.rolloutChanged(seed, row({ ...seed, allowlist: [ID_A.toUpperCase()] })), false, 'allowlist compared as a case-insensitive set');
+  assert.equal(flags.rolloutChanged(seed, row({ ...seed, note: 'a ' })), false, 'note compared trimmed');
+  assert.equal(flags.rolloutChanged(seed, row({ ...seed, note: 'b' })), true);
 });

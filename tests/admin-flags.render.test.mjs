@@ -73,7 +73,8 @@ test('the table lists every registry group plus the unknown group, names, notes,
     assert.ok(at > last, `${title} appears after the previous group`);
     last = at;
   }
-  assert.match(html, /<th scope="colgroup" colSpan="6"/);
+  assert.match(html, /<th scope="rowgroup" colSpan="6"/);
+  assert.doesNotMatch(html, /opacity-70/, 'rows are not dimmed; the badge and "No controls" already say it');
 
   // Rows and their controls.
   assert.match(html, /data-flag="live"/);
@@ -107,7 +108,8 @@ test('the table lists every registry group plus the unknown group, names, notes,
   // Public read column from GET /api/capabilities.
   assert.match(html, /On<span class="sr-only"> for a signed-out reader<\/span>/);
   assert.match(html, /Off<span class="sr-only"> for a signed-out reader<\/span>/);
-  assert.match(html, /aria-label="Not reported by GET \/api\/capabilities"/);
+  assert.match(html, /<span aria-hidden="true">—<\/span><span class="sr-only">Not reported by GET \/api\/capabilities<\/span>/);
+  assert.doesNotMatch(html, /aria-label="Not reported by GET/, 'aria-label on a role-less span is not announced');
 
   // Edit buttons are keyboard-reachable and named.
   assert.match(html, /aria-expanded="false" aria-controls="flag-editor-live"/);
@@ -132,7 +134,9 @@ test('an open editor renders the percentage input, the allowlist and note textar
   assert.match(html, /<button[^>]*type="submit"[^>]*disabled[^>]*>(?:<span[^>]*>)*Save changes/, 'nothing changed yet');
   assert.match(html, /Nothing changed yet\./);
   assert.match(html, />Cancel</);
-  assert.match(html, /Signed-out readers see it only at 100\./);
+  assert.match(html, /Signed-out readers see it only at 100 %\./);
+  assert.doesNotMatch(html, /<span class="text-xs text-text-3">%<\/span>/, 'no adornment detached from the 8 rem field');
+  assert.doesNotMatch(html, /This flag changed while you were editing/, 'a fresh editor matches its row');
 });
 
 test('the API\'s field error reads inline on its field; a row-level error reads beside the switch', () => {
@@ -144,11 +148,28 @@ test('the API\'s field error reads inline on its field; a row-level error reads 
   assert.match(html, /aria-invalid="true"/);
   assert.match(html, /role="alert"[^>]*>[\s\S]*?Allowlist entries must be 24-character hex user ids, at most 200\./);
   assert.match(html, /role="alert" class="mt-1\.5 text-xs text-danger">Rate limited\. Try again in 42 s\./);
+  assert.equal((html.match(/Allowlist entries must be 24-character hex user ids/g) || []).length, 1, 'inline only while the editor is open');
+
+  // With the editor closed the same field error has no inline home, so it reads beside the row.
+  const closed = render(ROWS, { features: {}, expanded: null, errors });
+  assert.match(closed, /data-flag="programs"[\s\S]*?role="alert" class="mt-1\.5 text-xs text-danger">Allowlist entries must be 24-character hex user ids, at most 200\./);
+  assert.doesNotMatch(closed, /data-testid="admin-flag-editor"/);
 });
 
-test('a pending row disables its switch; an unregistered row (FLAG_NOT_FOUND) loses its controls', () => {
+test('a field error on `enabled` reads beside the switch, editor open or closed: the switch sent it and the editor never shows it', () => {
+  const errors = { live: { kind: 'invalid', field: 'enabled', message: 'Enabled must be true or false.', retryAfterSec: null } };
+  for (const expanded of [null, 'live']) {
+    const html = render(ROWS, { features: {}, expanded, errors });
+    assert.match(html, /data-flag="live"[\s\S]*?role="alert" class="mt-1\.5 text-xs text-danger">Enabled must be true or false\./, `expanded=${expanded}`);
+    assert.equal((html.match(/Enabled must be true or false\./g) || []).length, 1, 'once');
+  }
+});
+
+test('a pending row keeps its switch focusable but busy; an unregistered row (FLAG_NOT_FOUND) loses its controls', () => {
   const pending = render(ROWS, { features: {}, pending: new Set(['live']) });
-  assert.match(pending, /role="switch" aria-checked="true" aria-label="Enable live" disabled/);
+  assert.match(pending, /role="switch" aria-checked="true" aria-label="Enable live" aria-busy="true"/);
+  assert.doesNotMatch(pending, /aria-label="Enable live" aria-busy="true" disabled/, 'disabling would throw keyboard focus to body');
+  assert.match(pending, /role="switch" aria-checked="true" aria-label="Enable programs" class="[^"]*cursor-pointer/, 'other rows are untouched');
   const gone = render(ROWS, { features: {}, unregistered: new Set(['trendingReview']) });
   assert.doesNotMatch(gone, /aria-label="Enable trendingReview"/);
   assert.match(gone, /data-flag="trendingReview"[\s\S]*?Not registered on this API build/);
