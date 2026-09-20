@@ -47,6 +47,7 @@ import {
   UserPlus,
   Users,
   Utensils,
+  Droplet, Trophy,
 } from './icons';
 
 export { notificationHref } from '../lib/notificationCopy';
@@ -60,6 +61,8 @@ type Page = {
 
 /** Copy lives in lib/notificationCopy.ts (keyed on the API enum); this maps its glyph names to icons. */
 const GLYPH_ICON: Record<NotificationGlyph, IconComponent> = {
+  droplet: Droplet,
+  trophy: Trophy,
   heart: Heart,
   comment: MessageCircle,
   'user-plus': UserPlus,
@@ -121,7 +124,7 @@ function NotificationRow({
   // Security, system and account rows have no human actor: the API sets
   // `sender` to the user themselves, which used to render "<Your name> Your
   // password was changed." with your own avatar, linking to your own profile.
-  const system = isSystemNotification(n.type);
+  const system = isSystemNotification(n.type) || copy.family === 'system';
 
   const items: MenuItem[] = [
     ...(unread ? [{ label: 'Mark as read', icon: <Check size={18} />, onSelect: onRead, disabled: busy }] : []),

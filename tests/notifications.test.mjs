@@ -222,3 +222,22 @@ test('offline.html runs under script-src self and is not precached', () => {
   assert.doesNotMatch(vite, /includeAssets:\s*\[[^\]]*'offline\.html'/s, 'offline.html must not be in includeAssets');
   assert.match(vite, /'offline\.html',\s*'offline\.js'/s);
 });
+
+test('session, recap, return-loop and badge rows read and route like the app', async () => {
+  const copy = await import('../src/lib/notificationCopy.ts');
+  assert.equal(copy.notificationCopy('session_invite').text, 'invited you to train together');
+  assert.equal(copy.notificationCopy('session_invite').family, 'people');
+  for (const type of ['session_summary', 'weekly_recap', 'monthly_recap', 'welcome_note', 'first_week_checkin', 'hydration_reminder', 'dormancy_touch', 'achievement_earned']) {
+    assert.equal(copy.notificationCopy(type).family, 'system', `${type} shows no sender prefix`);
+    assert.notEqual(copy.notificationCopy(type).text, 'sent you an update', `${type} has its own copy`);
+  }
+  const session = { type: 'session_invite', data: { kind: 'session', sessionId: '6aad635402be1805f4b9ef72', senderId: '6aad635402be1805f4b9ef73' } };
+  assert.equal(copy.notificationHref(session), '/session/6aad635402be1805f4b9ef72');
+  assert.equal(copy.notificationHref({ type: 'session_summary', data: { sessionId: '6aad635402be1805f4b9ef72' } }), '/session/6aad635402be1805f4b9ef72');
+  assert.equal(copy.notificationHref({ type: 'weekly_recap', data: { kind: 'recap', recapId: '6aad635402be1805f4b9ef74' } }), '/recaps/6aad635402be1805f4b9ef74');
+  assert.equal(copy.notificationHref({ type: 'achievement_earned', data: { kind: 'achievement', achievementId: 'x' } }), '/achievements');
+  assert.equal(copy.notificationHref({ type: 'hydration_reminder', data: {} }), '/health/water');
+  assert.equal(copy.notificationHref({ type: 'first_week_checkin', data: {} }), '/workouts');
+  assert.equal(copy.notificationHref({ type: 'welcome_note', data: {} }), '/');
+  assert.equal(copy.notificationHref({ type: 'dormancy_touch', data: {} }), '/');
+});

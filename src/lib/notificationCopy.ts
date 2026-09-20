@@ -43,12 +43,26 @@ export const NOTIFICATION_TYPES = [
   'system',
   'security',
   'account',
+  'session_invite',
+  'session_starting',
+  'session_started',
+  'session_cancelled',
+  'session_summary',
+  'weekly_recap',
+  'monthly_recap',
+  'welcome_note',
+  'first_week_checkin',
+  'hydration_reminder',
+  'dormancy_touch',
+  'achievement_earned',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 /** Which small glyph sits on the avatar. Resolved to an icon component by the page. */
 export type NotificationGlyph =
+  | 'droplet'
+  | 'trophy'
   | 'heart'
   | 'comment'
   | 'user-plus'
@@ -104,6 +118,20 @@ const ACTIVITY: Record<NotificationType, NotificationCopy> = {
   gym_member_joined: { text: 'joined your gym community', glyph: 'building', family: 'people' },
   gym_membership_update: { text: 'updated your gym membership', glyph: 'building', family: 'people' },
   // No actor: the server supplies `message`; these are the fallbacks.
+  // Together sessions (services/sessionJobs.js): the host is the sender; rows link to /session/:sessionId.
+  session_invite: { text: 'invited you to train together', glyph: 'users', family: 'people' },
+  session_starting: { text: 'is about to start a session', glyph: 'dumbbell', family: 'people' },
+  session_started: { text: 'started a session', glyph: 'dumbbell', family: 'people' },
+  session_cancelled: { text: 'cancelled a session', glyph: 'users', family: 'people' },
+  session_summary: { text: 'Your session is saved.', glyph: 'dumbbell', family: 'system' },
+  // Recaps and the return loop (services/recaps.js, services/returnLoopJobs.js): the member is the sender, so no name prefix.
+  weekly_recap: { text: 'Your weekly recap is ready.', glyph: 'clipboard', family: 'system' },
+  monthly_recap: { text: 'Your monthly recap is ready.', glyph: 'clipboard', family: 'system' },
+  welcome_note: { text: 'Welcome to Vybe.', glyph: 'bell', family: 'system' },
+  first_week_checkin: { text: 'A check-in from Vybe.', glyph: 'dumbbell', family: 'system' },
+  hydration_reminder: { text: 'Time for some water.', glyph: 'droplet', family: 'system' },
+  dormancy_touch: { text: 'Your place is saved whenever you are ready.', glyph: 'bell', family: 'system' },
+  achievement_earned: { text: 'You earned a badge.', glyph: 'trophy', family: 'system' },
   system: { text: 'Vybe has an update for you.', glyph: 'bell', family: 'system' },
   security: { text: 'There was a security event on your account.', glyph: 'shield', family: 'system' },
   account: { text: 'Your account was updated.', glyph: 'settings', family: 'system' },
@@ -181,6 +209,15 @@ export function notificationHref(n: NotificationLike): string | null {
   if (type.startsWith('meal_plan_') || type.startsWith('weekly_plan_')) return '/meals/plans';
   if (type === 'new_workout_plan' || type.startsWith('workout_plan_')) return '/workouts';
   if (type.startsWith('gym_')) return '/communities';
+
+  // Together sessions carry { kind: 'session', sessionId, senderId } (services/sessionJobs.js routingData).
+  const sessionId = idOf(d.sessionId);
+  if (sessionId && type.startsWith('session_')) return `/session/${sessionId}`;
+  // Return-loop touches and badges name their destination by type; they carry no entity id worth a deep link.
+  if (type === 'achievement_earned') return '/achievements';
+  if (type === 'hydration_reminder') return '/health/water';
+  if (type === 'first_week_checkin') return '/workouts';
+  if (type === 'welcome_note' || type === 'dormancy_touch') return '/';
 
   // weekly_recap / monthly_recap rows carry { kind: 'recap', recapId, recapKind,
   // periodKey, userId } with the member as sender; the recap viewer is the
