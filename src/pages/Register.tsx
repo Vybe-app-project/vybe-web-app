@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth';
 import { postLoginTarget, type FromLocation } from '../lib/authRedirect';
 import { registerInviteLine } from '../lib/invites';
 import { rememberPendingInvite } from '../lib/pendingInvite';
+import { signupLocale } from '../lib/signupLocale';
 import {
   clearRegisterDraft,
   markWelcomePending,
@@ -330,6 +331,7 @@ export default function Register() {
     }
 
     setBusy(true);
+    const locale = signupLocale();
     try {
       // A dedicated client is used so the pre-token (not the session token)
       // is sent as the bearer credential.
@@ -341,6 +343,12 @@ export default function Register() {
           fullName: fullName.trim(),
           password,
           fcmTokens: [],
+          // The API resolves settings.units from this once, at account creation
+          // (US, LR and MM give imperial; every other region gives metric; a
+          // region-less or malformed tag leaves units unset so the device
+          // fallback still applies). Sent as-is and omitted when the browser
+          // has no language, because unset is meaningfully different from a guess.
+          ...(locale ? { locale } : {}),
         },
         {
           headers: {

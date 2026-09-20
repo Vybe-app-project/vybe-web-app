@@ -328,7 +328,7 @@ test('the landing is a public route before the guards, calls the one preview end
   const reg = read('src/pages/Register.tsx');
   assert.match(reg, /registerInviteLine\(new URLSearchParams\(location\.search\)\.get\('invite'\)\)/);
   assert.match(reg, /data-testid="register-invite-code"/);
-  assert.match(reg, /email: trimmedEmail,\s*username: trimmedUsername,\s*fullName: fullName\.trim\(\),\s*password,\s*fcmTokens: \[\],\s*\}/, 'the register body is unchanged');
+  assert.match(reg, /email: trimmedEmail,\s*username: trimmedUsername,\s*fullName: fullName\.trim\(\),\s*password,\s*fcmTokens: \[\],[\s\S]*?\.\.\.\(locale \? \{ locale \} : \{\}\),\s*\}/, 'the register body carries the API fields plus the sign-up locale, and nothing invented');
 
   // The route snapshot is re-pinned when the API lands; until then the contract audit lists the preview call as unmatched.
   const snapshot = JSON.parse(read('contracts/backend-routes.json'));

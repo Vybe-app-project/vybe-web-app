@@ -515,7 +515,8 @@ if (!PLAYWRIGHT) {
       await page.waitForURL((url) => url.pathname === '/');
       const created = requests.filter((r) => r.key === 'POST /api/auth/register-password');
       assert.equal(created.length, 1);
-      assert.deepEqual(Object.keys(created[0].body).sort(), ['email', 'fcmTokens', 'fullName', 'password', 'username'], 'no consent field: the API writes the rows itself');
+      const bodyKeys = Object.keys(created[0].body).filter((k) => k !== 'locale').sort();
+      assert.deepEqual(bodyKeys, ['email', 'fcmTokens', 'fullName', 'password', 'username'], 'no consent field: the API writes the rows itself');
       assert.equal(created[0].headers['x-platform'], 'web');
       // The new account's rows exist server-side, so the first check is clear and the welcome sheet is what opens.
       await page.getByRole('dialog', { name: /Welcome to Vybe, Sam/ }).waitFor();

@@ -578,7 +578,7 @@ test('the code travels through sign-up in the tab and is offered once on the wel
   assert.match(reg, /rememberPendingInvite\(sessionStorage, new URLSearchParams\(location\.search\)\.get\('invite'\)\)/);
   assert.match(reg, /registerInviteLine\(new URLSearchParams\(location\.search\)\.get\('invite'\)\)/, 'pinned by tests/invite-landing.test.mjs');
   assert.match(reg, /data-testid="register-invite-code"/);
-  assert.match(reg, /email: trimmedEmail,\s*username: trimmedUsername,\s*fullName: fullName\.trim\(\),\s*password,\s*fcmTokens: \[\],\s*\}/, 'the register body is unchanged: the API redeems, never the sign-up');
+  assert.match(reg, /email: trimmedEmail,\s*username: trimmedUsername,\s*fullName: fullName\.trim\(\),\s*password,\s*fcmTokens: \[\],[\s\S]*?\.\.\.\(locale \? \{ locale \} : \{\}\),\s*\}/, 'the register body carries the sign-up locale but no invite field: the API redeems, never the sign-up');
   assert.doesNotMatch(reg, /inviteCode|invitedBy/, 'no invented register field');
 
   const sheet = read('src/pages/WelcomeSheet.tsx');
