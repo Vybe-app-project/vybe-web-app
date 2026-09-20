@@ -14,19 +14,21 @@ import {
   ErrorState,
   IconButton,
   Menu,
-  PageHeader,
   Section,
   Skeleton,
   SkeletonRow,
   SkeletonText,
-  StatGrid,
-  StatTile,
   formatStat,
   humanize,
   useToast,
 } from './ui';
 import { Activity, Clock, Dumbbell, Flame, Layers, Plus, Trash } from './icons';
-import { AddWorkoutPicker, LikeButton, PlanModal, planMenu, type PlanEntry, type WorkoutPlan } from './Workouts';
+import { RouteSheet } from '../components/RouteSheet';
+import { planMenu } from './Workouts';
+import { LikeButton, MetaList } from './workouts/cards';
+import { fetchPlan, type PlanEntry, type WorkoutPlan } from './workouts/model';
+import { AddWorkoutPicker } from './workouts/planPickers';
+import { TRAIN, useSheetClose, useSheetNav } from './workouts/sheet';
 
 type PlanEnvelope = { success?: boolean; data?: WorkoutPlan };
 
@@ -39,14 +41,6 @@ function PlanSkeleton() {
           <Skeleton className="h-6 w-20 rounded-xs" />
           <Skeleton className="h-6 w-24 rounded-xs" />
         </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="card p-4">
-            <Skeleton className="h-3 w-1/2" />
-            <Skeleton className="mt-3 h-8 w-2/3" />
-          </div>
-        ))}
       </div>
       <div className="space-y-2">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -61,8 +55,9 @@ const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const dayLabel = (day: number) => (day >= 1 && day <= 7 ? `Day ${day} · ${DAY_NAMES[day - 1]}` : `Day ${day}`);
 
 /**
- * A workout plan, week by week. Owners edit it here: add sessions to a week
- * and day, take them out again, rename, change the length, or delete the plan.
+ * /workouts/plans/:planId — a workout plan, week by week, as a sheet over the
+ * page that opened it. Owners schedule sessions into a week and day here and
+ * take them out again; renaming and the length live at /workouts/plans/:planId/edit.
  */
 export default function WorkoutPlanDetail() {
   const { planId = '' } = useParams();
@@ -70,21 +65,14 @@ export default function WorkoutPlanDetail() {
   const qc = useQueryClient();
   const toast = useToast();
   const { user } = useAuth();
-  const [editOpen, setEditOpen] = useState(false);
+  const { open, state } = useSheetNav();
+  const close = useSheetClose(TRAIN.tab('plans'));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<PlanEntry | null>(null);
 
   const queryKey = ['workout-plan', planId];
-  const { data: plan, isLoading, isError, error, refetch } = useQuery({
-    queryKey,
-    queryFn: async (): Promise<WorkoutPlan> => {
-      const { data } = await api.get<PlanEnvelope>(`/workouts/plan/single-plan/${planId}`);
-      if (!data?.data) throw new Error('Plan not found');
-      return data.data;
-    },
-    enabled: Boolean(planId),
-  });
+  const { data: plan, isLoading, isError, error, refetch } = useQuery({ queryKey, queryFn: () => fetchPlan(planId), enabled: Boolean(planId) });
 
   const isOwn = Boolean(user && plan?.createdBy && plan.createdBy._id === user._id);
   const liked = Boolean(user && (plan?.likes ?? []).some((id) => String(id) === user._id));
@@ -153,7 +141,7 @@ export default function WorkoutPlanDetail() {
       toast.success('Plan deleted');
       qc.removeQueries({ queryKey });
       qc.invalidateQueries({ queryKey: ['workouts', 'plans'] });
-      navigate('/workouts?tab=plans', { replace: true, viewTransition: true });
+      navigate(TRAIN.tab('plans'), { replace: true, viewTransition: true });
     },
     onError: (e) => toast.error(errMsg(e, 'Could not delete plan')),
   });
@@ -180,17 +168,15 @@ export default function WorkoutPlanDetail() {
 
   if (isLoading) {
     return (
-      <>
-        <PageHeader title="Workout plan" back="/workouts?tab=plans" />
+      <RouteSheet title="Workout plan" onClose={close}>
         <PlanSkeleton />
-      </>
+      </RouteSheet>
     );
   }
 
   if (isError || !plan) {
     return (
-      <>
-        <PageHeader title="Workout plan" back="/workouts?tab=plans" />
+      <RouteSheet title="Workout plan" onClose={close}>
         <ErrorState
           error={error}
           title="Plan not found"
@@ -200,13 +186,13 @@ export default function WorkoutPlanDetail() {
               <Button variant="primary" onClick={() => void refetch()}>
                 Try again
               </Button>
-              <Button variant="secondary" onClick={() => navigate('/workouts?tab=plans', { viewTransition: true })}>
+              <Button variant="secondary" onClick={close}>
                 Back to plans
               </Button>
             </div>
           }
         />
-      </>
+      </RouteSheet>
     );
   }
 
@@ -218,43 +204,34 @@ export default function WorkoutPlanDetail() {
   const menu = planMenu(plan, {
     isOwn,
     toast,
-    onEdit: () => setEditOpen(true),
+    onEdit: () => open(TRAIN.editPlan(plan._id)),
     onAddWorkout: () => setPickerOpen(true),
     onDelete: () => setConfirmDelete(true),
   });
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title={plan.title}
-        back="/workouts?tab=plans"
-        actions={
-          <>
-            <LikeButton liked={liked} count={(plan.likes ?? []).length} disabled={like.isPending} onToggle={() => like.mutate()} />
-            {isOwn ? (
-              <Button variant="primary" icon={<Plus size={18} />} onClick={() => setPickerOpen(true)}>
-                Add workout
-              </Button>
-            ) : null}
-            <Menu items={menu} label={`More options for ${plan.title}`} />
-          </>
-        }
-        mobileActions={<Menu items={menu} label={`More options for ${plan.title}`} />}
-      />
+    <RouteSheet title={plan.title} onClose={close}>
+    <div className="space-y-section">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {plan.level ? <Badge>{humanize(plan.level)}</Badge> : null}
+          {plan.durationWeeks ? (
+            <Badge tone="neutral">
+              {plan.durationWeeks} {plan.durationWeeks === 1 ? 'week' : 'weeks'}
+            </Badge>
+          ) : null}
+          {plan.isPremade ? <Badge tone="info">Premade</Badge> : null}
+          {isOwn && plan.isPublic === false ? <Badge>Private</Badge> : null}
+        </div>
+        <div className="flex items-center gap-1">
+          <LikeButton liked={liked} count={(plan.likes ?? []).length} disabled={like.isPending} onToggle={() => like.mutate()} />
+          <Menu items={menu} label={`More options for ${plan.title}`} />
+        </div>
+      </div>
 
       <Card padded={false} className="overflow-hidden">
         {cover ? <img src={cover} alt="" className="aspect-[16/9] w-full object-cover md:aspect-auto md:h-64" /> : null}
         <div className="space-y-4 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {plan.level ? <Badge>{humanize(plan.level)}</Badge> : null}
-            {plan.durationWeeks ? (
-              <Badge tone="neutral">
-                {plan.durationWeeks} {plan.durationWeeks === 1 ? 'week' : 'weeks'}
-              </Badge>
-            ) : null}
-            {plan.isPremade ? <Badge tone="accent">Premade</Badge> : null}
-            {isOwn && plan.isPublic === false ? <Badge>Private</Badge> : null}
-          </div>
           {plan.goal ? <p className="text-md font-semibold text-text-1">{plan.goal}</p> : null}
           {plan.description ? <p className="prose-measure text-base text-text-1">{plan.description}</p> : null}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
@@ -278,19 +255,21 @@ export default function WorkoutPlanDetail() {
         </div>
       </Card>
 
-      <StatGrid columns={4}>
-        <StatTile label="Weeks" value={formatStat(plan.durationWeeks ?? weeks.length)} icon={<Layers size={18} />} tone="brand" />
-        <StatTile label="Sessions" value={formatStat(sessions.length)} icon={<Dumbbell size={18} />} hint={sessions.length ? undefined : 'None scheduled'} />
-        <StatTile label="Planned time" value={minutes ? formatStat(minutes) : '–'} unit={minutes ? 'min' : undefined} icon={<Clock size={18} />} hint={minutes ? undefined : 'Not specified'} />
-        <StatTile label="Burn" value={kcal ? formatStat(kcal) : '–'} unit={kcal ? 'kcal' : undefined} icon={<Flame size={18} />} tone={kcal ? 'accent' : 'neutral'} hint={kcal ? undefined : 'Not specified'} />
-      </StatGrid>
+      <MetaList
+        items={[
+          { icon: <Layers size={14} />, label: `${formatStat(plan.durationWeeks ?? weeks.length)} ${(plan.durationWeeks ?? weeks.length) === 1 ? 'week' : 'weeks'}` },
+          sessions.length > 0 && { icon: <Dumbbell size={14} />, label: `${formatStat(sessions.length)} ${sessions.length === 1 ? 'session' : 'sessions'}` },
+          minutes > 0 && { icon: <Clock size={14} />, label: `${formatStat(minutes)} min planned` },
+          kcal > 0 && { icon: <Flame size={14} />, label: `${formatStat(kcal)} kcal` },
+        ]}
+      />
 
       <Section
         title="Schedule"
         description={sessions.length ? 'Week by week. Open a session to see the exercises or log it.' : undefined}
         action={
           isOwn ? (
-            <Button variant="secondary" icon={<Plus size={18} />} onClick={() => setPickerOpen(true)}>
+            <Button variant="primary" icon={<Plus size={18} />} onClick={() => setPickerOpen(true)}>
               Add workout
             </Button>
           ) : undefined
@@ -302,7 +281,7 @@ export default function WorkoutPlanDetail() {
             icon={<Dumbbell size={26} />}
             title="No sessions yet"
             message={isOwn ? 'Add your first workout and place it on a week and day.' : 'This plan has no workouts scheduled.'}
-            action={isOwn ? { label: 'Add workout', onClick: () => setPickerOpen(true), icon: <Plus size={18} /> } : undefined}
+            action={isOwn ? { label: 'Add workout', onClick: () => setPickerOpen(true), icon: <Plus size={18} />, variant: 'secondary' } : undefined}
           />
         ) : (
           <div className="space-y-3">
@@ -320,6 +299,7 @@ export default function WorkoutPlanDetail() {
                       <li key={`${entry.week}-${entry.day}-${entry.workout?._id}`} className="flex items-center gap-1 pr-2">
                         <Link
                           to={`/workouts/${entry.workout?._id}`}
+                          state={state}
                           viewTransition
                           className="flex min-h-12 min-w-0 flex-1 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2"
                         >
@@ -354,7 +334,6 @@ export default function WorkoutPlanDetail() {
         )}
       </Section>
 
-      <PlanModal open={editOpen} editing={plan} onClose={() => setEditOpen(false)} />
       <AddWorkoutPicker plan={plan} open={pickerOpen} onClose={() => setPickerOpen(false)} />
       <ConfirmDialog
         open={Boolean(pendingRemove)}
@@ -377,5 +356,6 @@ export default function WorkoutPlanDetail() {
         onConfirm={() => remove.mutate()}
       />
     </div>
+    </RouteSheet>
   );
 }

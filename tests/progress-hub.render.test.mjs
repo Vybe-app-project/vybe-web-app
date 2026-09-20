@@ -82,21 +82,23 @@ test('TrainingCalendar: one cell per day with data-level and a spoken label; tra
   assert.equal(count(html, 'data-level="1"'), 1);
   assert.equal(count(html, 'data-level="2"'), 1);
   assert.equal(count(html, 'data-level="3"'), 1);
-  assert.ok(html.includes('href="/workouts/logs#day-2026-09-03"'), 'a trained day links to its log section');
-  assert.ok(html.includes('href="/workouts/logs#day-2026-09-07"'));
+  assert.ok(html.includes('href="/workouts/history#day-2026-09-03"'), 'a trained day links to its History section');
+  assert.ok(html.includes('href="/workouts/history#day-2026-09-07"'));
   assert.ok(!html.includes('#day-2026-09-02'), 'an empty day is not a link');
   assert.ok(html.includes('<span class="sr-only">1 Sep, 1 session</span>'));
   assert.ok(html.includes('<span class="sr-only">2 Sep, 0 sessions</span>'));
   assert.ok(html.includes('3 Sep, 2 sessions'));
   assert.ok(html.includes('0 · 1 · 2 · 3+ sessions'), 'the legend');
   assert.ok(html.includes('3 training days · 7 sessions'));
-  assert.ok(html.includes('bg-brand/45') && html.includes('bg-brand/75') && html.includes('bg-brand"'), 'the brand ramp');
-  // Colour is not the only cue: rest days are hollow on the hairline, every trained level carries the brand-text outline.
+  // The ramp is the ink token at three opacities: the accent colour is for the one action on a screen, never a fill.
+  assert.ok(html.includes('bg-text-1/35') && html.includes('bg-text-1/65') && html.includes('bg-text-1"'), 'the neutral ramp');
+  assert.ok(!html.includes('bg-brand'), 'no accent fill on the heatmap');
+  // Colour is not the only cue: rest days are hollow on the hairline, every trained level carries the ink outline.
   assert.match(html, /data-level="0"[^>]*class="[^"]*border-line[^"]*bg-surface-2/);
-  assert.doesNotMatch(html, /data-level="0"[^>]*class="[^"]*border-brand-text/);
-  assert.match(html, /data-level="1"[^>]*class="[^"]*border-brand-text[^"]*bg-brand\/45/);
-  assert.match(html, /data-level="2"[^>]*class="[^"]*border-brand-text[^"]*bg-brand\/75/);
-  assert.match(html, /data-level="3"[^>]*class="[^"]*border-brand-text[^"]*bg-brand"/);
+  assert.doesNotMatch(html, /data-level="0"[^>]*class="[^"]*border-text-2/);
+  assert.match(html, /data-level="1"[^>]*class="[^"]*border-text-2[^"]*bg-text-1\/35/);
+  assert.match(html, /data-level="2"[^>]*class="[^"]*border-text-2[^"]*bg-text-1\/65/);
+  assert.match(html, /data-level="3"[^>]*class="[^"]*border-text-2[^"]*bg-text-1"/);
   assert.equal(count(html, 'pointer-coarse:size-5'), 10 + 4 + count(html, 'aria-hidden="true" class="size-3'), 'every cell and legend swatch grows under a coarse pointer');
   assert.ok(!html.includes('Sep 2025'), 'no range label unless the caller passes one');
   const labelled = render(h(TrainingCalendar, { range, days, rangeLabel: '1 Sep 2026–10 Sep 2026', now: NOW }));

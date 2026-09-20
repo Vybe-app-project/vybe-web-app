@@ -283,7 +283,7 @@ test('Notifications has one Mark-all-read control per viewport and PageHeader ho
 });
 
 test('page-level "+" actions use the quiet icon button; the Log circle is the only primary in the bar and shows a plus', () => {
-  for (const file of ['Health', 'Challenges', 'ProgressPhotos', 'Water', 'Meals', 'WorkoutLogs', 'Stories']) {
+  for (const file of ['Health', 'Challenges', 'ProgressPhotos', 'Water', 'Meals', 'WorkoutHistory', 'Stories']) {
     const src = read(`src/pages/${file}.tsx`);
     const mobile = src.slice(src.indexOf('mobileActions='), src.indexOf('mobileActions=') + 400);
     assert.doesNotMatch(mobile, /variant="primary"/, `${file}: header IconButton must not be a filled square beside the Log circle`);

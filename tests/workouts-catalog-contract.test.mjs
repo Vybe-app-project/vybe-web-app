@@ -12,10 +12,18 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
+// The Train hub was split for the gym-first redesign: the hub page, the editor routes, the pickers and the
+// data model live in src/pages/workouts/*; History replaced the workout log.
 const workouts = read('src/pages/Workouts.tsx');
+const editor = read('src/pages/workouts/WorkoutEditor.tsx');
+const planEditor = read('src/pages/workouts/PlanEditor.tsx');
+const exerciseRows = read('src/pages/workouts/exerciseDraft.tsx');
+const cover = read('src/pages/workouts/CoverPicker.tsx');
+const pickers = read('src/pages/workouts/planPickers.tsx');
+const model = read('src/pages/workouts/model.ts');
 const detail = read('src/pages/WorkoutDetail.tsx');
 const planDetail = read('src/pages/WorkoutPlanDetail.tsx');
-const logs = read('src/pages/WorkoutLogs.tsx');
+const logs = read('src/pages/WorkoutHistory.tsx');
 const challenges = read('src/pages/Challenges.tsx');
 const achievements = read('src/pages/Achievements.tsx');
 const settings = read('src/pages/Settings.tsx');
@@ -26,17 +34,17 @@ const app = read('src/App.tsx');
 
 test('editing a workout saves through the full update route and waits for the echoed document', () => {
   // PATCH /workouts/:id was a privacy toggle that answered 200 and dropped every other field.
-  assert.match(workouts, /api\.put<SaveEnvelope>\(`\/workouts\/update\/\$\{editing\._id\}`, payload\)/);
-  assert.doesNotMatch(workouts, /api\.patch[^\n]*`\/workouts\/\$\{editing\._id\}`/);
-  assert.match(workouts, /The server did not confirm the save/);
-  assert.match(workouts, /saved\.title !== payload\.title/);
+  assert.match(editor, /api\.put<SaveEnvelope>\(`\/workouts\/update\/\$\{editing\._id\}`, payload\)/);
+  assert.doesNotMatch(editor, /api\.patch[^\n]*`\/workouts\/\$\{editing\._id\}`/);
+  assert.match(editor, /The server did not confirm the save/);
+  assert.match(editor, /saved\.title !== payload\.title/);
   // Plans edit through their own full update route.
-  assert.match(workouts, /api\.put<PlanEnvelope>\(`\/workouts\/update-plan\/\$\{editing\._id\}`, payload\)/);
+  assert.match(planEditor, /api\.put<PlanEnvelope>\(`\/workouts\/update-plan\/\$\{editing\._id\}`, payload\)/);
 });
 
 test('exercise durations are seconds on screen and in the editor', () => {
-  assert.match(workouts, /label="Seconds"/);
-  assert.doesNotMatch(workouts, /label="Minutes"/);
+  assert.match(exerciseRows, /label="Seconds"/);
+  assert.doesNotMatch(exerciseRows, /label="Minutes"/);
   assert.match(detail, /secondsParts\(ex\.duration\)/);
   assert.doesNotMatch(detail, /formatStat\(ex\.duration\), 'min'/);
   assert.match(logs, /formatSeconds\(ex\.duration\)/);
@@ -46,7 +54,7 @@ test('exercise durations are seconds on screen and in the editor', () => {
 test('plans have an editor: schedule, remove, edit, delete, and a canonical route', () => {
   assert.match(app, /path=["']workouts\/plans\/:planId["']/);
   assert.match(app, /import\('\.\/pages\/WorkoutPlanDetail'\)/);
-  assert.match(workouts, /`\/workouts\/plans\/add-workout\/\$\{planId\}`/);
+  assert.match(pickers, /`\/workouts\/plans\/add-workout\/\$\{planId\}`/);
   assert.match(planDetail, /`\/workouts\/plans\/\$\{planId\}\/workouts\/\$\{workoutId\}`/);
   assert.match(planDetail, /label=\{`Remove \$\{entry\.workout\?\.title \?\? 'session'\} from week/);
   assert.match(workouts, /const href = `\/workouts\/plans\/\$\{plan\._id\}`/);
@@ -59,21 +67,22 @@ test('plans have an editor: schedule, remove, edit, delete, and a canonical rout
   assert.match(planDetail, /humanize\(plan\.level\)/);
   // A program card with sessions stays openable: the title links, and so does "View schedule".
   assert.match(workouts, /aria-label=\{`View schedule for \$\{plan\.title\}`\}/);
-  assert.match(workouts, /<Link to=\{href\} viewTransition className="relative z-\[2\][^"]*">\s*\{plan\.title\}/);
+  // The title link carries the sheet background so the plan opens over the hub on desktop.
+  assert.match(workouts, /<Link to=\{href\} state=\{state\} viewTransition className="relative z-\[2\][^"]*">\s*\{plan\.title\}/);
 });
 
 test('premade and community programs are browsable and lists page', () => {
-  assert.match(workouts, /'\/workouts\/commom\/workouts\/plan\/all\/premade\/fetch'/);
-  assert.match(workouts, /'\/workouts\/plans\/filter\/all\/workouts\/feed\/filter\/feed'/);
+  assert.match(model, /'\/workouts\/commom\/workouts\/plan\/all\/premade\/fetch'/);
+  assert.match(model, /'\/workouts\/plans\/filter\/all\/workouts\/feed\/filter\/feed'/);
   assert.match(workouts, /\{ key: 'programs', label: 'Programs'/);
   assert.match(workouts, /useInfiniteQuery\(/);
   assert.match(workouts, /Load more/);
 });
 
 test('workouts can carry a cover photo uploaded through the owned-media route', () => {
-  assert.match(workouts, /uploadImage\(file, 'posts'\)/);
-  assert.match(workouts, /payload\.image = \{ uri: form\.imageKey \}/);
-  assert.match(workouts, /payload\.image = null/);
+  assert.match(cover, /uploadImage\(file, 'posts'\)/);
+  assert.match(editor, /payload\.image = \{ uri: form\.imageKey \}/);
+  assert.match(editor, /payload\.image = null/);
 });
 
 test('workout comments can be deleted and timestamps use the compact style', () => {

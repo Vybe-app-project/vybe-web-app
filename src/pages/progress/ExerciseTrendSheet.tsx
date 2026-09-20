@@ -3,8 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../../lib/api';
-import { EmptyState, ErrorState, Modal, Skeleton, Tabs, VIZ, chartTheme, humanize } from '../ui';
-import { Activity } from '../icons';
+import { ChartEmpty, ErrorState, Modal, Skeleton, Tabs, VIZ, chartTheme, humanize } from '../ui';
 import {
   PROGRESS_STRINGS,
   RECORD_TYPES,
@@ -164,7 +163,7 @@ export function ExerciseTrendSheet({
           ) : history.isError ? (
             <ErrorState error={history.error} title={PROGRESS_STRINGS.cardError} onRetry={() => history.refetch()} />
           ) : shownPoints.length < 2 ? (
-            <EmptyState size="sm" level={3} icon={<Activity size={24} />} title={PROGRESS_STRINGS.trendEmpty} message={shownPoints.length === 1 ? `One so far: ${formatTrendValue(series, shownPoints[0].value)} on ${shownPoints[0].label}.` : undefined} />
+            <ChartEmpty height={160} label={shownPoints.length === 1 ? `${PROGRESS_STRINGS.trendEmpty} One so far: ${formatTrendValue(series, shownPoints[0].value)} on ${shownPoints[0].label}.` : PROGRESS_STRINGS.trendEmpty} />
           ) : (
             <div className="h-52 w-full" role="img" aria-label={trendDescription(shownSeries)}>
               <ResponsiveContainer width="100%" height="100%">

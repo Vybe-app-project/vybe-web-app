@@ -3,7 +3,7 @@ import { MUSCLE_ROWS_COLLAPSED, PROGRESS_STRINGS, muscleRows, type ProgressMuscl
 
 /**
  * "Muscle groups": sets per group this period with a bar against the busiest
- * group (brand token, never a colour scale), "+n secondary" for assisting
+ * group (ink token, never a colour scale or the action colour), "+n secondary" for assisting
  * work, the top eight until "Show all". The API already counts custom and
  * unknown exercises under Other; the footnote says so. Pure: the open state
  * lives with the caller.
@@ -40,7 +40,7 @@ export function MuscleGroups({
             <li key={row.group} className="grid grid-cols-[minmax(0,7rem)_1fr_auto] items-center gap-3 text-sm">
               <span className="truncate text-text-1">{row.name}</span>
               <div className="h-1.5 overflow-hidden rounded-full bg-surface-3" aria-hidden="true">
-                <div className="h-full rounded-full bg-brand" style={{ width: `${Math.round(row.fraction * 100)}%` }} />
+                <div className="h-full rounded-full bg-text-1" style={{ width: `${Math.round(row.fraction * 100)}%` }} />
               </div>
               <span className="whitespace-nowrap text-right tabular-nums text-text-1">
                 {row.sets}
