@@ -151,7 +151,8 @@ test('small fixes: duplicate reports, phone input size, preload hints, shared fo
   assert.match(css, /@media \(max-width: 767px\) \{\s*\.input-base \{ font-size: 16px; \}\s*\}/);
 
   const vite = read('vite.config.ts');
-  assert.match(vite, /modulePreload: false/);
+  // Hints on, polyfill off (Instagram rebuild, Q0): without hints a hub's chunk graph loaded one depth per round trip.
+  assert.match(vite, /modulePreload: \{ polyfill: false \}/);
 
   const ui = read('src/components/ui.tsx');
   assert.match(ui, /export function useFocusTrap\(/);
