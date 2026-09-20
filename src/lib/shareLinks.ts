@@ -5,9 +5,11 @@
  * target to its canonical route here. Keep the type list and the id rule in
  * step with the mobile module.
  */
+import { normaliseInviteCode } from './invites';
+
 export const SHARE_TYPES = [
   'post', 'profile', 'meal', 'meal-template', 'meal-plan', 'workout', 'workout-plan', 'gym', 'community', 'live', 'challenge', 'hashtag',
-  'session',
+  'session', 'invite',
 ] as const;
 export type ShareType = (typeof SHARE_TYPES)[number];
 
@@ -27,6 +29,7 @@ export const SHARE_LABEL: Record<ShareType, string> = {
   challenge: 'challenge',
   hashtag: 'hashtag',
   session: 'session',
+  invite: 'invite',
 };
 
 export function isShareType(value: unknown): value is ShareType {
@@ -49,10 +52,16 @@ const MEAL_SHARE_TOKEN = /^[a-f0-9]{64}$/i;
  * workout plans, live streams, challenges and hashtags (mobile docs/deep-links.md):
  * a hashtag travels as the bare tag (a leading # is tolerated) and lands on the
  * search page; a challenge opens the Challenges page with its id in the query,
- * which the page may use once it has a detail view.
+ * which the page may use once it has a detail view. An invite travels as its
+ * 8-character code (lib/invites.ts: any case, VYBE- prefix and dashes
+ * tolerated) and lands on /join/<CODE>, the same page the universal link opens.
  */
 export function shareDestination(type: string | null, id: string | null): string | null {
   if (!isShareType(type) || typeof id !== 'string') return null;
+  if (type === 'invite') {
+    const code = normaliseInviteCode(id);
+    return code ? `/join/${code}` : null;
+  }
   const entity = type === 'hashtag' ? id.replace(/^#/, '') : id;
   if (!SHARE_ENTITY_ID.test(entity)) return null;
   const q = encodeURIComponent(entity);
@@ -87,9 +96,10 @@ export function shareDestination(type: string | null, id: string | null): string
   }
 }
 
-/** Deep link the installed app registers on both platforms (vybe://open). */
+/** Deep link the installed app registers on both platforms (vybe://open). An invite id is the normalised code. */
 export function appDeepLink(type: ShareType, id: string): string {
-  return `vybe://open?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`;
+  const entity = type === 'invite' ? normaliseInviteCode(id) ?? id : id;
+  return `vybe://open?type=${encodeURIComponent(type)}&id=${encodeURIComponent(entity)}`;
 }
 
 /**

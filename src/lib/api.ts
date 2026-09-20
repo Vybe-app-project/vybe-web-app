@@ -160,8 +160,11 @@ const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'
  * token in its URL; a hard navigation would race that POST, copy the token
  * into /login?next=, and re-POST it after sign-in. The token store is still
  * cleared, useAuth settles to signed out, and the page offers sign-in itself.
+ * The invite landing (/join/<code>) is the same shape: the preview needs no
+ * session, the page handles signed-in and signed-out itself, and a recipient
+ * with an ended session should read the invite, not a "session ended" prompt.
  */
-const NO_SESSION_PATHS = ['/unsubscribe', '/email/unsubscribe'];
+const NO_SESSION_PATHS = ['/unsubscribe', '/email/unsubscribe', '/join'];
 
 const pathIsUnder = (pathname: string, paths: readonly string[]): boolean =>
   paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));

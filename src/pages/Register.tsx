@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { API_BASE, api, errMsg, installClientInterceptors, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { postLoginTarget, type FromLocation } from '../lib/authRedirect';
+import { registerInviteLine } from '../lib/invites';
 import {
   clearRegisterDraft,
   markWelcomePending,
@@ -163,6 +164,9 @@ export default function Register() {
   const setUser = useAuth((s) => s.setUser);
   const from = (location.state as FromState)?.from;
   const target = postLoginTarget({ from, next: new URLSearchParams(location.search).get('next') });
+  // A person who arrived from /join/<code> keeps the code in view. The API
+  // redeems it in the app after sign-up; the register request is unchanged.
+  const inviteLine = registerInviteLine(new URLSearchParams(location.search).get('invite'));
 
   // Progress survives a reload or a trip to Mail for the code (see authDrafts).
   const [draft] = useState(() => readRegisterDraft(sessionStorage));
@@ -408,6 +412,11 @@ export default function Register() {
       footer={<LegalLine />}
     >
       <Steps step={step} />
+      {inviteLine ? (
+        <p role="note" data-testid="register-invite-code" className="tabular mt-4 rounded-md border border-line bg-surface-1 px-3 py-2 text-sm text-text-2">
+          {inviteLine}
+        </p>
+      ) : null}
 
       <div className="mt-6 space-y-4">
         {info ? <Callout tone="brand">{info}</Callout> : null}
