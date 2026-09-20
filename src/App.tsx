@@ -49,6 +49,8 @@ const OpenHandoff = lazyPage(null, () => import('./pages/OpenHandoff'));
 const SessionGate = lazyPage(null, () => import('./pages/SessionInvite'));
 const NotFound = lazyPage(null, () => import('./pages/NotFound'));
 const EmailUnsubscribe = lazyPage(null, () => import('./pages/EmailUnsubscribe'));
+// Invite landing (/join/<code>): the public preview for a recipient who may not have the app; redemption is the app's.
+const JoinInvite = lazyPage(null, () => import('./pages/JoinInvite'));
 
 const Workouts = lazyPage('/workouts', () => import('./pages/Workouts'));
 const WorkoutDetail = lazyPage(null, () => import('./pages/WorkoutDetail'));
@@ -277,6 +279,10 @@ export default function App() {
             {/* Share links from the mobile app (and older web links): /open.html?type=…&id=… */}
             <Route path="/open.html" element={<OpenHandoff />} />
             <Route path="/open" element={<OpenHandoff />} />
+
+            {/* Invite landing: /join/<code> is the universal link an inviter shares (AASA /join/*); /join?code= is the hand-built form. Public: GET /api/public/invites/:code needs no account, and the code is shown in plain text for the app. */}
+            <Route path="/join/:code" element={<JoinInvite />} />
+            <Route path="/join" element={<JoinInvite />} />
 
             {/* Admin: the three signed-out surfaces sit outside RequireAdmin */}
             <Route path="/admin/login" element={<AdminLogin />} />

@@ -120,6 +120,8 @@ const INLINE_ERROR_PREFIXES = [
   '/food/search',
   '/email/unsubscribe',
   '/unsubscribe',
+  // The /join/<code> landing renders its 429 in its own "Too many requests" block.
+  '/public/invites',
 ];
 
 export function isInlineErrorSurface(url: string | null | undefined): boolean {
