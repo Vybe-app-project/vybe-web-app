@@ -1,10 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { PublicShell } from '../components/PublicShell';
-import { SHARE_LABEL, appDeepLink, isShareType, shareDestination } from '../lib/shareLinks';
+import { SHARE_LABEL, appDeepLink, isHandheld, isShareType, shareDestination } from '../lib/shareLinks';
 import { ButtonLink, buttonClass } from './ui';
-
-const isHandheld = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 /**
  * /open.html?type=…&id=… — the landing page for links shared from the app.
