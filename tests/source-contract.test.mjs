@@ -336,7 +336,7 @@ test('search: every API bucket renders, the typeahead is keyboard-navigable and 
   assert.match(search, /subtitle="People, posts, hashtags, workouts, meals and challenges across Vybe\."/);
   assert.match(read('src/components/Layout.tsx'), /placeholder="Search people, posts, workouts, meals…"/);
   // Challenges honours the deep link the search results use.
-  assert.match(read('src/pages/Challenges.tsx'), /useState<string \| null>\(\(\) => searchParams\.get\('open'\)\)/);
+  assert.match(read('src/pages/Challenges.tsx'), /useState<string \| null>\(\(\) => openedFromLink\)/);
 
   // Two clear affordances became one: the native WebKit cancel button is hidden.
   const css = read('src/styles.css');

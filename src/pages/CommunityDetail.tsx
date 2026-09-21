@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { type UseQueryResult, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { type User, useAuth } from '../lib/auth';
+import { useReportModal } from './Report';
 import {
   ACCEPTED_IMAGE_TYPES,
   MAX_UPLOAD_BYTES,
@@ -73,7 +74,7 @@ import {
   useToast,
   type MenuItem,
 } from './ui';
-import { Activity, Calendar, Check, Clock, Dashboard, ExternalLink, Image as ImageIcon, Info, Lock, MapPin, MessageCircle, Plus, Shield, Trash, Users, X } from './icons';
+import { Activity, Calendar, Check, Clock, Dashboard, ExternalLink, Flag, Image as ImageIcon, Info, Lock, MapPin, MessageCircle, Plus, Shield, Trash, Users, X } from './icons';
 
 /* ------------------------------------------------------------------ the tab strip under the header */
 
@@ -487,6 +488,7 @@ function MemberRow({
 /* ------------------------------------------------------------------ events */
 
 function EventRow({ event }: { event: CommunityEvent }) {
+  const { report, reportModal } = useReportModal();
   const when = eventWhen(event);
   const going = typeof event.goingCount === 'number' && event.goingCount > 0 ? event.goingCount : null;
   const spots = typeof event.spotsLeft === 'number' && event.spotsLeft > 0 ? event.spotsLeft : null;
@@ -513,6 +515,8 @@ function EventRow({ event }: { event: CommunityEvent }) {
           </div>
         ) : null}
       </div>
+      <Menu items={[{ label: 'Report event', icon: <Flag size={18} />, danger: true, onSelect: () => report({ targetType: 'event', targetId: event._id, targetLabel: 'event' }) }]} label={`Options for ${event.title || 'this session'}`} size={40} className="-mr-2 shrink-0" />
+      {reportModal}
     </li>
   );
 }

@@ -1485,13 +1485,13 @@ export default function Challenges() {
   const [categoryFilter, setCategoryFilter] = useState<'' | ChallengeCategory>('');
   const [myStatus, setMyStatus] = useState<MyStatus>('active');
   const [createOpen, setCreateOpen] = useState(false);
-  // Search results and shared links land on /challenges?open=<id>.
+  // Search results and shared links land on /challenges?open=<id>; links minted before 2026-09-21 used ?challenge=<id>.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [detailId, setDetailId] = useState<string | null>(() => searchParams.get('open'));
+  const openedFromLink = searchParams.get('open') ?? searchParams.get('challenge');
+  const [detailId, setDetailId] = useState<string | null>(() => openedFromLink);
   useEffect(() => {
-    const open = searchParams.get('open');
-    if (open) setDetailId(open);
-  }, [searchParams]);
+    if (openedFromLink) setDetailId(openedFromLink);
+  }, [openedFromLink]);
   const [editing, setEditing] = useState<Challenge | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Challenge | null>(null);
   const pendingHasParticipants = (pendingDelete?.participants?.length ?? 0) > 0;
@@ -1888,10 +1888,11 @@ export default function Challenges() {
         challengeId={detailId}
         onClose={() => {
           setDetailId(null);
-          if (searchParams.get('open')) {
+          if (searchParams.get('open') || searchParams.get('challenge')) {
             setSearchParams(
               (prev) => {
                 prev.delete('open');
+                prev.delete('challenge');
                 return prev;
               },
               { replace: true },

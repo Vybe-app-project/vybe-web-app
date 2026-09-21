@@ -111,7 +111,7 @@ test('Challenges.tsx shows a legacy weight-scored challenge as no longer scored 
   assert.equal((challenges.match(/onChallengeError\(e, '/g) ?? []).length, 4);
   assert.match(challenges, /if \(m\.code === CHALLENGE_TYPE_UNAVAILABLE\) invalidate\(\)/);
   // The deep link the search results use is untouched.
-  assert.match(challenges, /useState<string \| null>\(\(\) => searchParams\.get\('open'\)\)/);
+  assert.match(challenges, /useState<string \| null>\(\(\) => openedFromLink\)/);
   // aria-labels the live suites depend on are still there.
   for (const label of ['Filter by type', 'Filter by cadence', 'Filter my challenges', 'Challenge lists', 'Challenge sections']) {
     assert.match(challenges, new RegExp(`aria-label="${label}"`), label);

@@ -36,6 +36,7 @@ const Discover = lazyPage('/discover', () => import('./pages/Discover'));
 const Search = lazyPage('/search', () => import('./pages/Search'));
 const PostDetail = lazyPage(null, () => import('./pages/PostDetail'));
 const PublicPost = lazyPage(null, () => import('./pages/PublicPost'));
+const RoutineShare = lazyPage(null, () => import('./pages/RoutineShare'));
 const Profile = lazyPage('/profile', () => import('./pages/Profile'));
 const UserProfile = lazyPage(null, () => import('./pages/UserProfile'));
 const Connections = lazyPage(null, () => import('./pages/Connections'));
@@ -215,6 +216,20 @@ function PostGate() {
   return <PublicPost />;
 }
 
+/** Shared routine links (/r/<id|token>) open signed out with the public preview and wear the shell for members, who can save the routine. */
+function RoutineGate() {
+  const { user, loading } = useAuth();
+  if (loading) return <FullPageSpinner />;
+  if (user) {
+    return (
+      <Layout>
+        <RoutineShare member />
+      </Layout>
+    );
+  }
+  return <RoutineShare />;
+}
+
 /** Scroll offset per history entry (`location.key`: the same path twice in the stack keeps two positions). */
 const scrollPositions = new Map<string, number>();
 /** How many frames a restore may retry while the page grows back to the height it had. */
@@ -372,6 +387,8 @@ const ROUTE_TREE = (
 
     {/* Shared post links work signed out (public preview) and wear the shell when signed in */}
     <Route path="/p/:postId" element={<PostGate />} />
+    {/* Shared routine links: the API mints FRONTEND_URL/r/<token>; a public routine also travels by its 24-hex id */}
+    <Route path="/r/:idOrToken" element={<RoutineGate />} />
 
     {/* Together-session invite landing: works signed out (sign-in hand-off), wears the shell when signed in. The param is a session id or the API's invite token. */}
     <Route path="/session/:id" element={<SessionGate />} />

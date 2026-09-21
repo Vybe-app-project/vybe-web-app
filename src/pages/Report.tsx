@@ -4,7 +4,8 @@ import { api, errMsg } from '../lib/api';
 import { Button, Modal, RadioGroup, Textarea, humanize, useToast } from './ui';
 import { Shield } from './icons';
 
-export const REPORT_TARGET_TYPES = ['post', 'meal', 'workout', 'workout_plan', 'user'] as const;
+/** Mirrors the API's Report.TARGET_TYPES (models/Report.js); the server names the owner and resolves each target. */
+export const REPORT_TARGET_TYPES = ['post', 'meal', 'workout', 'workout_plan', 'user', 'comment', 'livestream', 'livestream_message', 'gym_community', 'gym_review', 'message', 'story', 'story_response', 'session', 'event'] as const;
 
 export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number];
 

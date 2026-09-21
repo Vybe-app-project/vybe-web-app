@@ -51,8 +51,8 @@ const MEAL_SHARE_TOKEN = /^[a-f0-9]{64}$/i;
  * page and only a plain id on the meal itself. Newer app builds also share
  * workout plans, live streams, challenges and hashtags (mobile docs/deep-links.md):
  * a hashtag travels as the bare tag (a leading # is tolerated) and lands on the
- * search page; a challenge opens the Challenges page with its id in the query,
- * which the page may use once it has a detail view. An invite travels as its
+ * search page; a challenge opens the Challenges page with its id in `?open=` (the page also
+ * accepts the older `?challenge=` links). An invite travels as its
  * 8-character code (lib/invites.ts: any case, VYBE- prefix and dashes
  * tolerated) and lands on /join/<CODE>, the same page the universal link opens.
  */
@@ -87,7 +87,7 @@ export function shareDestination(type: string | null, id: string | null): string
     case 'live':
       return `/live/${q}`;
     case 'challenge':
-      return `/challenges?challenge=${q}`;
+      return `/challenges?open=${q}`;
     case 'hashtag':
       return `/search?q=%23${q}`;
     case 'session':

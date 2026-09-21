@@ -4,6 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { formatDistanceToNowStrict } from 'date-fns';
 import { api, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useReportModal } from './Report';
 import {
   ACCEPTED_IMAGE_TYPES,
   ACCEPTED_VIDEO_TYPES,
@@ -69,6 +70,7 @@ import {
   Wow,
   X,
   type IconProps,
+  Flag,
 } from './icons';
 
 /* ------------------------------------------------------------------ types */
@@ -396,6 +398,7 @@ export function StoryViewer({
   const qc = useQueryClient();
   const toast = useToast();
   const me = useAuth((s) => s.user);
+  const { report, reportModal } = useReportModal();
   const panelRef = useRef<HTMLDivElement>(null);
   const [gi, setGi] = useState(startGroup);
   const [si, setSi] = useState(() => startStory ?? firstUnseenIndex(groups[startGroup]?.stories || [], me?._id));
@@ -603,6 +606,11 @@ export function StoryViewer({
               </IconButton>
             </>
           ) : null}
+          {!mine && me ? (
+            <IconButton label="Report story" variant="ghost" onClick={() => report({ targetType: 'story', targetId: story._id, targetLabel: 'story' })}>
+              <Flag size={20} />
+            </IconButton>
+          ) : null}
           {story.type === 'video' ? (
             <IconButton label={muted ? 'Unmute' : 'Mute'} variant="ghost" onClick={() => setMuted((m) => !m)} aria-pressed={!muted}>
               {muted ? <VolumeOff size={20} /> : <Volume size={20} />}
@@ -616,6 +624,7 @@ export function StoryViewer({
           </IconButton>
         </div>
 
+        {reportModal}
         {/* stage */}
         <div
           className="relative min-h-0 flex-1 bg-bg"

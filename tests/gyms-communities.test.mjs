@@ -241,7 +241,7 @@ test('communities have their own share type and canonical route', () => {
   // Newer app builds (mobile docs/deep-links.md, 2026-09-19) share four more kinds.
   assert.equal(share.shareDestination('workout-plan', '6aad635402be1805f4b9ef72'), '/workouts/plans/6aad635402be1805f4b9ef72');
   assert.equal(share.shareDestination('live', 'stream_1'), '/live/stream_1');
-  assert.equal(share.shareDestination('challenge', '6aad635402be1805f4b9ef72'), '/challenges?challenge=6aad635402be1805f4b9ef72');
+  assert.equal(share.shareDestination('challenge', '6aad635402be1805f4b9ef72'), '/challenges?open=6aad635402be1805f4b9ef72');
   assert.equal(share.shareDestination('hashtag', 'legday'), '/search?q=%23legday');
   assert.equal(share.shareDestination('hashtag', '#legday'), '/search?q=%23legday');
   assert.equal(share.shareDestination('hashtag', 'leg day'), null);

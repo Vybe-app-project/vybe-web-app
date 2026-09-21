@@ -69,12 +69,14 @@ function CommentRow({
   postId,
   postAuthorId,
   onReport,
+  onReportComment,
   onRemoved,
 }: {
   comment: PostComment;
   postId: string;
   postAuthorId?: string;
   onReport: (userId: string, label: string) => void;
+  onReportComment: (commentId: string) => void;
   onRemoved: (commentId: string) => void;
 }) {
   const me = useAuth((s) => s.user);
@@ -140,6 +142,7 @@ function CommentRow({
   const handle = author?.username ? `@${author.username}` : name;
 
   const items: MenuItem[] = [
+    ...(!isOwn ? ([{ label: 'Report comment', icon: <Flag size={18} />, onSelect: () => onReportComment(comment._id), danger: true }] satisfies MenuItem[]) : []),
     ...(authorId && !isOwn
       ? ([{ label: `Report ${handle}`, icon: <Flag size={18} />, onSelect: () => onReport(authorId, handle), danger: true }] satisfies MenuItem[])
       : []),
@@ -439,6 +442,7 @@ export default function PostDetail() {
                   postId={postId}
                   postAuthorId={post.author?._id}
                   onReport={(userId, label) => report({ targetType: 'user', targetId: userId, targetLabel: label })}
+                  onReportComment={(commentId) => report({ targetType: 'comment', targetId: commentId, targetLabel: 'comment' })}
                   onRemoved={onCommentRemoved}
                 />
               ))}

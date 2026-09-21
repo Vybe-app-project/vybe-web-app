@@ -63,6 +63,7 @@ import {
   useToast,
 } from './ui';
 import type { MenuItem } from './ui';
+import { useReportModal } from './Report';
 import {
   ArrowDown,
   Check,
@@ -82,6 +83,7 @@ import {
   Users,
   Video as VideoIcon,
   X,
+  Flag,
 } from './icons';
 
 /* ================================================================== types */
@@ -1243,6 +1245,7 @@ function Bubble({
   last,
   fresh,
   onDelete,
+  onReport,
   onOpenMedia,
 }: {
   message: ChatMessage;
@@ -1251,6 +1254,8 @@ function Bubble({
   last: boolean;
   fresh: boolean;
   onDelete?: (id: string, mine: boolean) => void;
+  /** Report someone else's message (the API resolves the sender as the owner). */
+  onReport?: (id: string) => void;
   onOpenMedia: (media: MessageMedia[], index: number) => void;
 }) {
   const toast = useToast();
@@ -1272,6 +1277,7 @@ function Bubble({
 
   const menuItems: MenuItem[] = [
     ...(hasText ? [{ label: 'Copy text', icon: <Copy size={18} />, onSelect: () => void copyText() } as MenuItem] : []),
+    ...(!mine && onReport ? [{ label: 'Report message', icon: <Flag size={18} />, onSelect: () => onReport(message._id), danger: true, divider: hasText } as MenuItem] : []),
     ...(onDelete
       ? [
           {
@@ -1759,6 +1765,7 @@ function Thread({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { report, reportModal } = useReportModal();
   const navigate = useNavigate();
   const online = useOnline();
   const room = target.kind === 'room' ? target.room : null;
@@ -2198,6 +2205,7 @@ function Thread({
                             last={i === item.messages.length - 1}
                             fresh={freshIds.has(m._id)}
                             onDelete={(id, mine) => setPendingDelete({ id, mine })}
+                            onReport={(id) => report({ targetType: 'message', targetId: id, targetLabel: 'message' })}
                             onOpenMedia={(items, index) => setLightbox({ items, index })}
                           />
                         ))}
@@ -2243,6 +2251,7 @@ function Thread({
         <Composer offline={!online} placeholder={isGroup ? 'Message the group' : `Message ${nameOf(peer).split(' ')[0]}`} onSend={queue} onTyping={onTyping} focusKey={threadKey} />
       )}
 
+      {reportModal}
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title={pendingDelete?.mine === false ? 'Delete for you?' : 'Delete message?'}
