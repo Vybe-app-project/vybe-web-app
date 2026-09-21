@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Card, CardHeader, DateField, Menu, Modal, Skeleton, type MenuItem } from '../ui';
 import { CalendarDays, Trash } from '../icons';
@@ -35,15 +35,23 @@ export const factLabel = (row: Pick<ShelfRow, 'facts'>, index: number): string =
 
 /* -------------------------------------------------------------------- rows */
 
+/**
+ * The row's facts on one line. Each fact is unbreakable so a value never
+ * parts from its label, and the separator is a real text node so the line
+ * still has somewhere to wrap between facts on a 390 px screen.
+ */
 function FactList({ facts }: { facts: ShelfRow['facts'] }) {
   return (
     <span className="text-text-2">
       {facts.map((fact, i) => (
-        <span key={fact.type} className={i > 0 ? 'before:px-1 before:content-["·"]' : undefined}>
-          {`${fact.label} `}
-          <span className="text-text-1">{fact.value}</span>
-          {fact.estimated ? <span className="text-text-3">{` ${PROGRESS_STRINGS.estimateMark}`}</span> : null}
-        </span>
+        <Fragment key={fact.type}>
+          {i > 0 ? <span aria-hidden="true">{' · '}</span> : null}
+          <span className="whitespace-nowrap">
+            {`${fact.label} `}
+            <span className="text-text-1">{fact.value}</span>
+            {fact.estimated ? <span className="text-text-3">{` ${PROGRESS_STRINGS.estimateMark}`}</span> : null}
+          </span>
+        </Fragment>
       ))}
     </span>
   );

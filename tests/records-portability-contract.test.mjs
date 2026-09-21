@@ -186,7 +186,9 @@ test('/workouts/import is a lazy page, a route, a ROUTES row in the train hub an
   const importIndex = layout.indexOf("pattern: '/workouts/import'");
   const paramIndex = layout.indexOf("pattern: '/workouts/:workoutId'");
   assert.ok(importIndex > 0 && importIndex < paramIndex, 'ROUTES lists /workouts/import before /workouts/:workoutId');
-  assert.match(layout, /\{ pattern: '\/workouts\/import', title: 'Import workouts', tab: 'workouts', nav: '\/workouts\/history', parent: '\/workouts\/history', hub: 'train' \}/);
+  // hideTabs on the row, not on the page: SectionTabs prefix-matches /workouts/
+  // and would underline Library, and a row-level hide never costs a layout shift.
+  assert.match(layout, /\{ pattern: '\/workouts\/import', title: 'Import workouts', tab: 'workouts', nav: '\/workouts\/history', parent: '\/workouts\/history', hub: 'train', hideTabs: true \}/);
   // A lazyPage that registers a preload must be routed, which the line above is.
   assert.ok(app.includes("<Route path=\"workouts/import\""));
   // Entry points: the History header menu, the History empty state, Settings › Data.
@@ -196,6 +198,8 @@ test('/workouts/import is a lazy page, a route, a ROUTES row in the train hub an
   assert.match(history, /<ButtonLink to=\{IMPORT_PATH\} variant="ghost" icon=\{<Upload size=\{18\} \/>\}>/);
   assert.match(dataExport, /const IMPORT_PATH = '\/workouts\/import';/);
   assert.match(dataExport, /const IMPORT_ROW = 'Import from Strong or Hevy';/);
+  assert.match(importPage, /back="\/workouts\/history"/, 'the back chevron goes to History');
+  assert.doesNotMatch(importPage, /hideSectionTabs/, 'the row hides the tabs, so the first frame never draws them');
   // Nothing outside the sheet list is a sheet route; the import is an ordinary page.
   assert.doesNotMatch(app, /path: 'workouts\/import'/);
 });

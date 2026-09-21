@@ -577,6 +577,14 @@ export const SHELF_ORDER: readonly RecordType[] = [
   'mostReps',
 ];
 
+/**
+ * How many facts one row shows. Three keeps the line readable at 390 px and
+ * is what the row is for — the best set, the estimate it implies and the best
+ * volume; SHELF_ORDER puts those first, so "Most reps" survives only for a
+ * movement that has nothing else (a bodyweight lift).
+ */
+export const SHELF_FACTS_MAX = 3;
+
 /** Short labels for a dense row; the long titles stay on the trend sheet. */
 export const SHELF_LABELS: Record<RecordType, string> = {
   heaviestWeightKg: 'Best set',
@@ -648,6 +656,7 @@ export function shelfRows(
       });
     }
     if (!facts.length) continue;
+    facts.length = Math.min(facts.length, SHELF_FACTS_MAX);
     const newest = facts.reduce((best, fact) => (Date.parse(fact.date) > Date.parse(best) ? fact.date : best), facts[0].date);
     rows.push({ exerciseId: id, name: exercise.name || id, facts, when: shortDate(newest, now) });
   }

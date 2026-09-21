@@ -130,7 +130,7 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/workouts/session/finish', title: 'Session', tab: 'workouts', nav: '/workouts', parent: '/workouts', hub: 'train' },
   { pattern: '/workouts/history', title: 'History', tab: 'workouts', nav: '/workouts/history', hub: 'train' },
   { pattern: '/workouts/progress', title: 'Progress', tab: 'workouts', nav: '/workouts/progress', hub: 'train' },
-  { pattern: '/workouts/import', title: 'Import workouts', tab: 'workouts', nav: '/workouts/history', parent: '/workouts/history', hub: 'train' },
+  { pattern: '/workouts/import', title: 'Import workouts', tab: 'workouts', nav: '/workouts/history', parent: '/workouts/history', hub: 'train', hideTabs: true },
   { pattern: '/challenges', title: 'Challenges', tab: 'workouts', nav: '/challenges', hub: 'train' },
   { pattern: '/achievements', title: 'Achievements', tab: 'workouts', nav: '/achievements', hub: 'train' },
   // Detail and editor routes (RouteSheet): a sheet over the parent on lg+, a page with a back chevron on phones.

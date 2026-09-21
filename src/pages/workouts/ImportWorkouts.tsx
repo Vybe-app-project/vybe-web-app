@@ -111,11 +111,14 @@ export function previewFacts(preview: ImportPreview): string[] {
  */
 export function skippedRows(preview: ImportPreview): Array<{ key: string; count: number; reason: string }> {
   const rows: Array<{ key: string; count: number; reason: string }> = [];
+  const one = (n: number) => Math.round(n) === 1;
   if (preview.alreadyImported > 0) {
-    rows.push({ key: 'already', count: preview.alreadyImported, reason: 'already on Vybe from an earlier import — these are left as they are' });
+    const n = preview.alreadyImported;
+    rows.push({ key: 'already', count: n, reason: `${one(n) ? 'session is' : 'sessions are'} already on Vybe from an earlier import and will be left alone` });
   }
   if (preview.invalid > 0) {
-    rows.push({ key: 'invalid', count: preview.invalid, reason: 'hold no sets, time or distance we can store' });
+    const n = preview.invalid;
+    rows.push({ key: 'invalid', count: n, reason: `${one(n) ? 'session holds' : 'sessions hold'} no sets, time or distance we can store` });
   }
   return rows;
 }
@@ -167,16 +170,16 @@ export function MappingTable({
   return (
     <ul className="divide-y divide-line" data-testid="import-mapping">
       {rows.map((row) => (
-        <li key={row.name} className="flex items-center gap-3 py-2.5 text-sm">
+        <li key={row.name} className="flex flex-col gap-1 py-2.5 text-sm sm:flex-row sm:items-center sm:gap-3">
           <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold text-text-1">{row.name}</p>
-            <p className="t-meta truncate">
+            <p className="font-semibold text-text-1">{row.name}</p>
+            <p className="t-meta">
               {row.target ? row.target : COPY.custom}
               {` · ${plural(row.sets, 'set')}`}
             </p>
           </div>
           {!row.resolved && (onChoose || onKeepCustom) ? (
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="-ml-2 flex shrink-0 items-center gap-1 sm:ml-0">
               {onChoose ? (
                 <Button variant="link" size="sm" onClick={() => onChoose(row.name)}>
                   {COPY.choose}
@@ -189,7 +192,7 @@ export function MappingTable({
               ) : null}
             </div>
           ) : (
-            <Check size={16} className="shrink-0 text-text-3" aria-hidden="true" />
+            <Check size={16} className="hidden shrink-0 text-text-3 sm:block" aria-hidden="true" />
           )}
         </li>
       ))}
@@ -295,6 +298,10 @@ export default function ImportWorkouts() {
 
   return (
     <div className="space-y-section">
+      {/* A focused task with a back chevron. The ROUTES row carries hideTabs,
+          not this page: SectionTabs prefix-matches /workouts/ and would
+          underline Library, and hiding the row from the route keeps it off the
+          first frame instead of removing it after paint. */}
       <PageHeader title={COPY.title} subtitle={COPY.subtitle} back="/workouts/history" />
 
       <input
@@ -383,7 +390,7 @@ export default function ImportWorkouts() {
                     {skippedRows(data).map((row) => (
                       <li key={row.key} className="py-2 text-sm text-text-2">
                         <span className="font-semibold text-text-1">{formatStat(row.count)}</span>
-                        {` ${row.count === 1 ? 'session' : 'sessions'} ${row.reason}.`}
+                        {` ${row.reason}.`}
                       </li>
                     ))}
                   </ul>

@@ -80,10 +80,11 @@ test('shelfRows: the records the payload carries, in reading order, with the ids
   const squat = rows[0];
   assert.deepEqual(
     squat.facts.map((fact) => `${fact.label} ${fact.value}`),
-    ['Best set 105 kg × 5', '1RM 122.5 kg', 'Best volume 525 kg', 'Most reps 12 reps'],
+    ['Best set 105 kg × 5', '1RM 122.5 kg', 'Best volume 525 kg'],
   );
   assert.equal(squat.facts[1].estimated, true, 'only Epley is an estimate');
   assert.equal(squat.facts[0].estimated, false);
+  assert.equal(squat.facts.length, lib.SHELF_FACTS_MAX, 'three facts keep the row readable at 390 px');
   assert.equal(squat.when, '5 Sep', 'the newest of the row’s records');
   // The id the maintenance routes parse: <workoutId>:<exerciseId>:<setId> for a set.
   assert.equal(records.recordIdOf('barbell-squat', squat.facts[0]), `${WORKOUT}:barbell-squat:s1`);
@@ -219,8 +220,12 @@ test('the preview reads the dry-run payload: counts, range, and what the commit 
       ['invalid', 1],
     ],
   );
-  // The API reports counts, never lines: neither row pretends to name one.
-  for (const row of skipped) assert.ok(row.reason.length > 0);
+  // The API reports counts, never lines: neither row pretends to name one, and
+  // each sentence agrees with its own count.
+  assert.match(skipped[0].reason, /^sessions are already on Vybe/);
+  assert.match(skipped[1].reason, /^session holds no sets/);
+  assert.match(importPage.skippedRows({ ...PREVIEW, alreadyImported: 1, invalid: 2 })[0].reason, /^session is already on Vybe/);
+  assert.match(importPage.skippedRows({ ...PREVIEW, alreadyImported: 1, invalid: 2 })[1].reason, /^sessions hold no sets/);
   assert.deepEqual(importPage.skippedRows({ ...PREVIEW, alreadyImported: 0, invalid: 0 }), [], 'no zeros');
   assert.equal(importPage.newSessions({ ...PREVIEW, workouts: 1, alreadyImported: 5, invalid: 0 }), 0, 'never negative');
 });
