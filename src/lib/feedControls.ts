@@ -28,7 +28,7 @@
  * scripts/audit-api-contracts.cjs and tests/feed-modes-contract.test.mjs pin
  * each one against contracts/backend-routes.json.
  */
-import { api } from './api';
+import { API_BASE, api, clientHeaders, tokenStore } from './api';
 import { apiErrorDetails } from './apiError';
 import { useFeature } from './capabilities';
 import { FEED_PAGE_SIZE, feedPageParams, type FeedPageParam } from './feedLogic';
@@ -151,6 +151,34 @@ export const FEED_REASONS = [
 ] as const;
 export type FeedReason = (typeof FEED_REASONS)[number];
 
+/**
+ * What each reason says on the card (P8c, "Why you’re seeing this"): one
+ * `.t-meta` line under the header, at most two reasons joined by a middle
+ * dot. The words are the ranker's facts in plain speech — `audition` is the
+ * every-fifth-slot new post shown to fewer than 20 people, `popular` is
+ * engagement inside the 7-day window — and nothing here claims more than
+ * `services/feedRanker.js` computed.
+ */
+export const FEED_REASON_COPY: Readonly<Record<FeedReason, string>> = Object.freeze({
+  followed: 'You follow them',
+  gym: 'Trains at your gym',
+  trained_together: 'You’ve trained together',
+  popular: 'Popular this week',
+  new_member: 'Joined Vybe recently',
+  audition: 'New post, shown to a few people first',
+  crew: 'From your Crew',
+  recent: 'Posted recently',
+});
+
+export const REASON_LINE_MAX = 2;
+
+/** The reason line for one post, or null when the server sent none it can name. Unknown slugs are skipped, never printed. */
+export function reasonLine(reasons: readonly string[] | null | undefined): string | null {
+  if (!reasons?.length) return null;
+  const known = [...new Set(reasons)].filter((r): r is FeedReason => (FEED_REASONS as readonly string[]).includes(r));
+  return known.length ? known.slice(0, REASON_LINE_MAX).map((r) => FEED_REASON_COPY[r]).join(' · ') : null;
+}
+
 export async function fetchFeed(mode: FeedMode, pageParam: FeedPageParam, limit = FEED_PAGE_SIZE): Promise<FeedResponse> {
   const { data } = await api.get<FeedResponse>('/posts/feed', { params: feedModeParams(mode, pageParam, limit) });
   return data;
@@ -253,12 +281,50 @@ export async function unsnoozeAuthor(userId: string): Promise<boolean> {
 
 /** `POST /feed/impressions` — 1 to 50 sightings; items in a mode the flag does not allow are dropped, not refused. */
 export const IMPRESSION_BATCH_MAX = 50;
+/**
+ * The client posts well under the server's cap (P8c): a batch goes every
+ * 5 s or at 20 sightings, whichever comes first, and on pagehide.
+ */
+export const IMPRESSION_FLUSH_MAX = 20;
+export const IMPRESSION_FLUSH_MS = 5_000;
+/** A card was seen once at least half of it has been on screen for a second. */
+export const IMPRESSION_VISIBLE_RATIO = 0.5;
+export const IMPRESSION_DWELL_MS = 1_000;
 
+/**
+ * One sighting. `mode` is the server's own word — `foryou` or `explore`;
+ * Latest never logs and the server drops it — `reqId` names the ranked
+ * window the post came from and `seenAt` is the device's clock (the server
+ * clamps a future one to now).
+ */
 export type FeedImpression = { post: string; mode: 'foryou' | 'explore'; reqId?: string; seenAt?: string };
 
 export async function recordImpressions(items: readonly FeedImpression[]): Promise<number> {
   const { data } = await api.post<{ accepted: number }>('/feed/impressions', { items: items.slice(0, IMPRESSION_BATCH_MAX) });
   return data.accepted ?? 0;
+}
+
+/**
+ * The same POST for the moment the page is going away (pagehide, a tab
+ * hidden): axios's XHR is aborted with the document, `fetch` with
+ * `keepalive` completes after it. The bearer and the identity headers are
+ * built the way the axios interceptor builds them (see `revokeSession` in
+ * lib/api.ts, the one other keepalive call). Fire and forget: nothing waits
+ * on a sighting, and nothing is told when one is lost.
+ */
+export function recordImpressionsKeepalive(items: readonly FeedImpression[]): void {
+  const token = tokenStore.get();
+  if (!token || !items.length || typeof fetch !== 'function') return;
+  try {
+    void fetch(`${API_BASE.replace(/\/$/, '')}/feed/impressions`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { Authorization: `Bearer ${token}`, ...clientHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items.slice(0, IMPRESSION_BATCH_MAX) }),
+    }).catch(() => undefined);
+  } catch {
+    // fetch itself can throw synchronously in exotic embeds; a lost sighting is not an error.
+  }
 }
 
 /** `POST /feed/posts/:postId/partners/remove-me` — the tagged person untags themself (`composerV2`). */
