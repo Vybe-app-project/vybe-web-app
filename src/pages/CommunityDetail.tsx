@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type UseQueryResult, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { type User, useAuth } from '../lib/auth';
 import {
@@ -15,27 +15,37 @@ import {
   uploadImage,
   useDebounced,
 } from '../lib/hooks';
-import { founderIdOf, isModRole, isObjectId, membershipOf } from '../lib/gyms';
+import { communityPath, coverSourceOf, founderIdOf, isModRole, isObjectId, membershipOf } from '../lib/gyms';
 import { type GymBandGym, memberCountLabel, trainingTodayLine } from '../components/GymBand';
+import { GymHeader } from '../components/GymHeader';
 import { MapTile, osmHref } from '../components/MapTile';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { FollowButton, UserRowSkeleton } from './UserRow';
 import { ContextualInviteButton } from './InviteLinkSheet';
 import {
+  type ActiveThisWeek,
   type BandPreview,
   type Community,
   type CommunityMember,
   JoinButton,
   Pager,
+  type PublicActor,
   RoleBadge,
+  ShareButton,
+  type TrainedToday,
   VisibilityBadge,
   ago,
+  hoursLine,
   memberTotalOf,
   nameOf,
   statusOf,
   unwrapCommunity,
+  useActiveThisWeek,
   useCommunityCover,
   useJoinMutation,
+  usePlaceHours,
+  useTrainedToday,
+  zoneOf,
 } from './GymCommunity';
 import {
   Avatar,
@@ -54,8 +64,8 @@ import {
   SearchField,
   Skeleton,
   SkeletonRow,
-  SkeletonText,
   Spinner,
+  Tabs,
   Textarea,
   cx,
   formatStat,
@@ -63,38 +73,44 @@ import {
   useToast,
   type MenuItem,
 } from './ui';
-import { Calendar, Check, Clock, ExternalLink, Image as ImageIcon, Lock, MapPin, MessageCircle, Plus, Shield, Trash, Users, X } from './icons';
+import { Activity, Calendar, Check, Clock, Dashboard, ExternalLink, Image as ImageIcon, Info, Lock, MapPin, MessageCircle, Plus, Shield, Trash, Users, X } from './icons';
 
-/* ------------------------------------------------------------------ tabs on the band */
+/* ------------------------------------------------------------------ the tab strip under the header */
 
 export type GymTab = 'feed' | 'today' | 'members' | 'about';
-const GYM_TABS: { key: GymTab; label: string }[] = [
-  { key: 'feed', label: 'Feed' },
-  { key: 'today', label: 'Today' },
-  { key: 'members', label: 'Members' },
-  { key: 'about', label: 'About' },
+const GYM_TABS: { key: GymTab; label: string; Icon: typeof Dashboard }[] = [
+  { key: 'feed', label: 'Feed', Icon: Dashboard },
+  { key: 'today', label: 'Today', Icon: Activity },
+  { key: 'members', label: 'Members', Icon: Users },
+  { key: 'about', label: 'About', Icon: Info },
 ];
 export const isGymTab = (v: string | null): v is GymTab => !!v && GYM_TABS.some((t) => t.key === v);
 export const gymTabHref = (pathname: string, tab: GymTab) => (tab === 'feed' ? pathname : `${pathname}?tab=${tab}`);
 
 /**
- * Feed · Today · Members · About as real links on the band, so a tab is a URL
- * (`?tab=`) that can be shared and stepped back through. The band's CSS styles
- * `.gym-band-tab`; `aria-current` marks the active one.
+ * Feed · Today · Members · About: the gym page's one tab row, Instagram's
+ * profile strip. Each tab is a real link (`?tab=`) so a tab can be shared and
+ * stepped back through; the underline slides between them on `transform`.
+ * Icons join the labels from `sm`, where four of each fit on one line. A
+ * count rides on a tab only when it is a real integer above zero.
  */
-export function GymTabs({ pathname, active, counts }: { pathname: string; active: GymTab; counts?: Partial<Record<GymTab, string | number>> }) {
+export function GymTabs({ pathname, active, counts }: { pathname: string; active: GymTab; counts?: Partial<Record<GymTab, number>> }) {
   return (
-    <nav aria-label="Gym sections" className="contents">
-      {GYM_TABS.map((t) => {
+    <Tabs
+      aria-label="Gym sections"
+      fill
+      active={active}
+      tabs={GYM_TABS.map((t) => {
         const count = counts?.[t.key];
-        return (
-          <Link key={t.key} to={gymTabHref(pathname, t.key)} className="gym-band-tab" aria-current={t.key === active ? 'page' : undefined}>
-            {t.label}
-            {count !== undefined && count !== null && count !== '' ? <small>{typeof count === 'number' ? formatStat(count) : count}</small> : null}
-          </Link>
-        );
+        return {
+          key: t.key,
+          label: t.label,
+          icon: <t.Icon size={18} className="hidden sm:inline" aria-hidden="true" />,
+          to: gymTabHref(pathname, t.key),
+          ...(typeof count === 'number' && Number.isFinite(count) && count > 0 ? { count } : {}),
+        };
       })}
-    </nav>
+    />
   );
 }
 
@@ -162,14 +178,6 @@ const homeCommunityIdOf = (me: User | null | undefined): string | null => {
   const h = (me as { homeGym?: { community?: string | { _id?: string } | null } | null } | null)?.homeGym?.community;
   if (!h) return null;
   return typeof h === 'string' ? h : h._id || null;
-};
-
-const zoneOf = () => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
 };
 
 /** Event times are rendered in the event's own zone, never the viewer's (API.md §11b). */
@@ -633,6 +641,15 @@ export function CommunitySurface({
   });
   const todayLabel = leaderboard.data?.today?.activeMembersLabel;
 
+  // The exact figures (additive routes, 2026-09-20): who trained today and who
+  // was active this week, for anyone who may see the community. A 404 is "no
+  // figure" — the leaderboard's string then stands in for members — and a
+  // count of 0 draws nothing.
+  const activityEnabled = detail.isSuccess && !isPrivateToViewer;
+  const activeThisWeek = useActiveThisWeek(communityId, activityEnabled);
+  const trainedToday = useTrainedToday(communityId, activityEnabled);
+  const hours = usePlaceHours(community?.placeId, tab === 'about');
+
   const events = useQuery({
     queryKey: ['community', communityId, 'events', 'upcoming'],
     enabled: detail.isSuccess && tab === 'today' && !isPrivateToViewer,
@@ -749,16 +766,35 @@ export function CommunitySurface({
     },
   });
 
+  // Check in: the figures move the moment the button is tapped — today's and
+  // the week's each gain the viewer once — and are put back if the server
+  // refuses. The leaderboard and both routes are re-read either way.
+  const activityKeys = [
+    ['community', communityId, 'trained-today'],
+    ['community', communityId, 'active-this-week'],
+  ] as const;
   const checkIn = useMutation({
     mutationFn: async () => {
       const { data } = await api.post(`/gyms/community/${communityId}/check-ins`, {});
       return data as { message?: string };
     },
+    onMutate: async () => {
+      const prev = activityKeys.flatMap((key) => qc.getQueriesData<ActiveThisWeek | TrainedToday | null>({ queryKey: key }));
+      const actor: PublicActor | null = me?._id ? { _id: String(me._id), username: me.username, fullName: me.fullName, avatar: me.avatar } : null;
+      for (const key of activityKeys) qc.setQueriesData<ActiveThisWeek | TrainedToday | null>({ queryKey: key }, (old) => (old ? withCheckIn(old, actor) : old));
+      return { prev };
+    },
     onSuccess: (data) => {
       toast.success(data?.message || `Checked in at ${name}`);
-      qc.invalidateQueries({ queryKey: ['community', communityId, 'leaderboard'] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not check you in')),
+    onError: (e, _v, ctx) => {
+      for (const [key, data] of ctx?.prev || []) qc.setQueryData(key, data);
+      toast.error(errMsg(e, 'Could not check you in'));
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['community', communityId, 'leaderboard'] });
+      for (const key of activityKeys) qc.invalidateQueries({ queryKey: key });
+    },
   });
 
   const join = useJoinMutation();
@@ -767,31 +803,37 @@ export function CommunitySurface({
   const pendingCount = requests.data?.length ?? 0;
   const totalMembers = memberTotalOf(community);
 
-  const bandGym: GymBandGym | null | undefined = community
+  // The header's gym: the details payload once it lands, the card's preview
+  // meanwhile, a skeleton of the same geometry before either.
+  const headerGym: GymBandGym | null = community
     ? bandGymOf(community, cover, membership.isMember ? todayLabel : undefined)
     : preview
       ? { id: preview.id ?? communityId, name: preview.name, city: preview.city, photoUrl: preview.photoUrl }
-      : undefined;
+      : null;
+  const headerLoading = !headerGym && detail.isPending;
+  // The banner is decided from the cover's source, not its resolved URL, so a
+  // place photo still fetching does not push the page down when it arrives.
+  const banner = community ? Boolean(coverSourceOf(community)) : Boolean(preview?.photoUrl);
 
-  // One mint control per screen: the band's action. Join for strangers, "Set
-  // as my gym" for members, "Check in" once this is their gym.
-  const bandAction = community ? (
+  // One blue control per screen: the header's action. Join for strangers,
+  // "Set as my gym" for members, "Check in" once this is their gym.
+  const primaryAction = community ? (
     !membership.isMember ? (
-      <JoinButton community={community} mutation={join} size="lg" variant="primary" />
+      <JoinButton community={community} mutation={join} variant="primary" />
     ) : isHome ? (
-      <Button variant="primary" size="lg" icon={<Check size={18} />} loading={checkIn.isPending} onClick={() => checkIn.mutate()}>
+      <Button variant="primary" icon={<Check size={18} />} loading={checkIn.isPending} onClick={() => checkIn.mutate()}>
         Check in
       </Button>
     ) : (
-      <Button variant="primary" size="lg" icon={<MapPin size={18} />} loading={setHome.isPending} onClick={() => setHome.mutate()}>
+      <Button variant="primary" icon={<MapPin size={18} />} loading={setHome.isPending} onClick={() => setHome.mutate()}>
         Set as my gym
       </Button>
     )
-  ) : undefined;
+  ) : null;
 
-  const counts: Partial<Record<GymTab, string | number>> = {};
-  if (totalMembers) counts.members = totalMembers;
-  if (typeof leaderboard.data?.today?.activeMembers === 'number' && leaderboard.data.today.activeMembers > 0) counts.today = leaderboard.data.today.activeMembers;
+  // The Today tab previews its figure on the strip; members and posts already sit in the header.
+  const counts: Partial<Record<GymTab, number>> = {};
+  if ((trainedToday.data?.count ?? 0) > 0) counts.today = trainedToday.data!.count;
 
   if (notFound) {
     return (
@@ -810,20 +852,40 @@ export function CommunitySurface({
 
   return (
     <div className="space-y-section">
-      <PageHeader
-        title={name}
-        back={back}
-        hideSectionTabs
-        band={bandGym ? { variant: 'full', gym: bandGym, action: bandAction, tabs: <GymTabs pathname={pathname} active={tab} counts={counts} /> } : undefined}
-      />
+      <PageHeader title={name} back={back} hideSectionTabs />
 
-      {detail.isLoading && !preview ? (
-        <div className="space-y-4" aria-busy="true" aria-label={`Loading ${name}`}>
-          <Skeleton className="h-8 w-56" />
-          <SkeletonText lines={2} />
-          <SkeletonRow />
-          <SkeletonRow />
-        </div>
+      {/* The gym as Instagram draws an account: bled to the viewport edge (the shell centres content by
+          max-width, so the header's own gutter lines its text up with the page) and, with a photo, pulled
+          up under the top bar so the banner starts where the chrome ends. */}
+      <GymHeader
+        variant="profile"
+        gym={headerGym}
+        member={membership.isMember}
+        loading={headerLoading}
+        banner={banner}
+        stats={community ? { posts: community.stats?.totalPosts, members: totalMembers, thisWeek: activeThisWeek.data?.count } : undefined}
+        action={primaryAction}
+        secondary={community ? <ShareButton path={communityPath(communityId)} title={name} /> : null}
+        className={cx('-mx-gutter', banner && '-mt-4 lg:-mt-6')}
+      >
+        {community?.reviewState === 'pending' ? <p className="t-meta px-4 pb-2 lg:px-6">Pending review</p> : null}
+        <GymTabs pathname={pathname} active={tab} counts={counts} />
+      </GymHeader>
+
+      {headerLoading ? (
+        <>
+          <div className="-mx-gutter -mt-section flex h-11 items-center gap-1 border-b border-line px-4 lg:px-6" aria-hidden="true">
+            {GYM_TABS.map((t) => (
+              <span key={t.key} className="flex flex-1 justify-center">
+                <Skeleton className="h-3 w-14" />
+              </span>
+            ))}
+          </div>
+          <div className="space-y-4" aria-busy="true" aria-label={`Loading ${name}`}>
+            <PostCardSkeleton />
+            <PostCardSkeleton media={false} />
+          </div>
+        </>
       ) : null}
       {detail.isError && !notFound ? <ErrorState error={detail.error} onRetry={() => detail.refetch()} /> : null}
 
@@ -831,7 +893,7 @@ export function CommunitySurface({
         <>
           {membership.pending ? (
             <Callout tone="info" title="Your request is pending" icon={<Clock size={18} />}>
-              An admin reviews new members. You will get a notification either way; tap the button on the cover to cancel if you change your mind.
+              An admin reviews new members. You will get a notification either way; tap Cancel request above if you change your mind.
             </Callout>
           ) : null}
 
@@ -869,13 +931,17 @@ export function CommunitySurface({
                     <EmptyState
                       family="community"
                       title="Join to post here"
-                      message={`Nothing has been shared at ${name} yet. Members post sessions, PRs and meetups; join from the cover to be the first.`}
+                      message={`Nothing has been shared at ${name} yet. Members post sessions, PRs and meetups; join above to be the first.`}
                     />
                   )
                 ) : null}
-                {(posts.data || []).map((p) => (
-                  <PostCard key={p._id} post={p} invalidate={[['community', communityId, 'posts'], ['feed']]} />
-                ))}
+                {(posts.data?.length || 0) > 0 ? (
+                  <div>
+                    {(posts.data || []).map((p) => (
+                      <PostCard key={p._id} post={p} invalidate={[['community', communityId, 'posts'], ['feed']]} />
+                    ))}
+                  </div>
+                ) : null}
               </section>
             )
           ) : null}
@@ -886,34 +952,18 @@ export function CommunitySurface({
               <PrivateNotice name={name} />
             ) : (
               <CardGrid min="20rem" aria-label={`Today at ${name}`}>
-                {membership.isMember ? (
-                  <Card container>
-                    {leaderboard.isLoading ? (
-                      <div className="space-y-3" aria-busy="true">
-                        <Skeleton className="h-5 w-40" />
-                        <SkeletonRow />
-                        <SkeletonRow />
-                      </div>
-                    ) : leaderboard.isError ? (
-                      <ErrorState error={leaderboard.error} onRetry={() => leaderboard.refetch()} className="py-6" />
-                    ) : (
-                      <TodayBoard
-                        board={leaderboard.data}
-                        name={name}
-                        checkIn={isHome ? undefined : { pending: checkIn.isPending, run: () => checkIn.mutate() }}
-                      />
-                    )}
-                  </Card>
-                ) : (
-                  <Card>
-                    <h2 className="type-heading text-lg text-text-1">Who is training today</h2>
-                    <p className="mt-1 text-sm text-text-2">Members see who has checked in at {name} today and this week’s regulars. Join from the cover to see them and to check in yourself.</p>
-                  </Card>
-                )}
+                <TodayCard
+                  name={name}
+                  today={trainedToday}
+                  fallbackLine={membership.isMember ? trainingTodayLine(todayLabel) : null}
+                  member={membership.isMember}
+                  checkIn={membership.isMember && !isHome ? { pending: checkIn.isPending, run: () => checkIn.mutate() } : undefined}
+                />
+                <WeekCard name={name} week={activeThisWeek} board={membership.isMember ? leaderboard : null} />
 
                 <Card container>
                   <div className="flex items-start justify-between gap-3">
-                    <h2 className="type-heading text-lg text-text-1">Upcoming sessions</h2>
+                    <h2 className="t-section text-text-1">Upcoming sessions</h2>
                     {canModerate ? <PlanSessionForm communityId={communityId} onPlanned={() => events.refetch()} /> : null}
                   </div>
                   {events.isLoading ? (
@@ -924,7 +974,7 @@ export function CommunitySurface({
                   ) : null}
                   {events.isError ? (
                     statusOf(events.error) === 403 ? (
-                      <p className="mt-3 text-sm text-text-2">Sessions are for members. Join from the cover to see what is planned.</p>
+                      <p className="mt-3 text-sm text-text-2">Sessions are for members. Join above to see what is planned.</p>
                     ) : (
                       <ErrorState error={events.error} onRetry={() => events.refetch()} className="py-6" />
                     )
@@ -958,7 +1008,7 @@ export function CommunitySurface({
                 {canModerate ? (
                   <Card>
                     <div className="flex items-center justify-between gap-3">
-                      <h2 className="type-heading text-lg text-text-1">Requests</h2>
+                      <h2 className="t-section text-text-1">Requests</h2>
                       {pendingCount ? <Badge tone="info">{pendingCount}</Badge> : null}
                     </div>
                     {requests.isLoading ? (
@@ -1029,7 +1079,7 @@ export function CommunitySurface({
                   )
                 ) : null}
                 {(members.data?.members?.length || 0) > 0 ? (
-                  <ul className="divide-y divide-line">
+                  <ul>
                     {(members.data?.members || []).map((m, i) => (
                       <MemberRow key={m._id || m.user?._id || i} member={m} community={community} viewerId={me?._id ? String(me._id) : undefined} viewerRole={membership.role} onChanged={invalidateCommunity} />
                     ))}
@@ -1050,10 +1100,10 @@ export function CommunitySurface({
           {tab === 'about' ? (
             <CardGrid min="20rem" aria-label={`About ${name}`}>
               <AboutCard community={community} totalMembers={totalMembers} />
-              <WhereCard community={community} />
+              <WhereCard community={community} hours={hoursLine(hours.data)} />
               {gallery.length ? (
                 <Card>
-                  <h2 className="type-heading text-lg text-text-1">Photos</h2>
+                  <h2 className="t-section text-text-1">Photos</h2>
                   <ul className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Community photos">
                     {gallery.map((photo, i) => (
                       <GalleryThumb key={photo.photoReference || photo.url || i} photo={photo} index={i + 2} />
@@ -1064,7 +1114,7 @@ export function CommunitySurface({
               {aboutExtra}
               {membership.isMember ? (
                 <Card>
-                  <h2 className="type-heading text-lg text-text-1">Your membership</h2>
+                  <h2 className="t-section text-text-1">Your membership</h2>
                   <p className="mt-1 text-sm text-text-2">
                     {isHome ? `${name} is your gym: the app opens on it and your week is counted here.` : `Make ${name} your gym and the app opens on it.`}
                     {membership.role && membership.role !== 'member' ? ` You are ${/^[aeiou]/i.test(membership.role) ? 'an' : 'a'} ${humanize(membership.role).toLowerCase()} here.` : ''}
@@ -1120,56 +1170,214 @@ function PrivateNotice({ name }: { name: string }) {
   );
 }
 
-function TodayBoard({ board, name, checkIn }: { board?: Leaderboard; name: string; checkIn?: { pending: boolean; run: () => void } }) {
-  const live = trainingTodayLine(board?.today?.activeMembersLabel);
-  const mySessions = typeof board?.me?.sessions === 'number' && board.me.sessions > 0 ? board.me.sessions : 0;
-  const entries = (board?.entries || []).filter((e) => e.user?._id).slice(0, 8);
-  const week = rangeLabel(board?.range);
+/** One more check-in from the viewer on a `{ count, members }` figure — unless they are already in it. */
+function withCheckIn<T extends { count: number; members: PublicActor[] }>(figure: T, actor: PublicActor | null): T {
+  if (actor && figure.members.some((m) => String(m._id) === actor._id)) return figure;
+  return { ...figure, count: figure.count + 1, members: actor ? [actor, ...figure.members].slice(0, 12) : figure.members };
+}
+
+/**
+ * "maya, alex and 4 others trained today": the visible faces by name, the
+ * exact count for the rest. `count` is the server's integer (every member
+ * with a check-in, discoverable or not); `members` is the subset it may show,
+ * so the tail is never invented and never a masked "a few".
+ */
+function FacesLine({ count, members, suffix }: { count: number; members: PublicActor[]; suffix: string }) {
+  const named = members.slice(0, 2);
+  const rest = count - named.length;
+  if (!named.length) {
+    return (
+      <>
+        <span className="tabular font-semibold text-text-1">{formatStat(count)}</span> {suffix}
+      </>
+    );
+  }
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="type-heading text-lg text-text-1">{live ?? 'Who is training today'}</h2>
-        <p className="mt-1 text-sm text-text-2">
-          {mySessions
-            ? `You have checked in ${mySessions === 1 ? 'once' : `${mySessions} times`} this week${typeof board?.me?.rank === 'number' ? `, #${board.me.rank} on the board` : ''}.`
-            : `Check in when you train at ${name} and the people here see you are in.`}
-        </p>
+    <>
+      {named.map((m, i) => (
+        <span key={m._id}>
+          {i > 0 ? (rest > 0 ? ', ' : ' and ') : ''}
+          <Link to={`/u/${m._id}`} viewTransition className="font-semibold text-text-1 hover:underline">
+            {nameOf(m)}
+          </Link>
+        </span>
+      ))}
+      {rest > 0 ? (
+        <>
+          {' and '}
+          <span className="tabular font-semibold text-text-1">{rest === 1 ? '1 other' : `${formatStat(rest)} others`}</span>
+        </>
+      ) : null}{' '}
+      {suffix}
+    </>
+  );
+}
+
+/** The faces themselves, each a link to the person: the twelve at most that the server sends. */
+function Faces({ members, label }: { members: PublicActor[]; label: string }) {
+  if (!members.length) return null;
+  return (
+    <ul className="flex flex-wrap gap-2" aria-label={label}>
+      {members.slice(0, 12).map((m) => (
+        <li key={m._id}>
+          <Link to={`/u/${m._id}`} viewTransition aria-label={nameOf(m)} title={nameOf(m)} className="pressable block rounded-full">
+            <Avatar src={m.avatar} name={nameOf(m)} size={40} seed={m._id} />
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The figure's geometry while it loads: one sentence, one row of faces. */
+function FigureSkeleton() {
+  return (
+    <div className="mt-2 space-y-3" aria-busy="true">
+      <Skeleton className="h-4 w-56 max-w-full" />
+      <div className="flex gap-2">
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-10 w-10 rounded-full" />
+        ))}
       </div>
-      {checkIn ? (
-        <Button variant="secondary" icon={<Check size={18} />} loading={checkIn.pending} onClick={checkIn.run}>
-          Check in
-        </Button>
-      ) : null}
-      {entries.length ? (
-        <div>
-          <h3 className="text-sm font-semibold text-text-1">Regulars this week</h3>
-          <ul className="mt-2 divide-y divide-line">
-            {entries.map((e) => {
-              const u = e.user!;
-              const sessions = typeof e.sessions === 'number' ? e.sessions : 0;
-              return (
-                <li key={String(u._id)} className="flex items-center gap-3 py-2">
-                  <Link to={`/u/${u._id}`} viewTransition className="shrink-0 rounded-full">
-                    <Avatar src={u.avatar} name={displayName(u)} size={36} />
-                  </Link>
-                  <Link to={`/u/${u._id}`} viewTransition className="min-w-0 flex-1 truncate text-sm font-semibold text-text-1 hover:underline">
-                    {displayName(u)}
-                  </Link>
-                  {sessions ? <span className="tabular text-xs text-text-2">{sessions === 1 ? '1 session' : `${sessions} sessions`}</span> : null}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : (
-        <p className="text-sm text-text-2">Nobody is on the board yet this week. The first check-in starts it.</p>
-      )}
-      {week ? (
-        <p className="text-xs text-text-3">{week}</p>
-      ) : board?.range?.timezoneSource === 'default' ? (
-        <p className="text-xs text-text-3">The week is not pinned to {name}’s time zone yet; it will be once the first session is planned.</p>
-      ) : null}
     </div>
+  );
+}
+
+/** A query that is switched off is not loading; TanStack still calls it pending. */
+const isFetchingFigure = (q: UseQueryResult<unknown>) => q.isPending && q.fetchStatus !== 'idle';
+
+/**
+ * Who trained today. The figure is the exact route (`trained-today`, drawn in
+ * the device's zone); when the route is not there — an older API, a 404 — a
+ * member still reads the leaderboard's string as before. Nobody yet is the
+ * next action, never a zero.
+ */
+function TodayCard({
+  name,
+  today,
+  fallbackLine,
+  member,
+  checkIn,
+}: {
+  name: string;
+  today: UseQueryResult<TrainedToday | null>;
+  fallbackLine: string | null;
+  member: boolean;
+  checkIn?: { pending: boolean; run: () => void };
+}) {
+  const figure = today.data ?? null;
+  const count = figure?.count ?? 0;
+  return (
+    <Card container>
+      <h2 className="t-section text-text-1">Today</h2>
+      {isFetchingFigure(today) ? (
+        <FigureSkeleton />
+      ) : (
+        <div className="mt-2 space-y-3">
+          {count > 0 && figure ? (
+            <p className="t-body text-text-2">
+              <FacesLine count={count} members={figure.members} suffix="trained today" />
+            </p>
+          ) : !figure && fallbackLine ? (
+            <p className="t-body text-text-1">{fallbackLine}</p>
+          ) : (
+            <p className="t-body text-text-2">
+              {member ? `Nobody has checked in yet. Check in when you train at ${name} and the people here see you are in.` : `Nobody has checked in at ${name} yet today.`}
+            </p>
+          )}
+          {count > 0 && figure ? <Faces members={figure.members} label="Trained today" /> : null}
+          {figure?.timezoneSource === 'default' ? <p className="t-meta">Counted in UTC until {name} has a time zone; the first planned session sets it.</p> : null}
+          {checkIn ? (
+            <Button variant="secondary" icon={<Check size={18} />} loading={checkIn.pending} onClick={checkIn.run}>
+              Check in
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * This week: the exact figure (`active-this-week`) for every viewer; members
+ * also read their own tally and the check-in board's regulars with session
+ * counts. The week's boundary is the community's (API.md §11c) and is named
+ * only when the community has a zone.
+ */
+function WeekCard({ name, week, board }: { name: string; week: UseQueryResult<ActiveThisWeek | null>; board: UseQueryResult<Leaderboard> | null }) {
+  const figure = week.data ?? null;
+  const count = figure?.count ?? 0;
+  const data = board?.data;
+  const mySessions = typeof data?.me?.sessions === 'number' && data.me.sessions > 0 ? data.me.sessions : 0;
+  const entries = (data?.entries || []).filter((e) => e.user?._id).slice(0, 8);
+  const range = rangeLabel(data?.range);
+  return (
+    <Card container>
+      <h2 className="t-section text-text-1">This week</h2>
+      {isFetchingFigure(week) ? (
+        <FigureSkeleton />
+      ) : (
+        <div className="mt-2 space-y-3">
+          {count > 0 && figure ? (
+            <p className="t-body text-text-2">
+              <FacesLine count={count} members={figure.members} suffix="active this week" />
+            </p>
+          ) : (
+            <p className="t-body text-text-2">
+              Nobody has checked in at {name} this week yet.{board ? ' The first check-in starts the board.' : ''}
+            </p>
+          )}
+          {count > 0 && figure ? <Faces members={figure.members} label="Active this week" /> : null}
+          {board ? (
+            board.isLoading ? (
+              <div className="space-y-2" aria-busy="true">
+                <SkeletonRow />
+                <SkeletonRow />
+              </div>
+            ) : board.isError ? (
+              <ErrorState error={board.error} onRetry={() => board.refetch()} className="py-4" />
+            ) : (
+              <>
+                {mySessions ? (
+                  <p className="t-meta">
+                    You have checked in {mySessions === 1 ? 'once' : `${mySessions} times`} this week{typeof data?.me?.rank === 'number' ? `, #${data.me.rank} on the board` : ''}.
+                  </p>
+                ) : count > 0 ? (
+                  <p className="t-meta">Check in when you train here and you join the board.</p>
+                ) : null}
+                {entries.length ? (
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-1">Regulars</h3>
+                    <ul className="mt-1">
+                      {entries.map((e) => {
+                        const u = e.user!;
+                        const sessions = typeof e.sessions === 'number' ? e.sessions : 0;
+                        return (
+                          <li key={String(u._id)} className="flex items-center gap-3 py-2">
+                            <Link to={`/u/${u._id}`} viewTransition className="shrink-0 rounded-full">
+                              <Avatar src={u.avatar} name={displayName(u)} size={36} />
+                            </Link>
+                            <Link to={`/u/${u._id}`} viewTransition className="min-w-0 flex-1 truncate text-sm font-semibold text-text-1 hover:underline">
+                              {displayName(u)}
+                            </Link>
+                            {sessions ? <span className="tabular text-xs text-text-2">{sessions === 1 ? '1 session' : `${sessions} sessions`}</span> : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
+                {range ? (
+                  <p className="t-meta">{range}</p>
+                ) : data?.range?.timezoneSource === 'default' ? (
+                  <p className="t-meta">The week is not pinned to {name}’s time zone yet; it will be once the first session is planned.</p>
+                ) : null}
+              </>
+            )
+          ) : null}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1177,7 +1385,7 @@ function AboutCard({ community, totalMembers }: { community: Community; totalMem
   const description = community.description?.trim();
   return (
     <Card container>
-      <h2 className="type-heading text-lg text-text-1">About</h2>
+      <h2 className="t-section text-text-1">About</h2>
       {description ? <p className="prose-measure mt-2 whitespace-pre-wrap text-base text-text-1">{description}</p> : null}
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         {totalMembers ? (
@@ -1207,13 +1415,14 @@ function AboutCard({ community, totalMembers }: { community: Community; totalMem
   );
 }
 
-function WhereCard({ community }: { community: Community }) {
+/** Where the gym is: the map tile and address, and — for a place the map provider knows — whether it is open right now. */
+function WhereCard({ community, hours }: { community: Community; hours: string | null }) {
   const coords = coordsOf(community);
   const place = community.vicinity?.trim();
-  if (!coords && !place) return null;
+  if (!coords && !place && !hours) return null;
   return (
     <Card container>
-      <h2 className="type-heading text-lg text-text-1">Where</h2>
+      <h2 className="t-section text-text-1">Where</h2>
       <div className="mt-3 flex flex-wrap items-start gap-4">
         {coords ? (
           <a
@@ -1231,6 +1440,12 @@ function WhereCard({ community }: { community: Community }) {
             <p className="flex items-start gap-1.5 text-sm text-text-1">
               <MapPin size={16} className="mt-0.5 shrink-0 text-text-3" />
               <span>{place}</span>
+            </p>
+          ) : null}
+          {hours ? (
+            <p className="flex items-center gap-1.5 text-sm text-text-1">
+              <Clock size={16} className="shrink-0 text-text-3" />
+              <span>{hours}</span>
             </p>
           ) : null}
           {coords ? (

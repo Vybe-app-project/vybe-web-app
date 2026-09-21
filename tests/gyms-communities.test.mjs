@@ -152,13 +152,80 @@ test('bandGymOf maps the details payload honestly: 1 member, no rating, partial 
   assert.equal(memberTotalOf({ _id: 'c3', totalMembers: 0 }), undefined);
   assert.equal(memberTotalOf({ _id: 'c4', stats: { totalMembers: 3 } }), 3, 'list payloads fall back to the stored counter');
   assert.equal(bandGymOf({ _id: 'c5', name: 'X', googleMapsData: { rating: 0 } }, '').rating, null);
-  // The tabs are links with aria-current on the active one and counts only when given.
+  // The strip is the page's one tab row (the shared Tabs, underline variant): four link tabs, the active
+  // one selected, a count only when a real integer was given. The icon precedes the label from `sm`.
   const html = renderToString(h(MemoryRouter, null, h(GymTabs, { pathname: '/communities/c1', active: 'members', counts: { members: 1 } })));
-  assert.match(html, /href="\/communities\/c1"[^>]*>Feed/);
-  assert.match(html, /<a class="gym-band-tab" aria-current="page" href="\/communities\/c1\?tab=members"[^>]*>Members<small>1<\/small>/);
-  assert.equal((html.match(/aria-current/g) || []).length, 1);
-  assert.equal((html.match(/class="gym-band-tab"/g) || []).length, 4);
-  assert.doesNotMatch(html, /Today<small>/, 'no count for Today unless the server sent the integer');
+  assert.match(html, /role="tablist" aria-label="Gym sections"/);
+  assert.match(html, /<a (?=[^>]*role="tab")(?=[^>]*href="\/communities\/c1")[^>]*>(?:<svg[\s\S]*?<\/svg>)?Feed<\/a>/);
+  assert.match(html, /<a (?=[^>]*aria-selected="true")(?=[^>]*href="\/communities\/c1\?tab=members")[^>]*>(?:<svg[\s\S]*?<\/svg>)?Members<span[^>]*>1<\/span><\/a>/);
+  assert.equal((html.match(/aria-selected="true"/g) || []).length, 1);
+  assert.equal((html.match(/role="tab"/g) || []).length, 4);
+  assert.doesNotMatch(html, /Today<span/, 'no count for Today unless a real integer was given');
+  assert.doesNotMatch(html, /gym-band-tab/, 'the band strip is gone');
+  // A zero is not a count.
+  const zero = renderToString(h(MemoryRouter, null, h(GymTabs, { pathname: '/communities/c1', active: 'feed', counts: { today: 0, members: 3 } })));
+  assert.doesNotMatch(zero, /Today<span/);
+  assert.match(zero, /Members<span[^>]*>3<\/span>/);
+});
+
+/* ------------------------------------------------------------------ the exact figures (API bb263548, additive) */
+
+test('the activity routes and hours degrade to nothing, the join is optimistic, and "Open now · closes 22:00" is only said with hours', async () => {
+  const { hoursLine, optimisticJoin } = await import('../src/pages/GymCommunity.tsx');
+  assert.equal(hoursLine({ open: true, closesAt: '22:00' }), 'Open now · closes 22:00');
+  assert.equal(hoursLine({ open: false, opensAt: '6:00' }), 'Closed · opens 06:00');
+  assert.equal(hoursLine({ open: true, closesAt: '22:00:00' }), 'Open now · closes 22:00');
+  assert.equal(hoursLine({ open: true }), 'Open now');
+  assert.equal(hoursLine({ open: false, opensAt: 'later' }), 'Closed now', 'an unreadable time is dropped, never guessed');
+  assert.equal(hoursLine({ open: null }), null, 'no hours known: nothing said');
+  assert.equal(hoursLine(null), null);
+  assert.equal(hoursLine(undefined), null);
+  // Join: a public community reads as joined at once, with one more member; approval reads as a request;
+  // a second tap on a pending request reads as withdrawn. The server's answer replaces all of it.
+  const open = optimisticJoin({ _id: 'c1', totalMembers: 4, settings: { isPublic: true } });
+  assert.equal(open.status, 'member');
+  assert.equal(open.community.totalMembers, 5);
+  assert.equal(open.community.userMembership.status, 'member');
+  const approval = optimisticJoin({ _id: 'c2', totalMembers: 4, settings: { isPublic: true, requireApproval: true } });
+  assert.equal(approval.status, 'pending');
+  assert.equal(approval.community.totalMembers, 4);
+  const cancel = optimisticJoin({ _id: 'c3', totalMembers: 4, userMembership: { status: 'pending', requestId: 'r1' } });
+  assert.equal(cancel.status, 'none');
+  assert.equal(cancel.community.userMembership.isMember, false);
+  assert.equal(optimisticJoin({ _id: 'c4', settings: { isPublic: true } }).community.totalMembers, undefined, 'no count is invented');
+
+  const src = read('src/pages/GymCommunity.tsx');
+  const detail = read('src/pages/CommunityDetail.tsx');
+  // The three routes, called as the API mounts them; a 404 (older API, or a community the viewer may not see) is "no figure".
+  assert.match(src, /api\.get\(`\/gyms\/community\/\$\{communityId\}\/active-this-week`\)/);
+  assert.match(src, /api\.get\(`\/gyms\/community\/\$\{communityId\}\/trained-today`, \{ params: \{ timeZone \} \}\)/, 'the local day is drawn in the device zone');
+  assert.match(src, /api\.get\(`\/gyms\/places\/\$\{encodeURIComponent\(placeId!\)\}\/hours`, \{ params: \{ timeZone \} \}\)/);
+  assert.match(src, /const resolvable = typeof placeId === 'string' && \/\^osm-\/\.test\(placeId\);/, 'only OpenStreetMap ids resolve, so nothing else is asked');
+  assert.ok((src.match(/if \(statusOf\(e\) === 404\) return null;/g) || []).length >= 4, 'every additive route swallows its 404');
+  // The header: the profile variant, the exact week count as its third figure, the strip as its children, the review line once.
+  assert.match(detail, /<GymHeader\s+variant="profile"/);
+  assert.match(detail, /thisWeek: activeThisWeek\.data\?\.count/);
+  assert.match(detail, /<GymTabs pathname=\{pathname\} active=\{tab\} counts=\{counts\} \/>\s*<\/GymHeader>/);
+  assert.match(detail, /community\?\.reviewState === 'pending' \? <p className="t-meta[^"]*">Pending review<\/p> : null/);
+  assert.equal((detail.match(/Pending review/g) || []).length, 1);
+  // Today: the count is a number (names, then "and N others"); the leaderboard's "a few" string is only the 404 fallback.
+  assert.match(detail, /fallbackLine=\{membership\.isMember \? trainingTodayLine\(todayLabel\) : null\}/);
+  assert.match(detail, /rest === 1 \? '1 other' : `\$\{formatStat\(rest\)\} others`/);
+  assert.match(detail, /figure\?\.timezoneSource === 'default'/, 'a UTC day is named as such');
+  assert.match(detail, /if \(\(trainedToday\.data\?\.count \?\? 0\) > 0\) counts\.today = trainedToday\.data!\.count;/, 'a zero never reaches the strip');
+  // Optimistic writes: Join and Check in each rewrite the cache first and put it back on error.
+  assert.match(src, /onMutate: async \(gymId: string\) => \{[\s\S]*?optimisticJoin\(detail\)\.community/);
+  assert.match(detail, /onMutate: async \(\) => \{[\s\S]*?withCheckIn\(old, actor\)/);
+  assert.match(detail, /for \(const \[key, data\] of ctx\?\.prev \|\| \[\]\) qc\.setQueryData\(key, data\);/);
+  // Hours live on About, in the Where card, and the map tile with them.
+  assert.match(detail, /<WhereCard community=\{community\} hours=\{hoursLine\(hours\.data\)\} \/>/);
+  assert.match(detail, /const hours = usePlaceHours\(community\?\.placeId, tab === 'about'\);/);
+  // No page still declares a band; the header action is a text button.
+  for (const file of ['Gyms', 'GymCommunity', 'GymDetail', 'CommunityDetail', 'Friends', 'Discover']) {
+    assert.doesNotMatch(read(`src/pages/${file}.tsx`), /band=\{\{/, `${file} declares no band`);
+  }
+  assert.match(read('src/pages/Gyms.tsx'), /<button type="button" className=\{TEXT_ACTION\} onClick=\{addAGym\}>\s*Add a gym/);
+  assert.match(read('src/pages/GymDetail.tsx'), /<GymHeader\s+variant="profile"/);
 });
 
 /* ------------------------------------------------------------------ share links */
@@ -201,7 +268,7 @@ test('the community detail acts on the real API shape and offers every member ac
   assert.ok(src.includes('Start a community'), 'missing UI text: Start a community');
   // Join / Request to join / Cancel request come from the shared label so the card and the detail never disagree.
   assert.match(src, /const label = joinLabel\(community\);/);
-  assert.match(detail, /<JoinButton community=\{community\} mutation=\{join\} size="lg" variant="primary" \/>/, 'the band action is the one primary control');
+  assert.match(detail, /<JoinButton community=\{community\} mutation=\{join\} variant="primary" \/>/, 'the header action is the one primary control');
   // The member composer posts into the community and the create form hits the create route.
   assert.match(detail, /api\.post\('\/posts\/create',[\s\S]*?community: communityId,/);
   assert.match(src, /api\.post\('\/gyms\/community\/join',\s*body\)/);
@@ -224,7 +291,8 @@ test('the community detail acts on the real API shape and offers every member ac
   assert.doesNotMatch(detail, /activeMembers \?\? 0|activeMembers \|\| 0/, 'never a computed "0 training today"');
   assert.match(detail, /params: \{ week: 'this' \}/);
   assert.match(detail, /enabled: detail\.isSuccess && membership\.isMember,/, 'the leaderboard is members-only');
-  assert.match(detail, /className="gym-band-tab" aria-current=\{t\.key === active \? 'page' : undefined\}/);
+  assert.match(detail, /<Tabs\s+aria-label="Gym sections"\s+fill\s+active=\{active\}/, 'the strip is the shared Tabs, the page’s one tab row');
+  assert.match(detail, /to: gymTabHref\(pathname, t\.key\),/, 'tabs stay links');
   // Home gym (API.md §1): PUT /users/settings { homeGym: { community } }, optimistic on the auth store.
   assert.match(detail, /api\.put\('\/users\/settings', \{ homeGym: \{ community: communityId \} \}\)/);
   assert.match(detail, /queryKey: \['home-gym'\]/);
@@ -258,6 +326,12 @@ test('the Gyms page keeps per-tab search, biases places, and lets people add gym
   // Gym First: Places leads (the DB is empty; a place is how a gym comes to exist), every place row looks the
   // community up by placeId before offering Create, and OpenStreetMap is credited wherever its rows show.
   assert.match(src, /: 'places';/, 'Places is the default tab');
+  // The search is the first element and follows the list under it; the page never links to itself.
+  assert.ok(src.indexOf('<SearchField') < src.indexOf('<SegmentedControl'), 'the Places search sits above the segmented control');
+  assert.match(src, /value=\{tab === 'all' \? directorySearch : placesSearch\}/);
+  assert.doesNotMatch(src, /to="\/gyms"|to: '\/gyms'|to=\{`\/gyms`\}/, 'the Gyms page never links to itself');
+  assert.doesNotMatch(src, /className="card/, 'boxed modules are <Card>, never a raw card class');
+  assert.doesNotMatch(read('src/pages/GymCommunity.tsx'), /className="card/);
   assert.match(src, /const existing = useCommunityAtPlace\(placeId\);/);
   assert.match(src, /Start the community here/);
   assert.match(src, /openstreetmap\.org\/copyright/);
