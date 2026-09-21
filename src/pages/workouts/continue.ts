@@ -1,47 +1,88 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../../lib/api';
+import { TRAIN, type ProgramSlotParam } from './sheet';
+import {
+  fetchEnrollments,
+  isFeatureDisabled,
+  programKeys,
+  programsFeature,
+  type EnrollmentListItem,
+} from '../../lib/programs';
 
 /**
- * The hub's one prominent button reads "Continue {plan} · Week n · Day d"
- * while the member is enrolled in a programme (Garmin Coach / Runna: the
- * programme state is a fraction plus one next-up line). The whole
- * /api/plans router sits behind the `programs` flag and answers 404 while it
- * is off, so the read is feature-detected: 404 and 403 mean "nothing to
- * continue", never an error, and the button simply keeps its default label.
- * Literal request path on purpose — scripts/audit-api-contracts.cjs pins it.
+ * The member's programmes, read once for the whole Train hub.
+ *
+ * Two surfaces share the answer. The hub's one prominent button reads
+ * "Continue {plan} · Week n · Day d" while a programme is running (Garmin
+ * Coach / Runna: the programme state is a fraction plus one next-up line),
+ * and every Programs row carries "Enrolled · Week 2 of 4" in its meta. One
+ * query key, so the button and the rows can never disagree.
+ *
+ * The whole /api/plans router sits behind the `programs` flag and answers 404
+ * while it is off, so the read is gated on the flag and a FEATURE_DISABLED
+ * answer is not retried: nothing to continue, no error, the button keeps its
+ * default label and the rows keep their ordinary meta.
  */
 
-export type EnrollmentPointer = { week: number; day: number; order: number; workoutId: string };
+/** Open and finished alike: a finished plan still says so on its row. */
+export const ENROLLMENT_STATUSES = 'active,paused,completed';
 
-export type ActiveEnrollment = {
-  enrollment: { _id?: string; status: string };
-  plan: { _id: string; title: string; durationWeeks?: number };
-  pointer: EnrollmentPointer | null;
-  progress?: { done: number; skipped: number; total: number; ratio: number };
-  suggestedWeek?: number | null;
+export const ENROLLMENT_KEY = programKeys.enrollments(ENROLLMENT_STATUSES);
+
+export type EnrolmentIndex = {
+  items: EnrollmentListItem[];
+  /** planId → the member's enrolment on it. */
+  byPlan: Map<string, EnrollmentListItem>;
+  isPending: boolean;
 };
 
-export const ENROLLMENT_KEY = ['plans', 'enrollments', 'active'] as const;
-
-const statusOf = (e: unknown): number | undefined => (e as { response?: { status?: number } } | null)?.response?.status;
-
-/** The member's one active programme, or null — including when the flag is off (404) or the read is refused (403). */
-export async function fetchActiveEnrollment(): Promise<ActiveEnrollment | null> {
-  try {
-    const { data } = await api.get<{ items?: ActiveEnrollment[] }>('/plans/enrollments', { params: { status: 'active', limit: 1 } });
-    return data?.items?.[0] ?? null;
-  } catch (e) {
-    const status = statusOf(e);
-    if (status === 404 || status === 403) return null;
-    throw e;
-  }
+/** Every enrolment the member holds, indexed by plan. Empty while the flag is off. */
+export function useEnrolments(): EnrolmentIndex {
+  const { programs } = programsFeature();
+  const query = useQuery({
+    queryKey: ENROLLMENT_KEY,
+    queryFn: () => fetchEnrollments(ENROLLMENT_STATUSES, 50),
+    enabled: programs,
+    staleTime: 60_000,
+    retry: (count, error) => !isFeatureDisabled(error) && count < 2,
+  });
+  const items = useMemo(() => query.data?.items ?? [], [query.data]);
+  const byPlan = useMemo(() => {
+    const map = new Map<string, EnrollmentListItem>();
+    for (const item of items) if (item.plan?._id) map.set(item.plan._id, item);
+    return map;
+  }, [items]);
+  return { items, byPlan, isPending: query.isPending && programs };
 }
 
 export type ContinueProgram = {
   /** "Continue Strength Builder · Week 2 · Day 3" */
   label: string;
   workoutId: string;
+  /** The slot the session counts toward, so the recap can mark it done. */
+  program: ProgramSlotParam;
+  /** The runner, seeded from the pointer's workout and carrying its slot. */
+  to: string;
 };
+
+/**
+ * The one programme the hub offers to continue: the running one, at the first
+ * slot that is neither done nor skipped. A paused plan is not offered — the
+ * member paused it — and a finished one has no pointer.
+ */
+export function continueProgramOf(items: readonly EnrollmentListItem[]): ContinueProgram | null {
+  const active = items.find((item) => item.enrollment?.status === 'active' && item.pointer?.workoutId && item.plan) ?? null;
+  const pointer = active?.pointer;
+  const plan = active?.plan;
+  if (!pointer?.workoutId || !plan) return null;
+  const program: ProgramSlotParam = { planId: plan._id, week: pointer.week, day: pointer.day, order: pointer.order };
+  return {
+    label: `Continue ${plan.title} · Week ${pointer.week} · Day ${pointer.day}`,
+    workoutId: pointer.workoutId,
+    program,
+    to: TRAIN.liveSession({ from: pointer.workoutId, program }),
+  };
+}
 
 /**
  * The label is built from the enrolment alone: one read, one relabel of a
@@ -49,12 +90,6 @@ export type ContinueProgram = {
  * "Next up" line that filled in after the rows had painted measured CLS 0.24).
  */
 export function useContinueProgram(): ContinueProgram | null {
-  const enrollment = useQuery({ queryKey: ENROLLMENT_KEY, queryFn: fetchActiveEnrollment, staleTime: 60_000, retry: false });
-  const active = enrollment.data ?? null;
-  const pointer = active?.pointer ?? null;
-  if (!active || !pointer?.workoutId) return null;
-  return {
-    label: `Continue ${active.plan.title} · Week ${pointer.week} · Day ${pointer.day}`,
-    workoutId: pointer.workoutId,
-  };
+  const { items } = useEnrolments();
+  return useMemo(() => continueProgramOf(items), [items]);
 }

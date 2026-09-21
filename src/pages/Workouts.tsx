@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
+import { enrolledMeta } from '../lib/programs';
 import { displayWeight, useUnits, weightUnit } from '../lib/units';
 import {
   Button,
@@ -22,7 +23,7 @@ import {
 } from './ui';
 import { ArrowRight, Copy, Edit, Flag, Layers, Play, Plus, ShareUp, Trash } from './icons';
 import { useReportModal } from './Report';
-import { useContinueProgram } from './workouts/continue';
+import { useContinueProgram, useEnrolments } from './workouts/continue';
 import {
   fetchCommunityPlans,
   fetchExplorePage,
@@ -184,6 +185,8 @@ export default function Workouts() {
   const { state: sheetState, open } = useSheetNav();
   const system = useUnits((s) => s.system);
   const continueProgram = useContinueProgram();
+  // One read for the hub: the CTA's label and every programme row's meta.
+  const enrolments = useEnrolments();
   const hasSession = useHasSession();
 
   const qc = useQueryClient();
@@ -303,10 +306,11 @@ export default function Workouts() {
   // The page's one prominent action. A session already open comes first —
   // nothing else on this page matters while one is running — then the
   // programme's next day, then a fresh session.
+  // Continue carries the programme slot, so finishing the session marks the day done.
   const cta = hasSession
     ? { label: 'Resume session', to: TRAIN.liveSession() }
     : continueProgram
-      ? { label: continueProgram.label, to: TRAIN.liveSession({ from: continueProgram.workoutId }) }
+      ? { label: continueProgram.label, to: continueProgram.to }
       : { label: 'Start a session', to: TRAIN.liveSession() };
 
   const workoutRow = (workout: SocialWorkout, own: boolean) => (
@@ -439,7 +443,7 @@ export default function Workouts() {
                         plan={plan}
                         to={href}
                         state={sheetState}
-                        extra={[!plan.isPremade && plan.isPublic === false && 'Private']}
+                        extra={[enrolledMeta(enrolments.byPlan.get(plan._id)), !plan.isPremade && plan.isPublic === false && 'Private']}
                         menu={planMenu(plan, { isOwn: true, toast, onEdit: (p) => open(TRAIN.editPlan(p._id)), onAddWorkout: (p) => setAddingTo(p), onDelete: (p) => setPendingPlanDelete(p) })}
                       />
                     );
@@ -474,7 +478,7 @@ export default function Workouts() {
               ) : (
                 <RowList>
                   {premadePlans.data.map((plan) => (
-                    <PlanRow key={plan._id} plan={plan} to={TRAIN.plan(plan._id)} state={sheetState} />
+                    <PlanRow key={plan._id} plan={plan} to={TRAIN.plan(plan._id)} state={sheetState} extra={[enrolledMeta(enrolments.byPlan.get(plan._id))]} />
                   ))}
                 </RowList>
               )}
@@ -500,7 +504,7 @@ export default function Workouts() {
             <Section title="Shared programs" action={<Count n={communityPlans.data.length} />}>
               <RowList>
                 {communityPlans.data.map((plan) => (
-                  <PlanRow key={plan._id} plan={plan} to={TRAIN.plan(plan._id)} state={sheetState} />
+                  <PlanRow key={plan._id} plan={plan} to={TRAIN.plan(plan._id)} state={sheetState} extra={[enrolledMeta(enrolments.byPlan.get(plan._id))]} />
                 ))}
               </RowList>
             </Section>
