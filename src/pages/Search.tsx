@@ -580,7 +580,7 @@ export default function Search() {
 
         {/* ---------- results ---------- */}
         {activeQuery && results.isLoading ? (
-          <div className="space-y-3" aria-busy="true" aria-label="Searching">
+          <div aria-busy="true" aria-label="Searching">
             <UserRowSkeleton />
             <UserRowSkeleton />
             <PostCardSkeleton />

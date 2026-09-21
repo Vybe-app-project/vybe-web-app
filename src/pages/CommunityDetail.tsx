@@ -881,7 +881,7 @@ export function CommunitySurface({
               </span>
             ))}
           </div>
-          <div className="space-y-4" aria-busy="true" aria-label={`Loading ${name}`}>
+          <div aria-busy="true" aria-label={`Loading ${name}`}>
             <PostCardSkeleton />
             <PostCardSkeleton media={false} />
           </div>
@@ -913,7 +913,7 @@ export function CommunitySurface({
                   )
                 ) : null}
                 {posts.isLoading ? (
-                  <div className="space-y-4" aria-busy="true">
+                  <div aria-busy="true">
                     <PostCardSkeleton />
                     <PostCardSkeleton media={false} />
                   </div>
