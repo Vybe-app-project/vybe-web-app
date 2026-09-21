@@ -15,6 +15,7 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 // The Train hub was split for the gym-first redesign: the hub page, the editor routes, the pickers and the
 // data model live in src/pages/workouts/*; History replaced the workout log.
 const workouts = read('src/pages/Workouts.tsx');
+const rows = read('src/pages/workouts/rows.tsx');
 const editor = read('src/pages/workouts/WorkoutEditor.tsx');
 const planEditor = read('src/pages/workouts/PlanEditor.tsx');
 const exerciseRows = read('src/pages/workouts/exerciseDraft.tsx');
@@ -65,16 +66,16 @@ test('plans have an editor: schedule, remove, edit, delete, and a canonical rout
   // Legacy /workouts/<planId> links land on the canonical plan page.
   assert.match(detail, /<Navigate to=\{`\/workouts\/plans\/\$\{plan\.data\._id\}`\} replace \/>/);
   assert.match(planDetail, /humanize\(plan\.level\)/);
-  // A program card with sessions stays openable: the title links, and so does "View schedule".
-  assert.match(workouts, /aria-label=\{`View schedule for \$\{plan\.title\}`\}/);
-  // The title link carries the sheet background so the plan opens over the hub on desktop.
-  assert.match(workouts, /<Link to=\{href\} state=\{state\} viewTransition className="relative z-\[2\][^"]*">\s*\{plan\.title\}/);
+  // A programme row is one whole-row link that carries the sheet background, so the plan opens over the hub on desktop.
+  assert.match(rows, /<RowLink to=\{to\} label=\{`Open \$\{plan\.title\}`\} state=\{state\} \/>/);
+  assert.match(workouts, /<PlanRow[\s\S]*?to=\{href\}[\s\S]*?state=\{sheetState\}/);
 });
 
 test('premade and community programs are browsable and lists page', () => {
   assert.match(model, /'\/workouts\/commom\/workouts\/plan\/all\/premade\/fetch'/);
   assert.match(model, /'\/workouts\/plans\/filter\/all\/workouts\/feed\/filter\/feed'/);
-  assert.match(workouts, /\{ key: 'programs', label: 'Programs'/);
+  // Programs are a section of Browse since 2026-09-21, not a toggle inside the workouts list.
+  assert.match(workouts, /title="Programs"/);
   assert.match(workouts, /useInfiniteQuery\(/);
   assert.match(workouts, /Load more/);
 });
@@ -154,8 +155,8 @@ test('the compare panel treats a missing measurement as unknown', () => {
 });
 
 test('the live suites keep their labels and routes', () => {
-  assert.match(workouts, /label=\{`More options for \$\{workout\.title\}`\}/);
-  assert.match(workouts, /label=\{`More options for \$\{plan\.title\}`\}/);
+  assert.match(rows, /label=\{`More options for \$\{title\}`\}/);
+  assert.match(rows, /label=\{`More options for \$\{plan\.title\}`\}/);
   assert.match(workouts, /aria-label="Workout library"/);
   assert.match(workouts, /New workout/);
   assert.match(workouts, /New plan/);

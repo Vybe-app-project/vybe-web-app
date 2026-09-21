@@ -36,7 +36,8 @@ export function useSheetClose(fallback: string) {
 /* Train hub paths, in one place. */
 export const TRAIN = {
   hub: '/workouts',
-  tab: (tab: 'mine' | 'plans' | 'explore' | 'premade') => (tab === 'mine' ? '/workouts' : `/workouts?tab=${tab}`),
+  /** Mine | Browse since 2026-09-21; the older keys still resolve (plans → the My plans section, explore/premade → Browse). */
+  tab: (tab: 'mine' | 'browse' | 'plans' | 'explore' | 'premade') => (tab === 'mine' ? '/workouts' : tab === 'plans' ? '/workouts#plans' : '/workouts?tab=browse'),
   newWorkout: '/workouts/new',
   workout: (id: string) => `/workouts/${id}`,
   editWorkout: (id: string) => `/workouts/${id}/edit`,
