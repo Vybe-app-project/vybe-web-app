@@ -78,8 +78,10 @@ test('the Today card names the faces the server names, and says "and N others" w
   // The faces row itself carries no tail tile when nothing is missing.
   assert.doesNotMatch(exactText, /and \d+ others (?!trained)/);
 
-  // Twelve of forty: `sample` is the API saying the row is a subset, so the
-  // faces row ends in the rest rather than pretending twelve is everyone.
+  // Twelve of forty: the faces row ends in the rest rather than pretending
+  // twelve is everyone. `active-this-week` says so with `sample`;
+  // `trained-today` sends the same capped list and no flag, so the tail is
+  // the two numbers the payload always carries.
   const sampled = render(
     h(detail.TodayCard, {
       name: 'Iron Works',
@@ -92,6 +94,9 @@ test('the Today card names the faces the server names, and says "and N others" w
   assert.match(sampledText, /Member 1, Member 2 and 38 others trained here today/);
   assert.match(sampledText, /and 28 others/, 'the faces row admits the twelve are a sample of forty');
   assert.equal(count(sampled, 'aria-label="Trained here today"'), 1);
+  // The same payload without the flag reads the same: the cap is the fact.
+  const noFlag = textOf(render(h(detail.TodayCard, { name: 'Iron Works', today: resolved({ count: 40, members: TWELVE }), fallbackLine: null, member: true })));
+  assert.match(noFlag, /and 28 others/, 'trained-today sends no `sample`, and the tail is still honest');
 
   // Nobody yet is the next action, never a zero.
   const zero = textOf(render(h(detail.TodayCard, { name: 'Iron Works', today: resolved({ count: 0, members: [] }), fallbackLine: null, member: true })));

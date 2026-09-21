@@ -1258,6 +1258,16 @@ export function FacesLine({ count, members, suffix }: { count: number; members: 
 }
 
 /**
+ * How many people the faces row does not show. `active-this-week` says so
+ * with `sample`; `trained-today` sends the same capped list and no flag
+ * (docs/api-contract.md), so the tail is derived from the two numbers the
+ * payload always carries and the flag only confirms it.
+ */
+function facesTail(figure: { count: number; members: PublicActor[]; sample?: boolean }): number {
+  return Math.max(0, Math.round(figure.count) - figure.members.length);
+}
+
+/**
  * The faces themselves, each a link to the person: the twelve at most that
  * the server sends. `sample` on the payload means the row is a subset of the
  * count — the rest are members the viewer may not see, or nobody the server
@@ -1401,7 +1411,7 @@ export function TodayCard({
               {member ? `Nobody has checked in yet. Check in when you train at ${name} and the people here see you are in.` : `Nobody has checked in at ${name} yet today.`}
             </p>
           )}
-          {count > 0 && figure ? <Faces members={figure.members} label="Trained here today" more={figure.sample ? count - figure.members.length : 0} /> : null}
+          {count > 0 && figure ? <Faces members={figure.members} label="Trained here today" more={facesTail(figure)} /> : null}
           {figure?.timezoneSource === 'default' ? <p className="t-meta">Counted in UTC until {name} has a time zone; the first planned session sets it.</p> : null}
           {checkIn ? (
             <Button variant="secondary" icon={<Check size={18} />} loading={checkIn.pending} onClick={checkIn.run}>
@@ -1451,7 +1461,7 @@ function WeekCard({ name, week, board }: { name: string; week: UseQueryResult<Ac
               Nobody has checked in at {name} this week yet.{board ? ' The first check-in starts the board.' : ''}
             </p>
           )}
-          {count > 0 && figure ? <Faces members={figure.members} label="Active this week" more={figure.sample ? count - figure.members.length : 0} /> : null}
+          {count > 0 && figure ? <Faces members={figure.members} label="Active this week" more={facesTail(figure)} /> : null}
           {board ? (
             board.isError ? (
               <ErrorState error={board.error} onRetry={() => board.refetch()} className="py-4" />
