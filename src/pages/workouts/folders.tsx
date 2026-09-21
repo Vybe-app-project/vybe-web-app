@@ -69,8 +69,7 @@ export function FolderChips({ chips, value, onChange, className }: { chips: read
       <div role="group" aria-label="Folders" className="flex w-max gap-2 py-0.5">
         {chips.map((chip) => (
           <Chip key={chip.key} selected={value === chip.key} onClick={() => onChange(chip.key)}>
-            {chip.label}
-            {chip.count === undefined ? '' : ` ${formatStat(chip.count)}`}
+            {chip.count === undefined ? chip.label : `${chip.label} ${formatStat(chip.count)}`}
           </Chip>
         ))}
       </div>

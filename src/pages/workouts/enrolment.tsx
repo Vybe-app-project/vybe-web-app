@@ -72,7 +72,7 @@ export function EnrolmentCard(props: EnrolmentCardProps) {
       .join(' over ');
     return (
       <Card className="space-y-3">
-        {shape ? <p className="t-body text-text-1">{shape}.</p> : null}
+        {shape ? <p className="t-body text-text-1">{`${shape}.`}</p> : null}
         <p className="t-meta">{JOIN_COPY}</p>
         <Button variant="primary" block loading={starting} onClick={onStart}>
           Start this plan
@@ -90,7 +90,7 @@ export function EnrolmentCard(props: EnrolmentCardProps) {
       </div>
       {next ? (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-3">
-          <p className="t-body min-w-0 truncate text-text-1">Next: {nextUpLine(next)}</p>
+          <p className="t-body min-w-0 truncate text-text-1">{`Next: ${nextUpLine(next)}`}</p>
           {nextTo ? (
             <Link to={nextTo} viewTransition aria-label={`Start ${next.title || 'the next session'}`} className={ROW_ACTION}>
               Start
@@ -162,7 +162,7 @@ export function WeekList({ weeks, open, onToggle, workoutTo, linkState, menuFor,
               aria-controls={panelId}
               onClick={() => onToggle(week.week)}
             >
-              <span className="t-section text-text-1">Week {week.week}</span>
+              <span className="t-section text-text-1">{`Week ${week.week}`}</span>
               <span className="flex items-center gap-2">
                 <span className="t-meta tabular">{weekSummary(week, enrolled)}</span>
                 <ChevronDown size={16} className={cx('shrink-0 text-text-3 transition-transform dur-2', isOpen && 'rotate-180')} aria-hidden="true" />
@@ -175,7 +175,7 @@ export function WeekList({ weeks, open, onToggle, workoutTo, linkState, menuFor,
                   day.rest ? (
                     <li key={`${week.week}-${day.day}-rest`} className="flex min-h-11 items-center px-4 py-2">
                       <span aria-hidden="true" className="mr-2 h-4 w-4 shrink-0" />
-                      <span className="t-body text-text-3">{day.label} · Rest</span>
+                      <span className="t-body text-text-3">{`${day.label} · Rest`}</span>
                     </li>
                   ) : (
                     day.rows.map((row) => (
