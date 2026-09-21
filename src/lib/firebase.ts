@@ -1,4 +1,4 @@
-import { api } from './api';
+import { API_BASE, api } from './api';
 
 /**
  * Web push for the browser client (package P5).
@@ -321,7 +321,7 @@ export async function disablePush(): Promise<void> {
  * `revokeSession()` in lib/api.ts. Synchronous and fire-and-forget: signing
  * out must never wait on the network.
  */
-export function forgetPushTokenOnSignOut(bearer: string | null, baseUrl: string): void {
+export function forgetPushTokenOnSignOut(bearer: string | null): void {
   const record = pushTokenStore.read();
   pushTokenStore.clear();
   void getMessagingSafe()
@@ -329,7 +329,7 @@ export function forgetPushTokenOnSignOut(bearer: string | null, baseUrl: string)
     .catch(() => undefined);
   if (!record || !bearer) return;
   try {
-    void fetch(`${baseUrl.replace(/\/$/, '')}/users/push-token`, {
+    void fetch(`${API_BASE.replace(/\/$/, '')}/users/push-token`, {
       method: 'DELETE',
       keepalive: true,
       headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },

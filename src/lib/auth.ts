@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { AxiosError } from 'axios';
 import { api, tokenStore, adminApi, revokeSession, signOutReason } from './api';
+import { forgetPushTokenOnSignOut } from './firebase';
 import { disposeSocket } from './socket';
 import type { AccountFields, HomeGymRef } from './accountTypes';
 
@@ -246,6 +247,11 @@ export const useAuth = create<AuthState>((set, get) => ({
     // locally, which is the pre-existing behaviour. revokeSession() carries
     // the token explicitly and survives the navigation below; see api.ts.
     revokeSession('/auth/logout', tokenStore.get());
+    // Take this browser's push token off the account on the way out, or the
+    // next person to sign in here inherits the previous account's pushes.
+    // Same keepalive reasoning as the revocation above, and best-effort for
+    // the same reason: signing out must never wait on the network.
+    forgetPushTokenOnSignOut(tokenStore.get());
     // The shared realtime socket authenticated with this token; drop it so it
     // cannot keep a revoked session "online" or hold a live room open.
     disposeSocket();
@@ -256,6 +262,7 @@ export const useAuth = create<AuthState>((set, get) => ({
 
   logoutEverywhere: () => {
     revokeSession('/auth/logout-all', tokenStore.get());
+    forgetPushTokenOnSignOut(tokenStore.get());
     disposeSocket();
     tokenStore.clear();
     set({ user: null, sessionStale: false });

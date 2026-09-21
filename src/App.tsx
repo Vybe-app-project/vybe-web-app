@@ -15,6 +15,8 @@ import WelcomeSheet from './pages/WelcomeSheet';
 import { FullPageSpinner, ToastProvider, useThemeSync, useToast } from './components/ui';
 import { useAuth, useSessionRefresh } from './lib/auth';
 import { AccountPreferencesSync } from './lib/accountPreferences';
+import { WebPush } from './components/WebPush';
+import { setPushRegistration } from './lib/firebase';
 import { lazyPage } from './lib/navigation';
 import { SHEET_MEDIA, backgroundLocationOf } from './components/RouteSheet';
 import { useMediaQuery } from './components/ui';
@@ -351,6 +353,12 @@ function PwaUpdates() {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
+    // The same worker carries the FCM handlers (vite.config.ts
+    // workbox.importScripts), so this registration is the one getToken has to
+    // mint against; there is nowhere else to get it from.
+    onRegisteredSW(_swScriptUrl, registration) {
+      setPushRegistration(registration);
+    },
     onRegisterError(error) {
       console.warn('Service worker registration failed', error);
     },
@@ -562,6 +570,7 @@ export default function App() {
       <ApiNotices />
       <SessionRefresh />
       <AccountPreferencesSync />
+      <WebPush />
       <Suspense fallback={<FullPageSpinner />}>
         <RouteErrorBoundary>
           <AppRoutes />
