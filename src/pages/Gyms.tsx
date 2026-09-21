@@ -9,6 +9,7 @@ import { osmHref } from '../components/MapTile';
 import { memberCountLabel } from '../components/GymBand';
 import { dedupeProviderPlaces, distanceLabelKm, haversineKm, presetFromPlace, providerRadiusMeters } from '../lib/gyms';
 import { Pager, TEXT_ACTION, communityHref, communityLinkState, memberTotalOf, useCommunityAtPlace, useCommunityCover, type Community } from './GymCommunity';
+import { GymsUnderReview, useGymsUnderReview } from './gyms/PendingGyms';
 import {
   Badge,
   Button,
@@ -633,6 +634,9 @@ export default function Gyms() {
     },
   });
 
+  // Read only on the directory, where the cards go.
+  const underReview = useGymsUnderReview(tab === 'all');
+
   const nearby = useQuery({
     queryKey: ['gyms', 'nearby', coords?.lat, coords?.lng, radius, page],
     enabled: tab === 'nearby' && Boolean(coords),
@@ -775,17 +779,15 @@ export default function Gyms() {
       {/* ---------------------------------------------------------------- places */}
       {tab === 'places' ? (
         <section className="space-y-4" aria-label="Place search">
+          {/* The one line that says the first act. The search is already at the
+              top of the page, so the state before a search is a sentence, not
+              a hero: a person who has never used this needs to be told to type
+              a name, and nothing more. */}
           {!debouncedPlaces ? (
-            <EmptyState
-              size="sm"
-              family="community"
-              title="Your gym is already on the map"
-              message={
-                coords
-                  ? 'Type its name, for example “Iron Works Bethlehem”, and pick it, closest to you first. If nobody has started its community yet, you can start it in a minute.'
-                  : 'Type its name, for example “Iron Works Bethlehem”, and pick it from the map. If nobody has started its community yet, you can start it in a minute.'
-              }
-            />
+            <p className="t-body text-text-2">
+              Type the name of the place you train at — “Iron Works Bethlehem” —{' '}
+              {coords ? 'and pick it from the map, closest to you first.' : 'and pick it from the map.'} If nobody has started its community, you can.
+            </p>
           ) : null}
           {placesReady && places.isLoading ? <PlaceListSkeleton label="Searching places" /> : null}
           {places.isError ? (
@@ -910,6 +912,10 @@ export default function Gyms() {
       {/* ---------------------------------------------------------------- directory */}
       {tab === 'all' ? (
         <section className="space-y-4" aria-label="Gym directory">
+          {/* A gym a member added is theirs alone until an operator adds it to
+              the directory, and nothing tells them when that happens — so its
+              state is said here, on its own card. */}
+          <GymsUnderReview list={underReview.data || []} loading={underReview.isLoading && !underReview.data} />
           <div className="flex justify-end">
             <Select label="Sort gyms" hideLabel options={SORT_OPTIONS} value={sort} onChange={changeSort} containerClassName="w-44" />
           </div>
