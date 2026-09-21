@@ -28,9 +28,10 @@ import {
   useToast,
   type MenuItem,
 } from './ui';
-import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, TrendingUp, Zap } from './icons';
+import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, TrendingUp, Upload, Zap } from './icons';
 import { MetaList } from './workouts/cards';
 import { LOGS_KEY, dayKey, dayLabel, dayStreak, fetchLogs, parseLogDate, relativeDay, sessionVolume, sortLogs, weekTotals, weeksKept, type LogsResponse, type WorkoutLog } from './workouts/sessions';
+import { usePortabilitySupport } from '../lib/portability';
 import { SessionResumeBar } from './workouts/session/ResumeBar';
 import { TRAIN, useSheetNav } from './workouts/sheet';
 
@@ -43,9 +44,18 @@ const HistoryChart = lazy(() => import('./workouts/HistoryChart'));
  * (/workouts/history/:logId); logging one is /workouts/history/new. Older
  * deep links — /workouts/logs?log=1, ?from=<workoutId>, ?starter=1 — are
  * forwarded to that route with their seed intact.
+ *
+ * Coming from another app (P4): the header menu and the empty state both lead
+ * to /workouts/import, and both disappear once lib/portability has seen a
+ * 404 NOT_FOUND from the import route on this deployment.
  */
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatStat(n)} ${n === 1 ? one : many}`;
+
+/** Where a member arriving from Strong or Hevy goes, named once. */
+export const IMPORT_PATH = '/workouts/import';
+export const IMPORT_LABEL = 'Import from Strong or Hevy';
+const IMPORT_MENU: MenuItem[] = [{ label: IMPORT_LABEL, description: 'A CSV export from either app', icon: <Upload size={18} />, to: IMPORT_PATH }];
 
 /* --------------------------------------------------------------- session card */
 
@@ -167,6 +177,7 @@ export default function WorkoutHistory() {
   const unit = weightUnit(system);
   const { hash } = useLocation();
   const { state, open } = useSheetNav();
+  const canImport = usePortabilitySupport((p) => p.importSupported);
 
   const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: LOGS_KEY, queryFn: fetchLogs });
   const logs = useMemo(() => sortLogs(data?.workouts ?? []), [data]);
@@ -293,12 +304,16 @@ export default function WorkoutHistory() {
             <ButtonLink to={TRAIN.newSession()} state={state} variant={hasLogs ? 'primary' : 'secondary'} icon={<Plus size={18} />}>
               Log session
             </ButtonLink>
+            {canImport ? <Menu items={IMPORT_MENU} label="More history options" /> : null}
           </>
         }
         mobileActions={
-          <IconButton label="Log session" to={TRAIN.newSession()} state={state}>
-            <Plus size={24} />
-          </IconButton>
+          <>
+            <IconButton label="Log session" to={TRAIN.newSession()} state={state}>
+              <Plus size={24} />
+            </IconButton>
+            {canImport ? <Menu items={IMPORT_MENU} label="More history options" /> : null}
+          </>
         }
       />
 
@@ -333,7 +348,18 @@ export default function WorkoutHistory() {
           title="No sessions yet"
           message="Log your first session and your weekly volume, time and streak start building here."
           action={{ label: 'Log session', to: TRAIN.newSession(), state, icon: <Plus size={18} /> }}
-          secondaryAction={{ label: 'Start from a workout', to: TRAIN.hub, variant: 'quiet' }}
+          secondaryAction={
+            <>
+              {canImport ? (
+                <ButtonLink to={IMPORT_PATH} variant="ghost" icon={<Upload size={18} />}>
+                  {IMPORT_LABEL}
+                </ButtonLink>
+              ) : null}
+              <ButtonLink to={TRAIN.hub} variant="quiet">
+                Start from a workout
+              </ButtonLink>
+            </>
+          }
         />
       ) : (
         <>

@@ -1,3 +1,4 @@
+import { create } from 'zustand';
 import { api } from './api';
 import { apiErrorDetails } from './apiError';
 import { timezoneOffsetMinutes } from './timezone';
@@ -210,6 +211,34 @@ export function isNotDeployed(error: unknown): boolean {
 
 /** The route's error codes, so a page can answer the ones worth a different sentence. */
 export const importErrorCode = (error: unknown): string | null => apiErrorDetails(error).code;
+
+/**
+ * Whether this deployment has the two routes, for the entry points.
+ *
+ * Neither route can be probed cheaply — the export streams the whole history
+ * and the import needs a body — so nothing is asked in advance: the rows are
+ * offered, and the first 404 NOT_FOUND from either one takes its entry points
+ * away for the rest of the session. Optimistic by design: the routes are in
+ * the contract snapshot, so the honest default is that they are there, and a
+ * server without them hides them after one attempt instead of flashing an
+ * entry point that disappears on every load.
+ */
+export const usePortabilitySupport = create<{
+  importSupported: boolean;
+  exportSupported: boolean;
+  markMissing: (kind: 'import' | 'export') => void;
+}>((set) => ({
+  importSupported: true,
+  exportSupported: true,
+  markMissing: (kind) => set(kind === 'import' ? { importSupported: false } : { exportSupported: false }),
+}));
+
+/** Note a 404 NOT_FOUND against the surface that raised it; anything else is left alone. */
+export function noteIfMissing(kind: 'import' | 'export', error: unknown): boolean {
+  if (!isNotDeployed(error)) return false;
+  usePortabilitySupport.getState().markMissing(kind);
+  return true;
+}
 
 /** "42 sessions" / "1 session". Kept here so the page and its tests agree. */
 export const plural = (n: number, one: string, many = `${one}s`): string =>

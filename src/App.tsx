@@ -78,6 +78,8 @@ const SessionRunner = lazyPage('/workouts/session', () => import('./pages/workou
 const SessionFinish = lazyPage(null, () => import('./pages/workouts/session/Finish'));
 const MealLog = lazyPage(null, () => import('./pages/MealLog'));
 const WorkoutProgress = lazyPage('/workouts/progress', () => import('./pages/WorkoutProgress'));
+// Bring your history in (P4): a Strong / Hevy CSV, previewed before anything is written.
+const ImportWorkouts = lazyPage('/workouts/import', () => import('./pages/workouts/ImportWorkouts'));
 const Meals = lazyPage('/meals', () => import('./pages/Meals'));
 const MealDetail = lazyPage(null, () => import('./pages/MealDetail'));
 const SharedMeal = lazyPage(null, () => import('./pages/SharedMeal'));
@@ -471,6 +473,7 @@ const ROUTE_TREE = (
       <Route path="workouts/history" element={<WorkoutHistory />} />
       <Route path="workouts/logs" element={<RedirectHistory />} />
       <Route path="workouts/progress" element={<WorkoutProgress />} />
+      <Route path="workouts/import" element={<ImportWorkouts />} />
       {/* Detail and editor routes (RouteSheet); static paths before the :param routes below. */}
       {SHEET_ROUTES.map((r) => (
         <Route key={r.path} path={r.path} element={r.element} />
