@@ -228,7 +228,7 @@ test('every Message entry point opens the draft thread with the peer, and /messa
     assert.doesNotMatch(src, /\/messages\?to=/, `${file} must not use the ignored /messages?to= form`);
   }
   const src = read('src/pages/Messages.tsx');
-  assert.match(src, /const isDraft = roomId === DRAFT_ROOM_ID \|\| \(!roomId && toParam\.length > 0\)/);
+  assert.match(src, /const isDraft = !showRequests && \(roomId === DRAFT_ROOM_ID \|\| \(!roomId && toParam\.length > 0\)\)/);
   assert.match(read('src/components/ui.tsx'), /<Link to=\{to\} state=\{state\} viewTransition aria-label=\{label\}/, 'IconButton links carry router state');
 });
 

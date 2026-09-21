@@ -32,6 +32,8 @@ import {
   type TypingState,
 } from '../lib/chat';
 import { linkifySegments } from '../lib/linkify';
+import { isPendingRequestRoom } from '../lib/messageRequests';
+import { AcceptToReplyBanner, MessageRequestsView, RequestsEntryRow, useMessageRequests } from './messages/MessageRequests';
 import PeopleSearch, { PersonRow, personName as nameOf, rememberPerson, usePeopleSearch, type Person } from './PeopleSearch';
 import {
   Avatar,
@@ -123,6 +125,13 @@ type ChatRoom = {
     isGroup?: boolean;
     otherUser?: ChatUser;
   };
+  /**
+   * The viewer's own participant row. `status: 'pending'` is the only
+   * honest way to know this thread is a message request waiting on them —
+   * there is no `isRequest` field (docs/api-contract.md, Messaging v2).
+   */
+  me?: { status?: string; role?: string };
+  requestContext?: { kind?: string; state?: string; createdAt?: string; expiresAt?: string };
 };
 
 type ChatMessage = {
@@ -489,6 +498,9 @@ function RoomList({
   onOpenWith: (user: ChatUser) => void;
 }) {
   const [search, setSearch] = useState('');
+  // One Requests entry over the list, never a badge per conversation. Absent
+  // while the flag is off, and absent for a member who takes no requests.
+  const requests = useMessageRequests();
   const q = search.trim().toLowerCase();
   // The same typeahead query as every other people surface (debounced, aborted, cached).
   const people = usePeopleSearch(search);
@@ -540,6 +552,11 @@ function RoomList({
       </div>
 
       <nav aria-label="Conversations" className={cx('min-h-0 flex-1', compact ? '' : 'overflow-y-auto overscroll-contain p-2')}>
+        {requests.flagOn && requests.allowRequests && !q ? (
+          <div className={cx('mb-1', compact ? '' : 'border-b border-line pb-1')}>
+            <RequestsEntryRow total={requests.total} compact={compact} />
+          </div>
+        ) : null}
         {rooms.isLoading ? (
           <ul className="space-y-1" aria-busy="true" aria-label="Loading conversations">
             {Array.from({ length: 7 }).map((_, i) => (
@@ -2079,6 +2096,7 @@ function Thread({
   const subtitle = isGroup ? `${room?.participants?.length ?? 0} members` : peerOnline ? 'Active now' : peer?.username ? `@${peer.username}` : 'Direct message';
   const lastTimelineOutboxTemp = outbox.length ? outbox[outbox.length - 1].tempId : null;
   const consentBlocked = target.kind === 'draft' && consent.blocked;
+  const pendingRequest = isPendingRequestRoom(room);
   const headerLink = room && isGroup ? undefined : peer ? `/u/${peer._id}` : undefined;
   const onTyping = room ? (active: boolean) => emitTyping(room._id, isGroup, active) : undefined;
 
@@ -2242,7 +2260,12 @@ function Thread({
         ) : null}
       </div>
 
-      {consentBlocked && peer ? (
+      {pendingRequest && room ? (
+        // A reply IS an accept server-side, so a composer here would accept
+        // the request without saying so. One line and the same two words the
+        // Requests list uses.
+        <AcceptToReplyBanner roomId={room._id} onAccepted={() => void thread.refetch()} />
+      ) : consentBlocked && peer ? (
         <ConsentCallout
           peer={{ ...peer, friendStatus: consent.friendStatus ?? peer.friendStatus }}
           onChanged={(status, canMessage) => setConsent({ blocked: !canMessage, friendStatus: status })}
@@ -2540,7 +2563,10 @@ export default function Messages() {
   /* --- which thread --- */
   // Both /messages/new?to=<id> and the older /messages?to=<id> open a draft with that person.
   const toParam = params.get('to') || '';
-  const isDraft = roomId === DRAFT_ROOM_ID || (!roomId && toParam.length > 0);
+  // /messages/requests is a static route, so `roomId` is undefined there;
+  // the pathname is read too in case the dynamic route matched first.
+  const showRequests = roomId === 'requests' || location.pathname === '/messages/requests';
+  const isDraft = !showRequests && (roomId === DRAFT_ROOM_ID || (!roomId && toParam.length > 0));
   const draftPeerId = isDraft ? toParam : '';
   // /messages/new with nobody picked yet used to render a dead "conversation
   // isn't available" thread; it now opens the people picker over the inbox.
@@ -2552,11 +2578,14 @@ export default function Messages() {
   }, [roomId, toParam, navigate, location.state]);
   const statePeer = (location.state as { peer?: ChatUser } | null)?.peer;
 
-  const activeRoom = useMemo(() => (roomId && !isDraft ? (rooms.data || []).find((r) => r._id === roomId) || null : null), [rooms.data, roomId, isDraft]);
+  const activeRoom = useMemo(
+    () => (roomId && !isDraft && !showRequests ? (rooms.data || []).find((r) => r._id === roomId) || null : null),
+    [rooms.data, roomId, isDraft, showRequests],
+  );
 
   // Deep links to rooms outside the first page of the list resolve individually.
   const hiding = Boolean(roomId && hiddenRooms.current.has(roomId));
-  const lookupEnabled = Boolean(roomId && !isDraft && !rooms.isPending && !activeRoom && !hiding);
+  const lookupEnabled = Boolean(roomId && !isDraft && !showRequests && !rooms.isPending && !activeRoom && !hiding);
   // The draft header can render from router state, but the consent flags
   // (canMessage, friendStatus) always come from the profile endpoint.
   const draftEnabled = Boolean(draftPeerId);
@@ -2598,8 +2627,11 @@ export default function Messages() {
   }, [isDraft, statePeer, draftPeerId, draftPeer.data, activeRoom, roomLookup.data]);
 
   const threadPending =
-    Boolean(roomId || isDraft) && !target && (hiding || (!isDraft && rooms.isPending) || (lookupEnabled && roomLookup.isPending) || (draftEnabled && draftPeer.isPending));
-  const threadMissing = Boolean(roomId || isDraft) && !target && !threadPending;
+    !showRequests &&
+    Boolean(roomId || isDraft) &&
+    !target &&
+    (hiding || (!isDraft && rooms.isPending) || (lookupEnabled && roomLookup.isPending) || (draftEnabled && draftPeer.isPending));
+  const threadMissing = !showRequests && Boolean(roomId || isDraft) && !target && !threadPending;
 
   const openWith = useCallback(
     (user: ChatUser) => {
@@ -2630,9 +2662,9 @@ export default function Messages() {
   const onLeft = useLeaveRoom(meId, hiddenRooms);
 
   /* --- layout --- */
-  const showThread = Boolean(roomId) || isDraft;
+  const showThread = !showRequests && (Boolean(roomId) || isDraft);
   const showThreadOnly = compact && showThread;
-  const showListOnly = compact && !showThread;
+  const showListOnly = compact && !showThread && !showRequests;
 
   const newMessageButton = (
     <Button variant="primary" icon={<Edit size={18} />} onClick={() => setPickerOpen(true)}>
@@ -2701,9 +2733,13 @@ export default function Messages() {
     </>
   );
 
+  const requestsPane = <MessageRequestsView meId={meId} onOpenThread={(id) => navigate(`/messages/${id}`, { viewTransition: true })} />;
+
   return (
     <>
-      {!showThreadOnly ? (
+      {showRequests ? (
+        <PageHeader title="Requests" subtitle="Messages from people you’re not connected to" back="/messages" actions={null} mobileActions={null} rail={null} />
+      ) : !showThreadOnly ? (
         <PageHeader
           title="Messages"
           subtitle={rooms.data?.length ? `${rooms.data.length} ${rooms.data.length === 1 ? 'conversation' : 'conversations'}` : undefined}
@@ -2718,7 +2754,9 @@ export default function Messages() {
         />
       ) : null}
 
-      {showListOnly ? (
+      {showRequests && compact ? (
+        <div className={cx('-mt-2 flex min-h-[20rem] flex-col', THREAD_PANE_H)}>{requestsPane}</div>
+      ) : showListOnly ? (
         <RoomList rooms={rooms} meId={meId} activeId={null} compact typing={typing} onNewMessage={() => setPickerOpen(true)} onOpenWith={openWith} />
       ) : showThreadOnly ? (
         <div className={cx('-mt-4 flex min-h-[20rem] flex-col', THREAD_PANE_H)}>
@@ -2727,10 +2765,10 @@ export default function Messages() {
       ) : (
         <div className={cx('flex min-h-[24rem] gap-gutter', SPLIT_PANE_H)}>
           <Card padded={false} role="complementary" aria-label="Conversation list" className="flex w-72 shrink-0 flex-col overflow-hidden lg:w-[22.5rem]">
-            <RoomList rooms={rooms} meId={meId} activeId={roomId && !isDraft ? roomId : null} compact={false} typing={typing} onNewMessage={() => setPickerOpen(true)} onOpenWith={openWith} />
+            <RoomList rooms={rooms} meId={meId} activeId={roomId && !isDraft && !showRequests ? roomId : null} compact={false} typing={typing} onNewMessage={() => setPickerOpen(true)} onOpenWith={openWith} />
           </Card>
-          <Card padded={false} role="region" aria-label="Conversation" className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            {threadPane}
+          <Card padded={false} role="region" aria-label={showRequests ? 'Message requests' : 'Conversation'} className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            {showRequests ? requestsPane : threadPane}
           </Card>
         </div>
       )}

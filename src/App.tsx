@@ -457,6 +457,9 @@ const ROUTE_TREE = (
       <Route path="settings" element={<Settings />} />
       <Route path="notifications" element={<Notifications />} />
       <Route path="messages" element={<Messages />} />
+      {/* The Requests fold. A static segment outranks :roomId, so this never
+          resolves as a room id (and Messages checks the pathname too). */}
+      <Route path="messages/requests" element={<Messages />} />
       <Route path="messages/:roomId" element={<Messages />} />
       <Route path="friends" element={<Friends />} />
       <Route path="gyms" element={<Gyms />} />

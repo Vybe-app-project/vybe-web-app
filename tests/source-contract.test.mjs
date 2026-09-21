@@ -294,7 +294,9 @@ test('search, profiles and friends: the fix8 regressions stay fixed', () => {
   // Messages: a bare /messages?to=<id> is the draft route.
   const messages = read('src/pages/Messages.tsx');
   assert.match(messages, /const toParam = params\.get\('to'\) \|\| '';/);
-  assert.match(messages, /const isDraft = roomId === DRAFT_ROOM_ID \|\| \(!roomId && toParam\.length > 0\);/);
+  assert.match(messages, /const isDraft = !showRequests && \(roomId === DRAFT_ROOM_ID \|\| \(!roomId && toParam\.length > 0\)\);/);
+  // /messages/requests is a static route, so the draft check excludes it (P8b).
+  assert.match(messages, /const showRequests = roomId === 'requests' \|\| location\.pathname === '\/messages\/requests';/);
 });
 
 test('settings: privacy switch, blocked accounts and inline username errors', () => {
