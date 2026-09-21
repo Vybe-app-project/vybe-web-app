@@ -41,6 +41,7 @@ import {
   VIZ,
   cx,
   formatStat,
+  hasMetric,
   humanize,
   usePulse,
   useToast,
@@ -313,6 +314,7 @@ function MacroRing({
   unit,
   color,
   size,
+  fallback = null,
 }: {
   label: string;
   value: number;
@@ -320,26 +322,32 @@ function MacroRing({
   unit: string;
   color: (typeof RINGS)[number]['color'];
   size: number;
+  /** In the centre while nothing is logged. The dashed ring already says "not yet", so most rings leave it blank; the kcal ring carries the page's one "Set targets". */
+  fallback?: ReactNode;
 }) {
   const hasGoal = goal > 0;
+  const shown = Math.round(value);
+  const logged = hasMetric(shown);
   // Nutrition numbers stay neutral (DP-005): the ring fills past its target in
-  // the macro's own colour, and nothing turns red or green.
+  // the macro's own colour, and nothing turns red or green. Nothing logged is
+  // never drawn as "0": the ring goes dashed and its centre holds `fallback`.
   return (
     <div className="flex flex-col items-center gap-2">
       <Ring
-        value={value}
+        value={shown}
         max={hasGoal ? goal : 0}
         size={size}
         stroke={size >= 96 ? 10 : 8}
         color={color}
-        label={hasGoal ? `${label} ${Math.round(value)} of ${Math.round(goal)} ${unit}` : `${label} ${Math.round(value)} ${unit}`}
+        fallback={fallback}
+        label={logged ? (hasGoal ? `${label} ${shown} of ${Math.round(goal)} ${unit}` : `${label} ${shown} ${unit}`) : `${label}: nothing logged yet`}
       >
-        <span className={cx('leading-none', size >= 96 ? 'text-xl' : 'text-lg')}>{formatStat(Math.round(value))}</span>
+        <span className={cx('leading-none', size >= 96 ? 'text-xl' : 'text-lg')}>{formatStat(shown)}</span>
         {hasGoal ? <span className="mt-0.5 text-2xs font-semibold tracking-normal text-text-3 [font-variation-settings:'wdth'_100]">of {formatStat(Math.round(goal))}</span> : null}
       </Ring>
       <span className="type-label text-text-2">
         {label}
-        {!hasGoal ? <span className="text-text-3"> {unit}</span> : null}
+        {!hasGoal ? <span className="text-text-3"> {unit}</span> : !logged ? <span className="text-text-3"> · of {formatStat(Math.round(goal))} {unit}</span> : null}
       </span>
     </div>
   );
@@ -640,8 +648,10 @@ export const servingLineFor = (food: SelectedFood) => (food.servings === 1 ? foo
 /**
  * One thin bar per macro: label, grams eaten against the target in tabular
  * numerals, the fill in the macro's fixed colour. Without a target the bar is
- * the dashed baseline and the grams stand alone. The phone half of the Today
- * card, beside the single kcal ring.
+ * the dashed baseline and the grams stand alone. Nothing eaten is never "0 g":
+ * the number gives way to the target ("of 150 g") when there is one and to
+ * nothing when there is not — the dashed baseline is the "not yet". The phone
+ * half of the Today card, beside the single kcal ring.
  */
 function MacroBars({ consumed, goals }: { consumed: MacroGoals; goals: MacroGoals | null }) {
   return (
@@ -649,6 +659,7 @@ function MacroBars({ consumed, goals }: { consumed: MacroGoals; goals: MacroGoal
       {MACRO_ITEMS.map((m) => {
         const eaten = Math.round(consumed[m.key]);
         const goal = goals ? Math.round(goals[m.key]) : 0;
+        const logged = hasMetric(eaten);
         return (
           <li key={m.key} className="space-y-1.5">
             <div className="flex items-baseline justify-between gap-3 text-xs">
@@ -657,11 +668,17 @@ function MacroBars({ consumed, goals }: { consumed: MacroGoals; goals: MacroGoal
                 {m.label}
               </span>
               <span className="tabular text-text-2">
-                <span className="font-semibold text-text-1">{formatStat(eaten)}</span>
-                {goal > 0 ? ` / ${formatStat(goal)}` : ''} g
+                {logged ? (
+                  <>
+                    <span className="font-semibold text-text-1">{formatStat(eaten)}</span>
+                    {goal > 0 ? ` / ${formatStat(goal)}` : ''} g
+                  </>
+                ) : goal > 0 ? (
+                  `of ${formatStat(goal)} g`
+                ) : null}
               </span>
             </div>
-            <Progress value={goal > 0 ? eaten : null} max={goal} tone={m.key} size="sm" label={`${m.label} ${eaten}${goal > 0 ? ` of ${goal}` : ''} g`} />
+            <Progress value={goal > 0 ? eaten : null} max={goal} tone={m.key} size="sm" label={logged ? `${m.label} ${eaten}${goal > 0 ? ` of ${goal}` : ''} g` : `${m.label}: nothing logged yet`} />
           </li>
         );
       })}
@@ -1253,7 +1270,7 @@ function MealList({ children, label }: { children: ReactNode; label?: string }) 
 
 function MealListSkeleton({ count = 3 }: { count?: number }) {
   return (
-    <div className="card divide-y divide-line" aria-busy="true" aria-label="Loading meals">
+    <Card padded={false} className="divide-y divide-line" aria-busy="true" aria-label="Loading meals">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="flex gap-3 p-3 sm:p-4">
           <Skeleton className="h-[72px] w-[72px] rounded-md" />
@@ -1264,7 +1281,7 @@ function MealListSkeleton({ count = 3 }: { count?: number }) {
           </div>
         </div>
       ))}
-    </div>
+    </Card>
   );
 }
 
@@ -1472,49 +1489,63 @@ export default function Meals() {
 
   const ringsLoading = todayQuery.isLoading || goalsQuery.isLoading;
 
-  // The band's one figure is today's kcal, drawn only once something is logged.
-  // With nothing logged the band carries the next step instead: targets first
-  // when there are none, otherwise a plain "nothing yet".
-  const bandNext = ringsLoading ? null : goalsKnown && !hasGoals ? (
-    <div>
-      <p className="text-base font-semibold">Set your daily targets</p>
-      <p className="gym-band-body-copy">Calorie and macro goals give every meal you log something to fill.</p>
-      <ButtonLink to="/health/goals" variant="secondary" size="sm" className="mt-3">
+  // Today's kcal ring never shows a zero. With nothing logged its centre holds
+  // the next step — "Set targets" when there are none (the ONE place that
+  // prompt appears on this page), a plain "Nothing yet" otherwise — and the
+  // footer line speaks only when it adds something the ring does not say.
+  const kcalFallback: ReactNode =
+    goalsKnown && !hasGoals ? (
+      <Link to="/health/goals" viewTransition className="font-semibold text-brand-text hover:underline">
+        Set targets
+      </Link>
+    ) : (
+      'Nothing yet'
+    );
+  const footer: ReactNode = goalsQuery.isError ? (
+    <>
+      <span>Targets didn’t load, so today’s totals are shown without them.</span>
+      <Button size="sm" variant="quiet" onClick={() => void goalsQuery.refetch()}>
+        Try again
+      </Button>
+    </>
+  ) : hasGoals ? (
+    <>
+      <span>
+        {remainingKcal === 0 ? (
+          'Right on today’s target'
+        ) : (
+          <>
+            <span className="tabular font-semibold text-text-1">{formatStat(Math.abs(remainingKcal ?? 0))} kcal</span> {(remainingKcal ?? 0) > 0 ? 'left today' : 'past today’s target'}
+          </>
+        )}
+      </span>
+      {burned > 0 ? (
+        <span className="tabular">
+          Target raised {formatStat(burned)} kcal for {formatStat(workouts)} {plural(workouts, 'workout')}
+        </span>
+      ) : null}
+    </>
+  ) : kcalToday > 0 ? (
+    <>
+      <span>Add daily targets and this shows what’s left.</span>
+      <ButtonLink to="/health/goals" size="sm" variant="quiet">
         Set targets
       </ButtonLink>
-    </div>
-  ) : (
-    <p className="text-sm text-band-ink-2">Nothing logged yet today.</p>
-  );
+    </>
+  ) : null;
 
   const streakLine = streak > 0 ? `${streak}-day logging streak` : undefined;
 
   return (
     <div className="space-y-section">
+      {/* Templates and Weekly plans are the hub's section tabs (the shell draws them); the header holds only the page's one action. */}
       <PageHeader
         title="Meals"
         actions={
-          <>
-            <ButtonLink to="/meals/templates" variant="quiet" icon={<BookOpen size={18} />}>
-              Templates
-            </ButtonLink>
-            <ButtonLink to="/meals/plans" variant="quiet">
-              Weekly plans
-            </ButtonLink>
-          </>
+          <Button variant="primary" icon={<Plus size={18} />} onClick={openLog}>
+            Log meal
+          </Button>
         }
-        band={{
-          context: format(new Date(), 'EEEE d MMMM'),
-          figure: kcalToday,
-          figureUnit: 'kcal',
-          figureLabel: hasGoals && goals ? `of ${formatStat(Math.round(goals.calories))} today` : 'eaten today',
-          action: (
-            <Button variant="primary" size="lg" icon={<Plus size={18} />} onClick={openLog}>
-              Log meal
-            </Button>
-          ),
-          children: bandNext,
-        }}
         mobileActions={
           <IconButton label="Log meal" onClick={openLog}>
             <Plus size={22} />
@@ -1542,66 +1573,34 @@ export default function Meals() {
             <>
               {/* Narrow card: one kcal ring and three macro bars. Wide card (@lg): the four-ring row. */}
               <div className="flex items-center gap-5 @lg:hidden">
-                <MacroRing label="Calories" unit="kcal" color="kcal" size={132} value={consumed.calories} goal={hasGoals && goals ? goals.calories : 0} />
+                <MacroRing label="Calories" unit="kcal" color="kcal" size={132} value={consumed.calories} goal={hasGoals && goals ? goals.calories : 0} fallback={kcalFallback} />
                 <MacroBars consumed={consumed} goals={hasGoals ? goals : null} />
               </div>
               <div className="hidden grid-cols-4 justify-items-center gap-4 @lg:grid">
                 {RINGS.map((r) => (
-                  <MacroRing key={r.key} label={r.label} unit={r.unit} color={r.color} size={96} value={consumed[r.key]} goal={hasGoals && goals ? goals[r.key] : 0} />
+                  <MacroRing key={r.key} label={r.label} unit={r.unit} color={r.color} size={96} value={consumed[r.key]} goal={hasGoals && goals ? goals[r.key] : 0} fallback={r.key === 'calories' ? kcalFallback : null} />
                 ))}
               </div>
 
-              <p className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-4 text-sm text-text-2">
-                {goalsQuery.isError ? (
-                  <>
-                    <span>Targets didn’t load, so today’s totals are shown without them.</span>
-                    <Button size="sm" variant="quiet" onClick={() => void goalsQuery.refetch()}>
-                      Try again
-                    </Button>
-                  </>
-                ) : !hasGoals ? (
-                  <>
-                    <span>Set calorie and macro targets and these fill as you log.</span>
-                    <ButtonLink to="/health/goals" size="sm" variant="quiet">
-                      Set targets
-                    </ButtonLink>
-                  </>
-                ) : (
-                  <>
-                    <span>
-                      <span className="tabular font-semibold text-text-1">{formatStat(Math.abs(remainingKcal ?? 0))} kcal</span>{' '}
-                      {(remainingKcal ?? 0) >= 0 ? 'left today' : 'past today’s target'}
-                    </span>
-                    {burned > 0 ? (
-                      <span className="tabular">
-                        Target raised {formatStat(burned)} kcal for {formatStat(workouts)} {plural(workouts, 'workout')}
-                      </span>
-                    ) : null}
-                  </>
-                )}
-              </p>
+              {footer ? <p className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-4 text-sm text-text-2">{footer}</p> : null}
             </>
           )}
         </Card>
       </Section>
 
-      <Section
-        title="Log"
-        action={
-          <SegmentedControl
-            size="sm"
-            fill={false}
-            aria-label="Range"
-            tabs={[
-              { key: 'today', label: 'Today' },
-              { key: 'week', label: 'This week' },
-              { key: 'community', label: 'Community', icon: <Globe size={14} /> },
-            ]}
-            value={tab}
-            onChange={(k: string) => changeTab(k as LogTab)}
-          />
-        }
-      >
+      <Section title="Log">
+        {/* The switcher is its own full-width row on the grid, not a control floated beside the title. */}
+        <SegmentedControl
+          aria-label="Range"
+          className="sm:max-w-md"
+          tabs={[
+            { key: 'today', label: 'Today' },
+            { key: 'week', label: 'This week' },
+            { key: 'community', label: 'Community', icon: <Globe size={14} /> },
+          ]}
+          value={tab}
+          onChange={(k: string) => changeTab(k as LogTab)}
+        />
         {tab === 'community' ? (
           <CommunityMeals onLog={openLog} />
         ) : rangeQuery.isLoading ? (
