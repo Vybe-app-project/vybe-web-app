@@ -222,11 +222,8 @@ export function ExerciseRows({
           {row.exerciseId ? (
             // Chosen from the library: the row names itself. "Change" reopens the picker, which is also the way back to a typed name.
             <div className="flex min-h-18 items-center gap-3">
-              {row.library?.thumbnail ? (
-                <ExerciseThumb exercise={{ media: [row.library.thumbnail], category: null }} />
-              ) : (
-                <ExerciseThumb exercise={{ media: [], category: null }} />
-              )}
+              {/* The picker handed over the rendition; a row rebuilt from a saved log has none and draws the glyph tile. */}
+              <ExerciseThumb exercise={{ media: row.library?.thumbnail ? [row.library.thumbnail] : [], category: null }} />
               <div className="min-w-0 flex-1">
                 <p className="t-name truncate text-text-1">
                   <span className="sr-only">{`Exercise ${i + 1}: `}</span>

@@ -252,14 +252,15 @@ export function ExercisePicker({
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
     const rows = rowButtons();
-    if (!rows.length) return;
     const inField = document.activeElement === searchRef.current;
     if (e.key === 'Enter') {
       if (!inField) return;
+      // Always swallowed: a bare Enter in a search field is a submit everywhere else.
       e.preventDefault();
-      rows[0].click();
+      rows[0]?.click();
       return;
     }
+    if (!rows.length) return;
     const at = rows.indexOf(document.activeElement as HTMLElement);
     e.preventDefault();
     if (e.key === 'ArrowDown') rows[at < 0 ? 0 : Math.min(rows.length - 1, at + 1)].focus();
