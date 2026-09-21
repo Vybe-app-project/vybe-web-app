@@ -31,8 +31,23 @@
 
 /* global importScripts, firebase, clients */
 
-importScripts('https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/12.19.0/firebase-messaging-compat.js');
+/**
+ * Failing to load the SDK must not fail the worker. This file is imported
+ * INTO the app shell's worker, so a throw here aborts that worker's
+ * installation and the PWA loses precaching, offline and the update prompt
+ * along with push. The one thing that realistically throws is the site's
+ * Content-Security-Policy: `script-src 'self'` (deploy/caddy/vybe.caddy)
+ * blocks these two imports until https://www.gstatic.com is added to it.
+ * Caught, background push is the only thing missing.
+ */
+var vybeFcmReady = false;
+try {
+  importScripts('https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js');
+  importScripts('https://www.gstatic.com/firebasejs/12.19.0/firebase-messaging-compat.js');
+  vybeFcmReady = true;
+} catch (error) {
+  console.warn('Vybe: FCM background handling is unavailable in this worker', error);
+}
 
 var VYBE_FALLBACK_LINK = '/notifications';
 /** Marks a notification this file posted, so the dedupe never closes its own. */
@@ -92,14 +107,16 @@ self.addEventListener('notificationclick', function (event) {
   );
 });
 
-firebase.initializeApp({
-  apiKey: 'AIzaSyDcrk_Q8hjzUuM9PzBHLH4FC8bezZQCA-Q',
-  authDomain: 'vybe-6ac92.firebaseapp.com',
-  projectId: 'vybe-6ac92',
-  storageBucket: 'vybe-6ac92.firebasestorage.app',
-  messagingSenderId: '127745278900',
-  appId: '1:127745278900:web:622fa8921b4e876836e8e1',
-});
+if (vybeFcmReady) {
+  firebase.initializeApp({
+    apiKey: 'AIzaSyDcrk_Q8hjzUuM9PzBHLH4FC8bezZQCA-Q',
+    authDomain: 'vybe-6ac92.firebaseapp.com',
+    projectId: 'vybe-6ac92',
+    storageBucket: 'vybe-6ac92.firebasestorage.app',
+    messagingSenderId: '127745278900',
+    appId: '1:127745278900:web:622fa8921b4e876836e8e1',
+  });
+}
 
 /** Close the SDK's own un-iconed copy of this push before posting ours. */
 function closeDuplicatesOf(title, body) {
@@ -117,21 +134,23 @@ function closeDuplicatesOf(title, body) {
     });
 }
 
-firebase.messaging().onBackgroundMessage(function (payload) {
-  var notification = (payload && payload.notification) || {};
-  var data = (payload && payload.data) || {};
-  var title = notification.title || 'Vybe';
-  var body = notification.body || '';
-  var options = {
-    body: body,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    data: Object.assign({}, data, { link: vybeLinkOf(data), vybePush: '1' }),
-  };
-  // The API's collapse key is per recipient, per type, per object: a second
-  // like on the same post replaces the first in the tray instead of stacking.
-  if (data.collapseKey) options.tag = data.collapseKey;
-  return closeDuplicatesOf(title, body).then(function () {
-    return self.registration.showNotification(title, options);
+if (vybeFcmReady) {
+  firebase.messaging().onBackgroundMessage(function (payload) {
+    var notification = (payload && payload.notification) || {};
+    var data = (payload && payload.data) || {};
+    var title = notification.title || 'Vybe';
+    var body = notification.body || '';
+    var options = {
+      body: body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: Object.assign({}, data, { link: vybeLinkOf(data), vybePush: '1' }),
+    };
+    // The API's collapse key is per recipient, per type, per object: a second
+    // like on the same post replaces the first in the tray instead of stacking.
+    if (data.collapseKey) options.tag = data.collapseKey;
+    return closeDuplicatesOf(title, body).then(function () {
+      return self.registration.showNotification(title, options);
+    });
   });
-});
+}

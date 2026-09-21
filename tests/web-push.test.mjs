@@ -213,6 +213,13 @@ test('the worker is imported into the generated one and matches the installed SD
     sw.indexOf("self.addEventListener('notificationclick'") < sw.indexOf('firebase.messaging().onBackgroundMessage'),
     'the click handler must be registered before the SDK adds its own',
   );
+
+  // A throw here aborts the APP SHELL's worker, not just push: this file is
+  // imported into it. Production CSP is `script-src 'self'`, which blocks
+  // gstatic outright, so the imports have to be survivable.
+  assert.match(sw, /try \{\s*importScripts\('https:\/\/www\.gstatic\.com[\s\S]*?\} catch \(error\) \{/);
+  assert.match(sw, /if \(vybeFcmReady\) \{\s*firebase\.initializeApp\(/);
+  assert.match(sw, /if \(vybeFcmReady\) \{\s*firebase\.messaging\(\)\.onBackgroundMessage\(/);
 });
 
 test('the permission is asked for on the card, never on a page load', () => {
