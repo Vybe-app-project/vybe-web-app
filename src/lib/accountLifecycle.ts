@@ -24,7 +24,7 @@ export const NO_REAUTH_METHODS: ReauthMethods = { password: false, emailCode: fa
 /** 200 body of POST /auth/reauth. Memory only; never stored. */
 export type ReauthResult = { reauthToken: string; expiresIn: number; expiresAt: string };
 
-export type ReauthPurpose = 'delete' | 'export' | 'download';
+export type ReauthPurpose = 'delete' | 'export' | 'download' | 'ownership';
 
 export type DeletionInfo = {
   requestedAt: string;

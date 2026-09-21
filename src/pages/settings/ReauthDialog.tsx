@@ -14,6 +14,7 @@ const PURPOSE_COPY: Record<ReauthPurpose, string> = {
   delete: 'Confirm it is you before anything is deleted.',
   export: 'Confirm it is you before we prepare a copy of your data.',
   download: 'Confirm it is you before we prepare the download.',
+  ownership: 'Confirm it is you before you take the gym on.',
 };
 
 const RESEND_COOLDOWN_SECONDS = 60;

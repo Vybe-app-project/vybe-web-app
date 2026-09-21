@@ -788,16 +788,15 @@ export async function fetchEventInsights(eventId: string): Promise<EventInsights
   return data as EventInsights;
 }
 
-export const EVENT_ICS_PATH = (eventId: string) => `/gyms/events/${eventId}/ics`;
-
 /**
  * The calendar file. The route is bearer-only (D-54: event ids are
  * enumerable, so there is no signed public link), so this is a blob read
  * through the one client and handed to the browser — the same shape as the
- * CSV export in lib/portability.ts.
+ * CSV export in lib/portability.ts. The path is written out here, not built
+ * from a helper, so the contract audit resolves it like every other one.
  */
 export async function fetchEventIcs(eventId: string): Promise<{ blob: Blob; fileName: string }> {
-  const response = await api.get<Blob>(EVENT_ICS_PATH(eventId), { responseType: 'blob' });
+  const response = await api.get<Blob>(`/gyms/events/${eventId}/ics`, { responseType: 'blob' });
   const disposition = String(response.headers?.['content-disposition'] ?? '');
   const named = /filename="?([^";]+)"?/i.exec(disposition);
   return { blob: response.data, fileName: named?.[1]?.trim() || `vybe-session-${eventId.slice(-6)}.ics` };

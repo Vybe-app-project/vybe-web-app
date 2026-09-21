@@ -196,12 +196,19 @@ test('the activity routes and hours degrade to nothing, the join is optimistic, 
 
   const src = read('src/pages/GymCommunity.tsx');
   const detail = read('src/pages/CommunityDetail.tsx');
-  // The three routes, called as the API mounts them; a 404 (older API, or a community the viewer may not see) is "no figure".
-  assert.match(src, /api\.get\(`\/gyms\/community\/\$\{communityId\}\/active-this-week`\)/);
-  assert.match(src, /api\.get\(`\/gyms\/community\/\$\{communityId\}\/trained-today`, \{ params: \{ timeZone \} \}\)/, 'the local day is drawn in the device zone');
-  assert.match(src, /api\.get\(`\/gyms\/places\/\$\{encodeURIComponent\(placeId!\)\}\/hours`, \{ params: \{ timeZone \} \}\)/);
+  const v2 = read('src/lib/gymCommunityV2.ts');
+  // The three routes, called as the API mounts them. Their request paths moved
+  // to lib/gymCommunityV2 with the rest of the gym page's fetchers (P7), so
+  // each path has one home; the hooks that call them stay here.
+  assert.match(v2, /api\.get\(`\/gyms\/community\/\$\{communityId\}\/active-this-week`\)/);
+  assert.match(v2, /api\.get\(`\/gyms\/community\/\$\{communityId\}\/trained-today`, \{ params: \{ timeZone \} \}\)/, 'the local day is drawn in the device zone');
+  assert.match(v2, /api\.get\(`\/gyms\/places\/\$\{encodeURIComponent\(placeId\)\}\/hours`, \{ params: \{ timeZone \} \}\)/);
   assert.match(src, /const resolvable = typeof placeId === 'string' && \/\^osm-\/\.test\(placeId\);/, 'only OpenStreetMap ids resolve, so nothing else is asked');
-  assert.ok((src.match(/if \(statusOf\(e\) === 404\) return null;/g) || []).length >= 4, 'every additive route swallows its 404');
+  // A 404 (an older API, a community the viewer may not see, a flag that is
+  // off) and a 403 are both "this surface is not for you": one helper, used
+  // by every additive read.
+  assert.match(v2, /if \(status === 404 \|\| status === 403\) return null;/);
+  assert.ok((src.match(/absentOnRefusal\(/g) || []).length >= 3, 'every additive route degrades to nothing');
   // The header: the profile variant, the exact week count as its third figure, the strip as its children, the review line once.
   assert.match(detail, /<GymHeader\s+variant="profile"/);
   assert.match(detail, /thisWeek: activeThisWeek\.data\?\.count/);
@@ -219,7 +226,9 @@ test('the activity routes and hours degrade to nothing, the join is optimistic, 
   assert.match(detail, /for \(const \[key, data\] of ctx\?\.prev \|\| \[\]\) qc\.setQueryData\(key, data\);/);
   // Hours live on About, in the Where card, and the map tile with them.
   assert.match(detail, /<WhereCard community=\{community\} hours=\{hoursLine\(hours\.data\)\} \/>/);
-  assert.match(detail, /const hours = usePlaceHours\(community\?\.placeId, tab === 'about'\);/);
+  // Today says it too (P7), so the read is enabled on both tabs that draw it.
+  assert.match(detail, /const hours = usePlaceHours\(community\?\.placeId, tab === 'about' \|\| tab === 'today'\);/);
+  assert.match(detail, /openNow=\{hoursLine\(hours\.data\)\}/);
   // No page still declares a band; the header action is a text button.
   for (const file of ['Gyms', 'GymCommunity', 'GymDetail', 'CommunityDetail', 'Friends', 'Discover']) {
     assert.doesNotMatch(read(`src/pages/${file}.tsx`), /band=\{\{/, `${file} declares no band`);

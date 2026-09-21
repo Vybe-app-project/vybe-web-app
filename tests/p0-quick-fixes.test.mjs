@@ -28,7 +28,8 @@ test('the web report enum is the API enum, and comments, messages, stories and e
   assert.match(read('src/pages/PostDetail.tsx'), /label: 'Report comment'[\s\S]*?targetType: 'comment'/);
   assert.match(read('src/pages/Messages.tsx'), /label: 'Report message'[\s\S]*?targetType: 'message'/);
   assert.match(read('src/pages/StoryTray.tsx'), /label="Report story"[\s\S]*?targetType: 'story'/);
-  assert.match(read('src/pages/CommunityDetail.tsx'), /label: 'Report event'[\s\S]*?targetType: 'event'/);
+  // The event row moved to src/pages/gyms/GymEventRow.tsx with RSVP and the .ics download (P7); the menu came with it.
+  assert.match(read('src/pages/gyms/GymEventRow.tsx'), /label: 'Report event'[\s\S]*?targetType: 'event'/);
 });
 
 test('/r/<id|token> is routed, public and member-aware, and treats the flag-off 404 as a state', () => {

@@ -17,6 +17,12 @@ import {
   useDebounced,
 } from '../lib/hooks';
 import { communityPath, coverSourceOf, founderIdOf, isModRole, isObjectId, membershipOf } from '../lib/gyms';
+import { type PinnedPost, pinnedAnnouncementOf, regularSetOf } from '../lib/gymCommunityV2';
+import { AnnouncementCard, AnnouncementCardSkeleton, PostAnnouncementDialog } from './gyms/GymAnnouncement';
+import { type GymEvent, GymEventRow } from './gyms/GymEventRow';
+import { GymModerationSection } from './gyms/GymModeration';
+import { OwnershipOfferRow, RegularBadge, useGymOwnerMenuItems } from './gyms/GymOwnership';
+import { useNotificationLevel, useOwnership, usePins, useRegulars, useRoles } from './gyms/useGymV2';
 import { type GymBandGym, memberCountLabel, trainingTodayLine } from '../components/GymBand';
 import { GymHeader } from '../components/GymHeader';
 import { MapTile, osmHref } from '../components/MapTile';
@@ -74,7 +80,7 @@ import {
   useToast,
   type MenuItem,
 } from './ui';
-import { Activity, Calendar, Check, Clock, Dashboard, ExternalLink, Flag, Image as ImageIcon, Info, Lock, MapPin, MessageCircle, Plus, Shield, Trash, Users, X } from './icons';
+import { Activity, Bell, Calendar, Check, Clock, Dashboard, ExternalLink, Image as ImageIcon, Info, Lock, MapPin, MessageCircle, Plus, Shield, Trash, Users, X } from './icons';
 
 /* ------------------------------------------------------------------ the tab strip under the header */
 
@@ -124,18 +130,12 @@ type Leaderboard = {
   entries?: { user?: PublicUser; sessions?: number; rank?: number }[];
 };
 
-type CommunityEvent = {
-  _id: string;
-  title?: string;
-  startsAt?: string;
-  startsAtLocal?: string;
-  timezone?: string;
-  goingCount?: number;
-  spotsLeft?: number | null;
-  isFull?: boolean;
-  myRsvp?: string | boolean | null;
-  locationNote?: string;
-};
+/**
+ * One planned session as the list sends it. The RSVP, attendee and insight
+ * fields live on the shared row (`gyms/GymEventRow`), which reads them back
+ * from the API's own answers rather than guessing.
+ */
+type CommunityEvent = GymEvent;
 
 type MembershipRequest = {
   _id: string;
@@ -198,7 +198,11 @@ function eventWhen(e: CommunityEvent): string {
       /* unknown zone id: fall through to the server's local string */
     }
   }
-  return e.startsAtLocal || '';
+  // `startsAtLocal` is the gym-time breakdown (`{ date, time, ... }`) so a
+  // client renders gym time without a zone library; older lists sent a string.
+  const local = e.startsAtLocal;
+  if (typeof local === 'string') return local;
+  return [local?.date, local?.time].filter(Boolean).join(' ');
 }
 
 function rangeLabel(range?: Leaderboard['range']): string | null {
@@ -371,12 +375,15 @@ function MemberRow({
   community,
   viewerId,
   viewerRole,
+  regular = false,
   onChanged,
 }: {
   member: CommunityMember;
   community: Community;
   viewerId?: string;
   viewerRole: string | null;
+  /** `GET /:gymId/regulars` named this member: they earned the laurel and chose to show it. Read only. */
+  regular?: boolean;
   onChanged: () => void;
 }) {
   const toast = useToast();
@@ -441,7 +448,7 @@ function MemberRow({
       <UserRow
         user={rowUser}
         below={
-          member.joinedAt || isFounderRow || role !== 'member' ? (
+          member.joinedAt || isFounderRow || regular || role !== 'member' ? (
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-text-3">
               {isFounderRow ? (
                 <Badge tone="brand">
@@ -451,6 +458,7 @@ function MemberRow({
               ) : (
                 <RoleBadge role={role} />
               )}
+              {regular ? <RegularBadge /> : null}
               {member.joinedAt ? <span>Joined {ago(member.joinedAt)}</span> : null}
             </div>
           ) : null
@@ -486,40 +494,6 @@ function MemberRow({
 }
 
 /* ------------------------------------------------------------------ events */
-
-function EventRow({ event }: { event: CommunityEvent }) {
-  const { report, reportModal } = useReportModal();
-  const when = eventWhen(event);
-  const going = typeof event.goingCount === 'number' && event.goingCount > 0 ? event.goingCount : null;
-  const spots = typeof event.spotsLeft === 'number' && event.spotsLeft > 0 ? event.spotsLeft : null;
-  const mine = event.myRsvp === true || event.myRsvp === 'going' || event.myRsvp === 'yes';
-  return (
-    <li className="flex items-start gap-3 py-3">
-      <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2">
-        <Calendar size={20} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-text-1">{event.title || 'Session'}</p>
-        {when ? <p className="text-xs text-text-2">{when}</p> : null}
-        {event.locationNote ? <p className="truncate text-xs text-text-3">{event.locationNote}</p> : null}
-        {going || spots || event.isFull || mine ? (
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {mine ? (
-              <Badge tone="brand">
-                <Check size={12} />
-                You’re going
-              </Badge>
-            ) : null}
-            {going ? <Badge tone="neutral">{going === 1 ? '1 going' : `${formatStat(going)} going`}</Badge> : null}
-            {event.isFull ? <Badge tone="warning">Full</Badge> : spots ? <Badge tone="neutral">{spots === 1 ? '1 spot left' : `${spots} spots left`}</Badge> : null}
-          </div>
-        ) : null}
-      </div>
-      <Menu items={[{ label: 'Report event', icon: <Flag size={18} />, danger: true, onSelect: () => report({ targetType: 'event', targetId: event._id, targetLabel: 'event' }) }]} label={`Options for ${event.title || 'this session'}`} size={40} className="-mr-2 shrink-0" />
-      {reportModal}
-    </li>
-  );
-}
 
 /** Organisers plan a session; the device zone travels with it (API.md §11b) so the community gets a zone. */
 function PlanSessionForm({ communityId, onPlanned }: { communityId: string; onPlanned: () => void }) {
@@ -652,7 +626,21 @@ export function CommunitySurface({
   const activityEnabled = detail.isSuccess && !isPrivateToViewer;
   const activeThisWeek = useActiveThisWeek(communityId, activityEnabled);
   const trainedToday = useTrainedToday(communityId, activityEnabled);
-  const hours = usePlaceHours(community?.placeId, tab === 'about');
+  // Open-now is read on both tabs that say it: Today's line and About's Where card.
+  const hours = usePlaceHours(community?.placeId, tab === 'about' || tab === 'today');
+
+  // Gym community v2. Each read answers 404 FEATURE_DISABLED while its flag
+  // is off for this caller and resolves to null, so every surface below is
+  // absent rather than broken: the announcement card, the overflow rows, the
+  // ownership offer, the moderation section and the Regular laurel.
+  const pins = usePins(communityId, detail.isSuccess && tab === 'feed' && !isPrivateToViewer);
+  const level = useNotificationLevel(communityId, membership.isMember);
+  const ownership = useOwnership(communityId, membership.isMember);
+  const roles = useRoles(communityId, membership.isMember);
+  const regulars = useRegulars(communityId, membership.isMember);
+  const regularIds = regularSetOf(regulars.data);
+  const announcement: PinnedPost | null = pinnedAnnouncementOf(pins.data?.pins || []);
+  const [announcing, setAnnouncing] = useState(false);
 
   const events = useQuery({
     queryKey: ['community', communityId, 'events', 'upcoming'],
@@ -835,6 +823,12 @@ export function CommunitySurface({
     )
   ) : null;
 
+  // The gym's overflow menu: the member's own notification level, and the
+  // owner's handover rows. Each one is offered only where its read succeeded,
+  // so with the v2 flags off there is no menu at all.
+  const owner = useGymOwnerMenuItems({ communityId, communityName: name, ownership: ownership.data, roles: roles.data, level: level.data });
+  const overflow = owner.items.length ? <Menu items={owner.items} label={`More at ${name}`} size={40} /> : null;
+
   // The Today tab previews its figure on the strip; members and posts already sit in the header.
   const counts: Partial<Record<GymTab, number>> = {};
   if ((trainedToday.data?.count ?? 0) > 0) counts.today = trainedToday.data!.count;
@@ -856,7 +850,8 @@ export function CommunitySurface({
 
   return (
     <div className="space-y-section">
-      <PageHeader title={name} back={back} hideSectionTabs />
+      <PageHeader title={name} back={back} hideSectionTabs actions={overflow} mobileActions={overflow} />
+      {owner.dialogs}
 
       {/* The gym as Instagram draws an account: bled to the viewport edge (the shell centres content by
           max-width, so the header's own gutter lines its text up with the page) and, with a photo, pulled
@@ -901,19 +896,44 @@ export function CommunitySurface({
             </Callout>
           ) : null}
 
+          {/* An open transfer for the viewer: theirs to accept or decline, on whichever tab they are on. */}
+          {ownership.data?.myOffer ? <OwnershipOfferRow communityId={communityId} communityName={name} ownership={ownership.data} /> : null}
+
           {/* ---------------------------------------------------------------- feed */}
           {tab === 'feed' ? (
             isPrivateToViewer ? (
               <PrivateNotice name={name} />
             ) : (
               <section className="space-y-4" aria-label={`Posts at ${name}`}>
+                {/* The community's own notice, above everything: the pinned
+                    announcement (`gymAnnouncements`). Absent when the flag is
+                    off, when nothing is pinned, or when the pin is an ordinary
+                    post — the strip itself still renders through PostCard. */}
+                {pins.isLoading ? <AnnouncementCardSkeleton /> : null}
+                {announcement ? (
+                  <AnnouncementCard
+                    communityId={communityId}
+                    post={announcement}
+                    communityName={name}
+                    canSeeSeenBy={canModerate}
+                    canManage={canModerate}
+                    enabled={membership.isMember}
+                  />
+                ) : null}
                 {membership.isMember ? (
                   composing ? (
                     <CommunityComposer communityId={community._id} communityName={name} onPosted={() => setComposing(false)} onCancel={() => setComposing(false)} />
                   ) : (
-                    <Button variant="secondary" block icon={<Plus size={18} />} onClick={() => setComposing(true)}>
-                      Post to this community
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="secondary" icon={<Plus size={18} />} onClick={() => setComposing(true)} className="flex-1">
+                        Post to this community
+                      </Button>
+                      {canModerate ? (
+                        <Button variant="quiet" icon={<Bell size={18} />} onClick={() => setAnnouncing(true)}>
+                          Post an announcement
+                        </Button>
+                      ) : null}
+                    </div>
                   )
                 ) : null}
                 {posts.isLoading ? (
@@ -961,6 +981,7 @@ export function CommunitySurface({
                   today={trainedToday}
                   fallbackLine={membership.isMember ? trainingTodayLine(todayLabel) : null}
                   member={membership.isMember}
+                  openNow={hoursLine(hours.data)}
                   checkIn={membership.isMember && !isHome ? { pending: checkIn.isPending, run: () => checkIn.mutate() } : undefined}
                 />
                 <WeekCard name={name} week={activeThisWeek} board={membership.isMember ? leaderboard : null} />
@@ -987,14 +1008,18 @@ export function CommunitySurface({
                     <EmptyState
                       size="sm"
                       icon={<Calendar size={24} />}
-                      title="Nothing planned yet"
-                      message={canModerate ? 'Plan the first session and members can turn up together.' : 'When an organiser plans a session it shows here with the time in the gym’s zone.'}
+                      title={canModerate ? 'Plan the first session' : 'No sessions planned yet'}
+                      message={
+                        canModerate
+                          ? 'Pick a time and a meeting point and members can say they are coming. The time is saved in the gym’s zone.'
+                          : 'When an organiser plans a session it shows here with the time in the gym’s zone, and you can say you are coming.'
+                      }
                     />
                   ) : null}
                   {(events.data?.length || 0) > 0 ? (
                     <ul className="mt-2 divide-y divide-line">
                       {(events.data || []).map((e) => (
-                        <EventRow key={e._id} event={e} />
+                        <GymEventRow key={e._id} event={e} communityId={communityId} when={eventWhen(e)} member={membership.isMember} />
                       ))}
                     </ul>
                   ) : null}
@@ -1009,6 +1034,10 @@ export function CommunitySurface({
               <PrivateNotice name={name} />
             ) : (
               <section className="space-y-4" aria-label={`Members of ${name}`}>
+                {/* Moderators only, and only where `gymModerationQueue` is on
+                    for this caller: the queue, the appeals and the log. The
+                    section renders nothing at all when the route refuses. */}
+                <GymModerationSection communityId={communityId} role={membership.role} enabled={canModerate} />
                 {canModerate ? (
                   <Card>
                     <div className="flex items-center justify-between gap-3">
@@ -1085,7 +1114,15 @@ export function CommunitySurface({
                 {(members.data?.members?.length || 0) > 0 ? (
                   <ul>
                     {(members.data?.members || []).map((m, i) => (
-                      <MemberRow key={m._id || m.user?._id || i} member={m} community={community} viewerId={me?._id ? String(me._id) : undefined} viewerRole={membership.role} onChanged={invalidateCommunity} />
+                      <MemberRow
+                        key={m._id || m.user?._id || i}
+                        member={m}
+                        community={community}
+                        viewerId={me?._id ? String(me._id) : undefined}
+                        viewerRole={membership.role}
+                        regular={Boolean(m.user?._id && regularIds.has(String(m.user._id)))}
+                        onChanged={invalidateCommunity}
+                      />
                     ))}
                   </ul>
                 ) : null}
@@ -1145,6 +1182,8 @@ export function CommunitySurface({
           ) : null}
         </>
       ) : null}
+
+      <PostAnnouncementDialog open={announcing} communityId={communityId} communityName={name} onClose={() => setAnnouncing(false)} />
 
       <ConfirmDialog
         open={confirmLeave}
@@ -1217,11 +1256,18 @@ function FacesLine({ count, members, suffix }: { count: number; members: PublicA
   );
 }
 
-/** The faces themselves, each a link to the person: the twelve at most that the server sends. */
-function Faces({ members, label }: { members: PublicActor[]; label: string }) {
+/**
+ * The faces themselves, each a link to the person: the twelve at most that
+ * the server sends. `sample` on the payload means the row is a subset of the
+ * count — the rest are members the viewer may not see, or nobody the server
+ * will name — so the row ends in "and N others" rather than pretending
+ * twelve is everyone.
+ */
+function Faces({ members, label, more = 0 }: { members: PublicActor[]; label: string; more?: number }) {
   if (!members.length) return null;
+  const rest = Number.isFinite(more) && more > 0 ? Math.round(more) : 0;
   return (
-    <ul className="flex flex-wrap gap-2" aria-label={label}>
+    <ul className="flex flex-wrap items-center gap-2" aria-label={label}>
       {members.slice(0, 12).map((m) => (
         <li key={m._id}>
           <Link to={`/u/${m._id}`} viewTransition aria-label={nameOf(m)} title={nameOf(m)} className="pressable block rounded-full">
@@ -1229,6 +1275,11 @@ function Faces({ members, label }: { members: PublicActor[]; label: string }) {
           </Link>
         </li>
       ))}
+      {rest > 0 ? (
+        <li className="t-meta grid h-10 place-items-center rounded-full bg-surface-2 px-3">
+          and {rest === 1 ? '1 other' : `${formatStat(rest)} others`}
+        </li>
+      ) : null}
     </ul>
   );
 }
@@ -1261,12 +1312,15 @@ function TodayCard({
   today,
   fallbackLine,
   member,
+  openNow,
   checkIn,
 }: {
   name: string;
   today: UseQueryResult<TrainedToday | null>;
   fallbackLine: string | null;
   member: boolean;
+  /** "Open now · closes 22:00" from the place's hours; null when the provider has none. */
+  openNow?: string | null;
   checkIn?: { pending: boolean; run: () => void };
 }) {
   const figure = today.data ?? null;
@@ -1274,13 +1328,19 @@ function TodayCard({
   return (
     <Card container>
       <h2 className="t-section text-text-1">Today</h2>
+      {openNow ? (
+        <p className="mt-1 flex items-center gap-1.5 text-sm text-text-1">
+          <Clock size={16} className="shrink-0 text-text-3" />
+          <span>{openNow}</span>
+        </p>
+      ) : null}
       {isFetchingFigure(today) ? (
         <FigureSkeleton />
       ) : (
         <div className="mt-2 space-y-3">
           {count > 0 && figure ? (
             <p className="t-body text-text-2">
-              <FacesLine count={count} members={figure.members} suffix="trained today" />
+              <FacesLine count={count} members={figure.members} suffix="trained here today" />
             </p>
           ) : !figure && fallbackLine ? (
             <p className="t-body text-text-1">{fallbackLine}</p>
@@ -1289,7 +1349,7 @@ function TodayCard({
               {member ? `Nobody has checked in yet. Check in when you train at ${name} and the people here see you are in.` : `Nobody has checked in at ${name} yet today.`}
             </p>
           )}
-          {count > 0 && figure ? <Faces members={figure.members} label="Trained today" /> : null}
+          {count > 0 && figure ? <Faces members={figure.members} label="Trained here today" more={figure.sample ? count - figure.members.length : 0} /> : null}
           {figure?.timezoneSource === 'default' ? <p className="t-meta">Counted in UTC until {name} has a time zone; the first planned session sets it.</p> : null}
           {checkIn ? (
             <Button variant="secondary" icon={<Check size={18} />} loading={checkIn.pending} onClick={checkIn.run}>
@@ -1331,7 +1391,7 @@ function WeekCard({ name, week, board }: { name: string; week: UseQueryResult<Ac
               Nobody has checked in at {name} this week yet.{board ? ' The first check-in starts the board.' : ''}
             </p>
           )}
-          {count > 0 && figure ? <Faces members={figure.members} label="Active this week" /> : null}
+          {count > 0 && figure ? <Faces members={figure.members} label="Active this week" more={figure.sample ? count - figure.members.length : 0} /> : null}
           {board ? (
             board.isLoading ? (
               <div className="space-y-2" aria-busy="true">

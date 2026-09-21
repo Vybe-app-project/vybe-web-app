@@ -20,6 +20,15 @@ import {
   pluralize,
   visibilityBadge,
 } from '../lib/gyms';
+import {
+  type Actor,
+  type PlaceHours,
+  absentOnRefusal,
+  fetchActiveThisWeek,
+  fetchPlaceHours,
+  fetchTrainedToday,
+  gymV2Keys,
+} from '../lib/gymCommunityV2';
 import { memberCountLabel } from '../components/GymBand';
 import {
   Badge,
@@ -84,29 +93,18 @@ export type Community = CommunityLike & {
   reviewState?: string;
 };
 
-/** The public face of a member on the activity routes (`active-this-week`, `trained-today`). */
-export type PublicActor = { _id: string; username?: string; fullName?: string; avatar?: string };
-
 /**
- * `GET /gyms/community/:id/active-this-week` — `count` is the exact number of
- * distinct members with a check-in this week (only-me, blocked and
- * undiscoverable included); `members` is the visible subset, at most 12,
- * newest first; `sample` is true when the subset is shorter than the count.
+ * The activity routes and their shapes live in `lib/gymCommunityV2` with the
+ * rest of the gym page's fetchers, so each request path has one home; these
+ * names stay because every gym surface already imports them from here.
+ *
+ * The public face of a member on `active-this-week` and `trained-today`; the
+ * exact `count` (only-me, blocked and undiscoverable members included), the
+ * visible subset (at most 12, newest first) and `sample` when the subset is
+ * shorter than the count.
  */
-export type ActiveThisWeek = { count: number; members: PublicActor[]; sample?: boolean };
-
-/** `GET /gyms/community/:id/trained-today?timeZone=` — the same shape for the local day, plus which zone drew the day. */
-export type TrainedToday = {
-  count: number;
-  members: PublicActor[];
-  localDay?: string;
-  timezone?: string;
-  /** `default` means the day was computed in UTC: the community has no zone yet. */
-  timezoneSource?: 'community' | 'query' | 'viewer' | 'default' | string;
-};
-
-/** `GET /gyms/places/:placeId/hours?timeZone=` — `open: null` means the provider has no hours for the place. */
-export type PlaceHours = { open: boolean | null; closesAt?: string | null; opensAt?: string | null; openingHours?: unknown };
+export type { ActiveThisWeek, PlaceHours, TrainedToday } from '../lib/gymCommunityV2';
+export type PublicActor = Actor;
 
 type Paged<T> = {
   gymCommunities: T[];
@@ -145,16 +143,6 @@ export const zoneOf = () => {
   }
 };
 
-/** The activity routes answer `{ count, members }`, sometimes inside a `data` envelope; anything else is "no figure". */
-function unwrapActivity<T extends { count: number; members: PublicActor[] }>(data: unknown): T | null {
-  const outer = data as { data?: unknown } | null;
-  const inner = outer?.data;
-  const body = (inner && typeof inner === 'object' && 'count' in (inner as object) ? inner : data) as Partial<T> | null;
-  if (!body || typeof body !== 'object' || typeof body.count !== 'number' || !Number.isFinite(body.count)) return null;
-  const members = Array.isArray(body.members) ? body.members.filter((m): m is PublicActor => Boolean(m && typeof m === 'object' && (m as PublicActor)._id)) : [];
-  return { ...(body as T), count: Math.max(0, Math.round(body.count)), members };
-}
-
 const ACTIVITY_QUERY = { retry: false, staleTime: 60_000 } as const;
 
 /**
@@ -164,18 +152,10 @@ const ACTIVITY_QUERY = { retry: false, staleTime: 60_000 } as const;
  */
 export function useActiveThisWeek(communityId: string, enabled: boolean) {
   return useQuery({
-    queryKey: ['community', communityId, 'active-this-week'],
+    queryKey: gymV2Keys.activeThisWeek(communityId),
     enabled,
     ...ACTIVITY_QUERY,
-    queryFn: async () => {
-      try {
-        const { data } = await api.get(`/gyms/community/${communityId}/active-this-week`);
-        return unwrapActivity<ActiveThisWeek>(data);
-      } catch (e) {
-        if (statusOf(e) === 404) return null;
-        throw e;
-      }
-    },
+    queryFn: () => absentOnRefusal(() => fetchActiveThisWeek(communityId)),
   });
 }
 
@@ -183,18 +163,10 @@ export function useActiveThisWeek(communityId: string, enabled: boolean) {
 export function useTrainedToday(communityId: string, enabled: boolean) {
   const timeZone = zoneOf();
   return useQuery({
-    queryKey: ['community', communityId, 'trained-today', timeZone],
+    queryKey: gymV2Keys.trainedToday(communityId, timeZone),
     enabled,
     ...ACTIVITY_QUERY,
-    queryFn: async () => {
-      try {
-        const { data } = await api.get(`/gyms/community/${communityId}/trained-today`, { params: { timeZone } });
-        return unwrapActivity<TrainedToday>(data);
-      } catch (e) {
-        if (statusOf(e) === 404) return null;
-        throw e;
-      }
-    },
+    queryFn: () => absentOnRefusal(() => fetchTrainedToday(communityId, timeZone)),
   });
 }
 
@@ -203,21 +175,11 @@ export function usePlaceHours(placeId: string | null | undefined, enabled = true
   const timeZone = zoneOf();
   const resolvable = typeof placeId === 'string' && /^osm-/.test(placeId);
   return useQuery({
-    queryKey: ['place', placeId, 'hours', timeZone],
+    queryKey: gymV2Keys.placeHours(String(placeId), timeZone),
     enabled: enabled && resolvable,
     retry: false,
     staleTime: 5 * 60_000,
-    queryFn: async () => {
-      try {
-        const { data } = await api.get(`/gyms/places/${encodeURIComponent(placeId!)}/hours`, { params: { timeZone } });
-        const outer = data as { data?: unknown } | null;
-        const body = (outer?.data && typeof outer.data === 'object' && 'open' in (outer.data as object) ? outer.data : data) as PlaceHours | null;
-        return body && typeof body === 'object' && 'open' in body ? body : null;
-      } catch (e) {
-        if (statusOf(e) === 404) return null;
-        throw e;
-      }
-    },
+    queryFn: () => absentOnRefusal(() => fetchPlaceHours(placeId!, timeZone)),
   });
 }
 
