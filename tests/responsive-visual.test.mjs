@@ -632,3 +632,18 @@ test('the sheet-as-page body slides up on transform only and drops the class at 
   assert.match(sheet, /className=\{entering \? 'anim-sheet-in' : undefined\}/);
   assert.match(css, /\.anim-sheet-in \{ transform: translateY\(0\); transition: transform var\(--duration-2\) var\(--ease-out\); \}/);
 });
+
+test('scroll is restored on Back and reset on a new route; focus moves forward only; the foreground refresh keeps what is on screen', () => {
+  assert.match(app, /window\.history\.scrollRestoration = 'manual'/);
+  assert.match(app, /const navigationType = useNavigationType\(\);/);
+  assert.match(app, /if \(navigationType === 'POP'\) \{\s*const y = scrollPositions\.get\(location\.key\);/);
+  assert.match(app, /useLayoutEffect\(\(\) => \{\s*const overSheet = sheet \|\| wasSheet\.current;/, 'restored before paint');
+  assert.match(app, /const sheet = wide && !!backgroundLocationOf\(location\);/, 'on phones a sheet route is an ordinary page and scrolls like one');
+  assert.match(app, /<ScrollRestoration \/>/);
+  assert.doesNotMatch(app, /ScrollToTop/);
+  assert.match(layout, /if \(navigationType !== 'POP'\) \{\s*const main = document\.getElementById\('main'\);/, 'focus follows a forward navigation only');
+  // SessionRefresh: active queries refetch with their data kept; the account, gym, community and capability keys are left alone.
+  assert.match(app, /refetchType: 'active',\s*predicate: \(query\) => query\.state\.status === 'success' && !SESSION_STABLE_KEYS\.has\(String\(query\.queryKey\[0\]\)\)/);
+  assert.match(app, /const SESSION_STABLE_KEYS = new Set\(\['me', 'home-gym', 'community', 'capabilities', 'api-version'\]\);/);
+  assert.doesNotMatch(app, /void qc\.invalidateQueries\(\);/, 'never everything at once');
+});

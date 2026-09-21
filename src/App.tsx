@@ -1,6 +1,6 @@
 /// <reference types="vite-plugin-pwa/react" />
-import { lazy, Suspense, useCallback, useEffect, useRef } from 'react';
-import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Layout from './components/Layout';
@@ -107,10 +107,30 @@ const AdminCatalog = lazy(() => import('./pages/admin/AdminCatalog'));
 const AdminCatalogWorkout = lazy(() => import('./pages/admin/AdminCatalogWorkout'));
 const AdminCatalogPlan = lazy(() => import('./pages/admin/AdminCatalogPlan'));
 
-/** Refresh the session user on foreground/interval; after a long absence, everything on screen refetches too. */
+/**
+ * Keys the foreground refresh leaves alone: the account refreshes through
+ * `refreshUser` itself, the home gym follows the account's pointer (its own
+ * signature effect), the capability flags and the API build are pinned for
+ * the session, and a community's page cache is served from the shell's fetch.
+ * Invalidating these on every return to the tab re-ran the gym lookup and
+ * Home's top quarter went back to a skeleton.
+ */
+const SESSION_STABLE_KEYS = new Set(['me', 'home-gym', 'community', 'capabilities', 'api-version']);
+
+/**
+ * Refresh the session user on foreground/interval. After a long absence the
+ * time-sensitive queries on screen refetch in the background with their data
+ * kept — active queries only, never a reset — so nothing on screen goes back
+ * to a skeleton while the fresh answer arrives.
+ */
 function SessionRefresh() {
   const qc = useQueryClient();
-  const onStale = useCallback(() => { void qc.invalidateQueries(); }, [qc]);
+  const onStale = useCallback(() => {
+    void qc.invalidateQueries({
+      refetchType: 'active',
+      predicate: (query) => query.state.status === 'success' && !SESSION_STABLE_KEYS.has(String(query.queryKey[0])),
+    });
+  }, [qc]);
   useSessionRefresh(onStale);
   return null;
 }
@@ -194,19 +214,63 @@ function PostGate() {
   return <PublicPost />;
 }
 
+/** Scroll offset per history entry (`location.key`: the same path twice in the stack keeps two positions). */
+const scrollPositions = new Map<string, number>();
+/** How many frames a restore may retry while the page grows back to the height it had. */
+const RESTORE_FRAMES = 20;
+
 /**
- * Route changes should start at the top rather than inherit scroll — except a
- * sheet opening or closing over its parent, which must leave the parent where
- * it was.
+ * Scroll on route change. A forward navigation starts at the top; Back and
+ * Forward (POP) return to where that entry was, so leaving a post does not
+ * dump you at the top of the feed; a sheet opening or closing over its parent
+ * on a wide screen leaves the parent where it was (on phones the same route
+ * is an ordinary page and scrolls like one). The browser's own restoration is
+ * off: it fires before React has rendered the page, lands somewhere else and
+ * then fights the route change. Restoring runs in a layout effect, before the
+ * new frame paints, and retries for a few frames when the page has not grown
+ * back to its height yet (its data is cached, its images are not).
  */
-function ScrollToTop() {
+function ScrollRestoration() {
   const location = useLocation();
-  const sheet = !!backgroundLocationOf(location);
-  const wasSheet = useRef(false);
+  const navigationType = useNavigationType();
+  const wide = useMediaQuery(SHEET_MEDIA);
+  const sheet = wide && !!backgroundLocationOf(location);
+  const wasSheet = useRef(sheet);
+
   useEffect(() => {
-    if (!sheet && !wasSheet.current) window.scrollTo(0, 0);
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+  }, []);
+
+  // Remember where this entry is as it scrolls. (Saving in a cleanup would
+  // run after the next route's layout effect has already scrolled to 0.)
+  useEffect(() => {
+    const key = location.key;
+    const save = () => scrollPositions.set(key, window.scrollY);
+    save();
+    window.addEventListener('scroll', save, { passive: true });
+    return () => window.removeEventListener('scroll', save);
+  }, [location.key]);
+
+  useLayoutEffect(() => {
+    const overSheet = sheet || wasSheet.current;
     wasSheet.current = sheet;
-  }, [location.pathname, sheet]);
+    if (overSheet) return;
+    if (navigationType === 'POP') {
+      const y = scrollPositions.get(location.key);
+      // A reload or a fresh tab has nothing saved: leave the page where it is.
+      if (y === undefined) return;
+      let frames = 0;
+      let raf = 0;
+      const restore = () => {
+        window.scrollTo(0, y);
+        frames += 1;
+        if (Math.abs(window.scrollY - y) > 1 && frames < RESTORE_FRAMES) raf = requestAnimationFrame(restore);
+      };
+      restore();
+      return () => cancelAnimationFrame(raf);
+    }
+    window.scrollTo(0, 0);
+  }, [location.key, navigationType, sheet]);
   return null;
 }
 
@@ -441,7 +505,7 @@ export default function App() {
 
   return (
     <ToastProvider>
-      <ScrollToTop />
+      <ScrollRestoration />
       <PwaUpdates />
       <UpdateRequiredScreen />
       {/* Terms / privacy re-consent for the signed-in account; root mount so SupportGate and PostGate are covered too. */}
