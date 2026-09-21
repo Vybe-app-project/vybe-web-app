@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, errMsg, mediaUrl } from '../lib/api';
-import { compactNumber as compactStat, timeAgo, type Post } from '../lib/hooks';
+import { SAVED_POSTS_PAGE_SIZE, favoriteKeys, fetchSavedPosts } from '../lib/favorites';
+import { compactNumber as compactStat, timeAgo, useInfiniteScroll, type Post } from '../lib/hooks';
 import {
   Badge,
   Card,
@@ -10,6 +11,7 @@ import {
   EmptyState,
   ErrorState,
   Skeleton,
+  Spinner,
   cx,
   humanize,
 } from './ui';
@@ -145,18 +147,28 @@ export function ProfilePosts({ userId, isOwn = false, name }: PanelProps) {
 /* ------------------------------------------------------------------ saved */
 
 /**
- * The signed-in user's bookmarks (GET /posts/bookmarks). PostCard's save button
- * invalidates ['bookmarks'], so a card removed here disappears on refetch and
- * a post saved anywhere shows up on the next visit.
+ * The signed-in user's bookmarks (`GET /posts/bookmarks`, through
+ * lib/favorites). PostCard's save button invalidates `['bookmarks']`, which
+ * is this list's key prefix, so a card unsaved here disappears on refetch
+ * and a post saved anywhere shows up on the next visit.
+ *
+ * It pages. The route answers two shapes and the query string picks: without
+ * `page` or `limit` it returns **every** saved post in one response, which
+ * is a cliff for anyone who has been saving for a year. Asking for a page is
+ * the only way to bound it.
  */
 export function ProfileSaved() {
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['bookmarks'],
-    queryFn: async () => {
-      const { data } = await api.get('/posts/bookmarks');
-      return (data.bookmarks || data.posts || []) as Post[];
-    },
+  const saved = useInfiniteQuery({
+    queryKey: favoriteKeys.bookmarksPage(SAVED_POSTS_PAGE_SIZE),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => fetchSavedPosts(pageParam as number),
+    getNextPageParam: (last, all) => (last.hasNextPage ? all.length + 1 : undefined),
   });
+  const { isLoading, isError, error, refetch } = saved;
+  const data = saved.data?.pages.flatMap((page) => page.posts) ?? [];
+  const sentinelRef = useInfiniteScroll(() => {
+    if (saved.hasNextPage && !saved.isFetchingNextPage) saved.fetchNextPage();
+  }, !!saved.hasNextPage);
 
   if (isLoading)
     return (
@@ -176,7 +188,7 @@ export function ProfileSaved() {
       />
     );
 
-  if (!data?.length)
+  if (!data.length)
     return (
       <EmptyState
         family="social"
@@ -191,6 +203,11 @@ export function ProfileSaved() {
       {data.map((post) => (
         <PostCard key={post._id} post={post} invalidate={[['bookmarks'], ['feed']]} />
       ))}
+      {saved.hasNextPage ? (
+        <div ref={sentinelRef} className="flex justify-center py-4">
+          {saved.isFetchingNextPage ? <Spinner className="text-text-2" /> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

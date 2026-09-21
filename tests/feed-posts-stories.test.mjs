@@ -104,8 +104,14 @@ test('saved posts have a home on the own profile only', () => {
   const tabs = read('src/pages/ProfileTabs.tsx');
   assert.match(tabs, /\{ key: 'saved', label: 'Saved', icon: <Bookmark size=\{18\} \/>, ownOnly: true \}/);
   assert.match(tabs, /export const PUBLIC_PROFILE_TABS = PROFILE_TABS\.filter\(\(t\) => !t\.ownOnly\);/);
-  assert.match(tabs, /queryKey: \['bookmarks'\]/, 'PostCard invalidates ["bookmarks"]; the list must read that key');
-  assert.match(tabs, /api\.get\('\/posts\/bookmarks'\)/);
+  // P8a: the list pages (the unpaged shape returns every saved post in one
+  // response) and the literal path moved into lib/favorites, but the key
+  // prefix is still ['bookmarks'] — the one PostCard invalidates.
+  assert.match(tabs, /favoriteKeys\.bookmarksPage\(SAVED_POSTS_PAGE_SIZE\)/, 'PostCard invalidates ["bookmarks"]; the list must read that prefix');
+  assert.match(read('src/lib/favorites.ts'), /bookmarksPage: \(limit: number\) => \['bookmarks', 'page', limit\] as const/);
+  assert.match(read('src/lib/favorites.ts'), /api\.get<[^>]*>\(\s*'\/posts\/bookmarks',\s*\{ params: \{ page, limit \} \},\s*\);/);
+  assert.match(read('src/lib/favorites.ts'), /api\.post\('\/posts\/bookmark', \{ postId \}\)/);
+  assert.match(read('src/lib/favorites.ts'), /api\.post\('\/posts\/unbookmark', \{ postId \}\)/);
   assert.match(tabs, /Nothing saved yet/);
 
   const profile = read('src/pages/Profile.tsx');

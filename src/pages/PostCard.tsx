@@ -8,6 +8,7 @@ import { api, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { commentTotal, likeTotal, tokenizeContent } from '../lib/feedLogic';
 import { communityPath } from '../lib/gyms';
+import { setPostBookmark } from '../lib/favorites';
 import { useHomeGym, type HomeGymState } from '../lib/homeGym';
 import {
   compactNumber,
@@ -819,8 +820,10 @@ export default function PostCard({
   });
 
   const bookmarkMutation = useMutation({
+    // Through lib/favorites, so both literal paths and the two shapes
+    // `GET /posts/bookmarks` answers live in one module.
     mutationFn: async (next: boolean) => {
-      await api.post(next ? '/posts/bookmark' : '/posts/unbookmark', { postId: post._id });
+      await setPostBookmark(post._id, next);
       return next;
     },
     onMutate: (next) => {
