@@ -19,6 +19,9 @@ import {
   type FeedMode,
   type FeedResponse,
 } from '../lib/feedControls';
+// P8c: what makes For you honest — the sightings it posts back, the two
+// controls on a card, and the reason line under the header.
+import { useFeedImpressions } from '../lib/feedImpressions';
 import {
   ACCEPTED_IMAGE_TYPES,
   ACCEPTED_VIDEO_TYPES,
@@ -58,6 +61,7 @@ import {
 import { ArrowUp, Image as ImageIcon, Refresh, UserPlus, Video as VideoIcon, X } from './icons';
 import { GymHeader } from '../components/GymHeader';
 import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors } from './PostCard';
+import { HiddenPostRow, useForYouControls } from './ForYouControls';
 import { StoryTray } from './StoryTray';
 import FirstWeekCard from './FirstWeekCard';
 import RhythmCard from './RhythmCard';
@@ -599,6 +603,28 @@ export default function Feed() {
       never a segment the pill does not offer. */
   const activeMode: FeedMode = HOME_FEED_MODES.includes(served) ? served : 'latest';
 
+  /**
+   * P8c. For you is "active" only when the server served it: the flag is
+   * on, the segment is For you, and the answer did not fall back to Latest
+   * (a known minor, D-91). Impressions post, the card menu grows Not
+   * interested and Snooze, and the reason line appears — under exactly that
+   * condition, and never for Following, whose sightings the server would
+   * drop unread.
+   */
+  const forYouActive = forYouOffered && activeMode === 'foryou';
+  // What the ranker said about each post, and the window each one came from.
+  const forYouMeta = useMemo(() => {
+    const reasons: Record<string, string[]> = {};
+    const reqIds: Record<string, string> = {};
+    for (const page of data?.pages ?? []) {
+      if (page.reasons) Object.assign(reasons, page.reasons);
+      if (page.reqId) for (const p of page.posts || []) reqIds[p._id] ??= page.reqId;
+    }
+    return { reasons, reqIds };
+  }, [data]);
+  const impressions = useFeedImpressions(forYouActive);
+  const controls = useForYouControls({ active: forYouActive, posts });
+
   const showNew = async () => {
     setShowingNew(true);
     window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
@@ -706,11 +732,35 @@ export default function Feed() {
       {posts.length ? (
         <div>
           {/* Items past the first screen skip layout and paint until they near the viewport. */}
-          {posts.map((post, i) => (
-            <PostCard key={post._id} post={post} invalidate={[['feed']]} className={i >= 3 ? 'cv-auto' : undefined} />
-          ))}
+          {posts.map((post, i) => {
+            const hiddenEntry = forYouActive ? controls.hidden[post._id] : undefined;
+            if (hiddenEntry) {
+              // A snooze hides every card by that author; the one whose menu was used carries the row and its Undo.
+              if (hiddenEntry.kind === 'snooze' && !hiddenEntry.primary) return null;
+              return <HiddenPostRow key={post._id} entry={hiddenEntry} onUndo={controls.undo} onSettle={controls.settle} undoPending={controls.undoPending} />;
+            }
+            return (
+              <PostCard
+                key={post._id}
+                post={post}
+                invalidate={[['feed']]}
+                className={i >= 3 ? 'cv-auto' : undefined}
+                forYou={
+                  forYouActive
+                    ? {
+                        reasons: forYouMeta.reasons[post._id],
+                        onNotInterested: () => controls.notInterested(post),
+                        onSnooze: () => controls.openSnooze(post),
+                        observe: impressions.refFor(post._id, forYouMeta.reqIds[post._id]),
+                      }
+                    : undefined
+                }
+              />
+            );
+          })}
         </div>
       ) : null}
+      {controls.sheet}
 
       {hasNextPage ? (
         <div ref={sentinelRef} className="flex justify-center py-4">

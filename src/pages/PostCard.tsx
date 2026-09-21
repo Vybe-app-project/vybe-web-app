@@ -46,6 +46,8 @@ import {
   Link as LinkIcon,
   MapPin,
   MessageCircle,
+  Minus,
+  Moon,
   Play,
   Send,
   ShareUp,
@@ -58,6 +60,10 @@ import { useReportModal } from './Report';
 import { WorkoutSummaryCard } from './WorkoutSummaryCard';
 import { hasWorkoutSummary } from '../lib/workoutSummary';
 import { RecapSummaryCard, hasRecapSummary } from './RecapSummaryCard';
+// P8c: For you's controls and the reason line. Both exist only when the feed
+// passes `forYou`; every other surface renders the card it always did.
+import { reasonLine } from '../lib/feedControls';
+import { forYouCopy } from './ForYouControls';
 
 /* ------------------------------------------------------------------ */
 /* The viewer's gym                                                    */
@@ -715,8 +721,23 @@ export function ActionButton({
 /* Post card                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * What the ranked feed adds to a card (P8c), and only it: the ranker's
+ * reasons for this post (one `.t-meta` line under the header), the two
+ * controls on the menu, and the impression observer's callback ref for the
+ * card's root. Following passes nothing here.
+ */
+export type PostCardForYou = {
+  reasons?: readonly string[];
+  onNotInterested?: () => void;
+  onSnooze?: () => void;
+  observe?: (node: HTMLElement | null) => void;
+};
+
 export type PostCardProps = {
   post: Post;
+  /** For you only; see PostCardForYou. */
+  forYou?: PostCardForYou;
   /** Query keys to invalidate after a mutation. */
   invalidate?: unknown[][];
   /** Hide the inline comment box (the detail page has its own composer). */
@@ -747,6 +768,7 @@ function authorHandle(author?: PublicUser | null): string {
 
 export default function PostCard({
   post,
+  forYou,
   invalidate = [['feed']],
   hideComposer = false,
   linkToDetail = true,
@@ -946,6 +968,23 @@ export default function PostCard({
     ...(linkToDetail
       ? [{ label: 'Open post', icon: <MessageCircle size={18} />, to: `/p/${post._id}` } satisfies MenuItem]
       : []),
+    ...(forYou && authorId && !isOwn
+      ? ([
+          {
+            label: forYouCopy.notInterested,
+            description: forYouCopy.notInterestedHint,
+            icon: <Minus size={18} />,
+            onSelect: () => forYou.onNotInterested?.(),
+            divider: true,
+          },
+          {
+            label: forYouCopy.snooze(handle),
+            description: forYouCopy.snoozeHint,
+            icon: <Moon size={18} />,
+            onSelect: () => forYou.onSnooze?.(),
+          },
+        ] satisfies MenuItem[])
+      : []),
     ...(authorId && !isOwn
       ? ([
           {
@@ -953,7 +992,7 @@ export default function PostCard({
             description: 'Hide their posts on this device',
             icon: <EyeOff size={18} />,
             onSelect: mute,
-            divider: true,
+            divider: !forYou,
           },
           {
             label: `Block ${handle}`,
@@ -1071,6 +1110,15 @@ export default function PostCard({
     </Link>
   ) : null;
 
+  /* For you: why this post is here, one meta line under the header (P8c). Nothing when the server sent no reason it can name. */
+  const why = forYou ? reasonLine(forYou.reasons) : null;
+  const reasonRow = why ? (
+    <p className={cx('t-meta truncate', item ? '-mt-2 mb-2' : 'mt-1')} data-testid="foryou-reason">
+      <span className="sr-only">{forYouCopy.whySeeing}: </span>
+      {why}
+    </p>
+  ) : null;
+
   /* media (edge to edge on phones), then a shared workout or recap, then the icon row, counts and caption */
   const media = <PostMediaGrid post={post} className={item ? undefined : 'mt-3'} expanded={expandMedia} onOpen={setLightbox} bleed={item} />;
   const summaries = (
@@ -1135,6 +1183,7 @@ export default function PostCard({
   const body = (
     <>
       {header}
+      {reasonRow}
       {communityLine}
 
       {textOnly ? (
@@ -1246,7 +1295,7 @@ export default function PostCard({
 
   if (item) {
     return (
-      <article aria-label={`Post by ${name}`} className={cx('feed-rule relative pb-3', className)}>
+      <article ref={forYou?.observe} aria-label={`Post by ${name}`} className={cx('feed-rule relative pb-3', className)}>
         {linkToDetail ? (
           <Link
             to={detailHref}
