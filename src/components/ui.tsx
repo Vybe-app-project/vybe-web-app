@@ -893,8 +893,8 @@ export function Input({
   );
 }
 
-/** Search input with the icon and `type="search"` semantics baked in. */
-export function SearchField(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & FieldProps) {
+/** Search input with the icon and `type="search"` semantics baked in. Forwards `ref` (a modal's initialFocusRef). */
+export function SearchField(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & FieldProps & { ref?: Ref<HTMLInputElement> }) {
   return <Input type="search" inputMode="search" autoComplete="off" leading={<SearchIcon size={18} />} {...props} />;
 }
 

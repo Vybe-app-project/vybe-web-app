@@ -1,6 +1,9 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { Button, Checkbox, IconButton, Input, Select, cx } from '../../components/ui';
 import { Plus, Trash } from '../../components/icons';
+import type { ExerciseMedia } from '../../lib/exerciseLibrary';
+import { ExercisePicker, ExerciseThumb } from './ExercisePicker';
+import { ROW_ACTION } from './rows';
 import type { WorkoutExercise } from './model';
 
 /**
@@ -31,6 +34,12 @@ export type ExerciseDraft = {
   notes: string;
   /** Stable id the records API keys on; kept when editing, never invented for aggregate rows. */
   exerciseId?: string;
+  /**
+   * What the library picker knew about the chosen exercise, so the row header
+   * can draw its thumbnail and "Barbell · Quads · Beginner" without a second
+   * read. Display only — `toExercisePayload` never sends it.
+   */
+  library?: { thumbnail?: ExerciseMedia | null; meta?: string };
   /** Present only for a set-aware exercise. */
   setRecords?: SetDraft[];
 };
@@ -172,6 +181,14 @@ function SetRows({ value, onChange, exerciseIndex }: { value: SetDraft[]; onChan
 /**
  * Repeating exercise rows. Every field is labelled; the remove control is a
  * 44 px icon button. Duration is entered in seconds.
+ *
+ * A row is either typed or chosen. "Choose from library" opens the picker
+ * (src/pages/workouts/ExercisePicker.tsx) and a choice fills in the name and
+ * the stable `exerciseId` the records API keys on, so the exercise page and
+ * the PREVIOUS ghost can find this lift's history; the row header then names
+ * it with its own photo and a "Change" action. Until then the field is an
+ * ordinary text input and a free-text name is still a complete answer — the
+ * picker's last row is "use what you typed".
  */
 export function ExerciseRows({
   value,
@@ -186,22 +203,52 @@ export function ExerciseRows({
 }) {
   const update = (i: number, patch: Partial<ExerciseDraft>) => onChange(value.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   const headingId = useId();
+  const [picking, setPicking] = useState<number | null>(null);
 
   return (
     <fieldset className="space-y-3" aria-describedby={error ? `${headingId}-error` : undefined}>
       <legend id={headingId} className="type-label mb-2 text-text-2">
         Exercises
       </legend>
-      {value.map((row, i) => (
-        <div key={row.exerciseId ?? i} className={cx('@container space-y-3 rounded-md bg-surface-2 p-3', row.setRecords && 'ring-1 ring-line')}>
-          <div className="flex items-end gap-2">
-            <Input label={`Exercise ${i + 1}`} placeholder="e.g. Back squat" autoComplete="off" value={row.name} onChange={(e) => update(i, { name: e.target.value })} />
-            {value.length > 1 ? (
-              <IconButton label={`Remove exercise ${i + 1}`} variant="ghost" className="mb-0.5 text-text-2 hover:text-danger" onClick={() => onChange(value.filter((_, idx) => idx !== i))}>
-                <Trash size={20} />
-              </IconButton>
-            ) : null}
-          </div>
+      {value.map((row, i) => {
+        const remove =
+          value.length > 1 ? (
+            <IconButton label={`Remove exercise ${i + 1}`} variant="ghost" className="text-text-2 hover:text-danger" onClick={() => onChange(value.filter((_, idx) => idx !== i))}>
+              <Trash size={20} />
+            </IconButton>
+          ) : null;
+        return (
+        <div key={row.exerciseId ? `${row.exerciseId}-${i}` : i} className={cx('@container space-y-3 rounded-md bg-surface-2 p-3', row.setRecords && 'ring-1 ring-line')}>
+          {row.exerciseId ? (
+            // Chosen from the library: the row names itself. "Change" reopens the picker, which is also the way back to a typed name.
+            <div className="flex min-h-18 items-center gap-3">
+              {row.library?.thumbnail ? (
+                <ExerciseThumb exercise={{ media: [row.library.thumbnail], category: null }} />
+              ) : (
+                <ExerciseThumb exercise={{ media: [], category: null }} />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="t-name truncate text-text-1">
+                  <span className="sr-only">{`Exercise ${i + 1}: `}</span>
+                  {row.name}
+                </p>
+                {row.library?.meta ? <p className="t-meta truncate">{row.library.meta}</p> : null}
+              </div>
+              <button type="button" className={ROW_ACTION} aria-label={`Change exercise ${i + 1}`} onClick={() => setPicking(i)}>
+                Change
+              </button>
+              {remove}
+            </div>
+          ) : (
+            <div className="flex items-end gap-2">
+              <Input label={`Exercise ${i + 1}`} placeholder="e.g. Back squat" autoComplete="off" value={row.name} onChange={(e) => update(i, { name: e.target.value })} />
+              <button type="button" className={cx(ROW_ACTION, 'mb-0.5')} aria-label={`Choose exercise ${i + 1} from the library`} onClick={() => setPicking(i)}>
+                <span className="@sm:hidden">Library</span>
+                <span className="hidden @sm:inline">Choose from library</span>
+              </button>
+              {remove ? <span className="mb-0.5">{remove}</span> : null}
+            </div>
+          )}
           {row.setRecords ? (
             <SetRows value={row.setRecords} exerciseIndex={i} onChange={(setRecords) => update(i, { setRecords })} />
           ) : (
@@ -224,7 +271,8 @@ export function ExerciseRows({
           )}
           {showNotes ? <Input label="Notes" hint="Optional. Tempo, cues, how it felt." value={row.notes} onChange={(e) => update(i, { notes: e.target.value })} /> : null}
         </div>
-      ))}
+        );
+      })}
       {error ? (
         <p id={`${headingId}-error`} role="alert" className="text-xs text-danger">
           {error}
@@ -233,6 +281,21 @@ export function ExerciseRows({
       <Button type="button" variant="secondary" icon={<Plus size={18} />} onClick={() => onChange([...value, emptyExercise()])}>
         Add exercise
       </Button>
+
+      <ExercisePicker
+        open={picking !== null}
+        initialQuery={picking !== null ? value[picking]?.name ?? '' : ''}
+        onClose={() => setPicking(null)}
+        onSelect={(pick) => {
+          const i = picking;
+          if (i === null) return;
+          update(i, {
+            name: pick.name,
+            exerciseId: pick.exerciseId ?? undefined,
+            library: pick.exerciseId ? { thumbnail: pick.thumbnail ?? null, meta: pick.meta } : undefined,
+          });
+        }}
+      />
     </fieldset>
   );
 }
