@@ -524,7 +524,7 @@ export default function Water() {
 
       <Section title="Today’s logs" description={`Newest first. Totals are shown in ${system === 'imperial' ? 'ounces' : 'millilitres'}; change units in Settings.`}>
         {isLoading ? (
-          <div className="card divide-y divide-line">
+          <Card padded={false} className="divide-y divide-line" aria-busy="true" aria-label="Loading logs">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3 p-3 pl-4">
                 <Skeleton className="h-10 w-10 rounded-full" />
@@ -534,7 +534,7 @@ export default function Water() {
                 </div>
               </div>
             ))}
-          </div>
+          </Card>
         ) : isError ? null : logs.length === 0 ? (
           <Card padded={false}>
             <EmptyState

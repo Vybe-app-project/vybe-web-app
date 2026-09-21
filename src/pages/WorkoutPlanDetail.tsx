@@ -35,16 +35,18 @@ type PlanEnvelope = { success?: boolean; data?: WorkoutPlan };
 function PlanSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true" aria-label="Loading plan">
-      <div className="card space-y-3 p-4 sm:p-5">
+      <Card className="space-y-3">
         <SkeletonText lines={2} />
         <div className="flex gap-2">
           <Skeleton className="h-6 w-20 rounded-xs" />
           <Skeleton className="h-6 w-24 rounded-xs" />
         </div>
-      </div>
+      </Card>
       <div className="space-y-2">
         {Array.from({ length: 3 }).map((_, i) => (
-          <SkeletonRow key={i} className="card px-4" />
+          <Card key={i} padded={false} className="px-4">
+            <SkeletonRow />
+          </Card>
         ))}
       </div>
     </div>

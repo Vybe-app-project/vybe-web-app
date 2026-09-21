@@ -85,7 +85,7 @@ function DetailSkeleton() {
   return (
     <div className="space-y-8" aria-busy="true" aria-label="Loading meal">
       <PageHeader title="Meal" />
-      <div className="card overflow-hidden">
+      <Card padded={false} className="overflow-hidden">
         <Skeleton className="aspect-[16/9] w-full max-h-72 rounded-none" />
         <div className="space-y-4 p-4 sm:p-5">
           <Skeleton className="h-5 w-2/3" />
@@ -96,7 +96,7 @@ function DetailSkeleton() {
             ))}
           </div>
         </div>
-      </div>
+      </Card>
       <Skeleton className="h-12 w-full" />
     </div>
   );

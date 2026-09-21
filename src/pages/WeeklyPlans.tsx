@@ -25,7 +25,7 @@ import {
   Select,
   Skeleton,
   Spinner,
-  Tabs,
+  SegmentedControl,
   Textarea,
   cx,
   formatStat,
@@ -934,7 +934,7 @@ function CardSkeletons({ count = 3 }: { count?: number }) {
   return (
     <CardGrid min="20rem" aria-busy="true" aria-label="Loading plans">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="card space-y-4 p-4 sm:p-5">
+        <Card key={i} className="space-y-4">
           <Skeleton className="h-5 w-2/3" />
           <Skeleton className="h-3 w-1/2" />
           <div className="grid grid-cols-7 gap-1">
@@ -946,7 +946,7 @@ function CardSkeletons({ count = 3 }: { count?: number }) {
             <Skeleton className="h-11 w-28" />
             <Skeleton className="h-11 w-11" />
           </div>
-        </div>
+        </Card>
       ))}
     </CardGrid>
   );
@@ -1209,8 +1209,8 @@ export default function WeeklyPlans() {
         </div>
       </Card>
 
-      <Tabs
-        variant="segmented"
+      <SegmentedControl
+        className="sm:max-w-md"
         aria-label="Plan collections"
         tabs={TABS.map((t) => ({
           key: t.key,

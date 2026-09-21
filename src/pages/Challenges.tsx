@@ -50,7 +50,6 @@ import {
   StatGrid,
   StatTile,
   Switch,
-  Tabs,
   Textarea,
   cx,
   formatStat,
@@ -1278,7 +1277,7 @@ function ChallengeDetailModal({
               ) : null}
 
               {joined && !legacy ? (
-                <div className="card space-y-4 p-4">
+                <Card padded={false} className="space-y-4 p-4">
                   <div className="flex items-center gap-4">
                     <Ring
                       value={myPct}
@@ -1346,7 +1345,7 @@ function ChallengeDetailModal({
                       </Button>
                     </form>
                   )}
-                </div>
+                </Card>
               ) : closed && !legacy ? (
                 <Callout tone="info" title="This challenge has ended">
                   Check the leaderboard for the final standings, or browse what is running now.
@@ -1766,8 +1765,9 @@ export default function Challenges() {
         />
       </StatGrid>
 
-      <Tabs
+      <SegmentedControl
         aria-label="Challenge lists"
+        className="max-w-xl"
         active={tab}
         onChange={(k) => setTab(k as TabKey)}
         tabs={[

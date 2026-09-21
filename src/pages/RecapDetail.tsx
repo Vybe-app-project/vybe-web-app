@@ -7,6 +7,7 @@ import { useUnits, weightUnit } from '../lib/units';
 import {
   Button,
   Callout,
+  Card,
   Checkbox,
   EmptyState,
   ErrorState,
@@ -66,8 +67,12 @@ function DetailSkeleton() {
         <SkeletonTile />
       </StatGrid>
       <Skeleton className="h-24 w-full rounded-md" />
-      <SkeletonRow className="card px-4" />
-      <SkeletonRow className="card px-4" />
+      <Card padded={false} className="px-4">
+        <SkeletonRow />
+      </Card>
+      <Card padded={false} className="px-4">
+        <SkeletonRow />
+      </Card>
     </div>
   );
 }
