@@ -5,6 +5,24 @@ import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { timeAgo } from '../lib/hooks';
 import {
+  completeEnrollment,
+  enroll,
+  isFeatureDisabled,
+  markSession,
+  openWeek,
+  patchEnrollment,
+  programKeys,
+  programsFeature,
+  scheduleWeeks,
+  shiftAnchor,
+  skipSession,
+  unmarkSession,
+  unskipSession,
+  useEnrollment,
+  type PlanSlotInput,
+  type ScheduleRow,
+} from '../lib/programs';
+import {
   Avatar,
   Badge,
   Button,
@@ -21,12 +39,14 @@ import {
   formatStat,
   humanize,
   useToast,
+  type MenuItem,
 } from './ui';
-import { Activity, Clock, Dumbbell, Flame, Layers, Plus, Trash } from './icons';
+import { Check, Clock, Dumbbell, ExternalLink, Flame, Layers, Minus, Pause, Play, Plus, Trash } from './icons';
 import { RouteSheet } from '../components/RouteSheet';
 import { planMenu } from './Workouts';
 import { LikeButton, MetaList } from './workouts/cards';
 import { fetchPlan, type PlanEntry, type WorkoutPlan } from './workouts/model';
+import { EnrolmentCard, WeekList } from './workouts/enrolment';
 import { AddWorkoutPicker } from './workouts/planPickers';
 import { TRAIN, useSheetClose, useSheetNav } from './workouts/sheet';
 
@@ -53,13 +73,23 @@ function PlanSkeleton() {
   );
 }
 
-const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const dayLabel = (day: number) => (day >= 1 && day <= 7 ? `Day ${day} · ${DAY_NAMES[day - 1]}` : `Day ${day}`);
-
 /**
  * /workouts/plans/:planId — a workout plan, week by week, as a sheet over the
  * page that opened it. Owners schedule sessions into a week and day here and
  * take them out again; renaming and the length live at /workouts/plans/:planId/edit.
+ *
+ * Since Wave G the page is also where a member joins the plan and follows it.
+ * Under the title sits one enrolment card: before joining, a sentence about
+ * what the plan is and the page's one filled blue; after, "Week 2 of 4 · 5 of
+ * 12 done", the one next-up row with a blue text Start, and a quiet overflow
+ * for pause, shift, complete and leave. The schedule below it is a text-only
+ * day list — Monday to Sunday, rest days named and dimmed — and it is the
+ * same list whether or not anyone has enrolled: a plan you cannot read is a
+ * plan you cannot choose.
+ *
+ * Every /api/plans route sits behind the `programs` flag and answers 404
+ * FEATURE_DISABLED while it is off, so the card is feature-detected: with the
+ * flag off it is simply absent and the schedule stays exactly as it was.
  */
 export default function WorkoutPlanDetail() {
   const { planId = '' } = useParams();
@@ -71,10 +101,26 @@ export default function WorkoutPlanDetail() {
   const close = useSheetClose(TRAIN.tab('plans'));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<PlanEntry | null>(null);
+  /** null until the member opens or closes a week themselves; then it is their choice. */
+  const [openWeeks, setOpenWeeks] = useState<Set<number> | null>(null);
 
   const queryKey = ['workout-plan', planId];
   const { data: plan, isLoading, isError, error, refetch } = useQuery({ queryKey, queryFn: () => fetchPlan(planId), enabled: Boolean(planId) });
+
+  const { programs: programsOn } = programsFeature();
+  const enrolment = useEnrollment(planId);
+  const view = enrolment.data ?? null;
+  const status = view?.enrollment?.status ?? 'none';
+  const enrolled = status === 'active' || status === 'paused' || status === 'completed';
+  /** The flag is on and the read answered: only then is there a card to draw. */
+  const showEnrolment = programsOn && !enrolment.isError;
+  const enrolmentKey = programKeys.enrollment(planId);
+  const afterEnrolmentWrite = () => {
+    qc.invalidateQueries({ queryKey: enrolmentKey });
+    qc.invalidateQueries({ queryKey: ['plans', 'enrollments'] });
+  };
 
   const isOwn = Boolean(user && plan?.createdBy && plan.createdBy._id === user._id);
   const liked = Boolean(user && (plan?.likes ?? []).some((id) => String(id) === user._id));
@@ -148,25 +194,98 @@ export default function WorkoutPlanDetail() {
     onError: (e) => toast.error(errMsg(e, 'Could not delete plan')),
   });
 
-  const weeks = useMemo(() => {
-    const byWeek = new Map<number, PlanEntry[]>();
-    for (const entry of plan?.workouts ?? []) {
-      if (!entry.workout) continue;
-      const list = byWeek.get(entry.week) ?? [];
-      list.push(entry);
-      byWeek.set(entry.week, list);
-    }
-    const declared = plan?.durationWeeks ?? 0;
-    const keys = new Set<number>([...byWeek.keys()]);
-    // Owners see every advertised week so an empty one is a visible slot to fill.
-    if (isOwn) for (let w = 1; w <= declared; w += 1) keys.add(w);
-    return [...keys]
-      .sort((a, b) => a - b)
-      .map((week) => ({
-        week,
-        entries: (byWeek.get(week) ?? []).slice().sort((a, b) => a.day - b.day || (a.order ?? 0) - (b.order ?? 0)),
-      }));
-  }, [plan, isOwn]);
+  /* ------------------------------------------------------- the enrolment */
+
+  const startPlan = useMutation({
+    mutationFn: () => enroll(planId),
+    onSuccess: (data) => {
+      qc.setQueryData(enrolmentKey, data);
+      qc.invalidateQueries({ queryKey: ['plans', 'enrollments'] });
+      toast.success(`You are on ${plan?.title ?? 'the plan'}`);
+    },
+    onError: (e) => toast.error(e, 'Could not start this plan'),
+  });
+
+  const patch = useMutation({
+    mutationFn: ({ patch: body }: { patch: Parameters<typeof patchEnrollment>[1]; message: string }) => patchEnrollment(planId, body),
+    onSuccess: (_data, { message }) => {
+      afterEnrolmentWrite();
+      toast.success(message);
+    },
+    onError: (e) => toast.error(e, 'Could not change this plan'),
+  });
+
+  const complete = useMutation({
+    mutationFn: () => completeEnrollment(planId),
+    onSuccess: () => {
+      afterEnrolmentWrite();
+      toast.success('Plan complete');
+    },
+    onError: (e) => toast.error(e, 'Could not mark this plan complete'),
+  });
+
+  const slotWrite = useMutation({
+    mutationFn: ({ row, action }: { row: ScheduleRow; action: 'mark' | 'unmark' | 'skip' | 'unskip' }) => {
+      const slot = { week: row.week, day: row.day, order: row.order };
+      if (action === 'mark') return markSession(planId, { ...slot, source: 'manual' });
+      if (action === 'unmark') return unmarkSession(planId, slot);
+      if (action === 'skip') return skipSession(planId, slot);
+      return unskipSession(planId, slot);
+    },
+    onSuccess: () => afterEnrolmentWrite(),
+    onError: (e) => toast.error(e, 'Could not update this session'),
+  });
+
+  const leave = useMutation({
+    mutationFn: () => patchEnrollment(planId, { status: 'left' }),
+    onSuccess: () => {
+      afterEnrolmentWrite();
+      setConfirmLeave(false);
+      toast.success('You have left the plan');
+    },
+    onError: (e) => {
+      setConfirmLeave(false);
+      toast.error(e, 'Could not leave this plan');
+    },
+  });
+
+  /* --------------------------------------------------------- the schedule */
+
+  /** The plan document's own slots: what the list reads before anyone enrols. */
+  const slots = useMemo<PlanSlotInput[]>(
+    () =>
+      (plan?.workouts ?? [])
+        .filter((entry) => entry.workout)
+        .map((entry) => ({
+          week: entry.week,
+          day: entry.day,
+          order: entry.order,
+          workoutId: entry.workout?._id ?? null,
+          title: entry.workout?.title ?? null,
+          estimatedMin: entry.workout?.duration ?? null,
+          exerciseCount: entry.workout?.exercises?.length ?? 0,
+        })),
+    [plan],
+  );
+
+  const weeks = useMemo(
+    () => scheduleWeeks({ slots, schedule: view?.schedule, pointer: view?.pointer, durationWeeks: plan?.durationWeeks }),
+    [slots, view?.schedule, view?.pointer, plan?.durationWeeks],
+  );
+
+  // The suggested week opens on arrival; once the member opens or closes one, their set wins.
+  const currentWeek = openWeek(weeks, view?.suggestedWeek, view?.pointer);
+  const openSet = openWeeks ?? new Set<number>([currentWeek]);
+  const toggleWeek = (week: number) =>
+    setOpenWeeks((previous) => {
+      const next = new Set(previous ?? [currentWeek]);
+      if (next.has(week)) next.delete(week);
+      else next.add(week);
+      return next;
+    });
+
+  /** The pointer as a row, so the card's next-up line and the list agree. */
+  const nextRow = useMemo(() => weeks.flatMap((week) => week.days).flatMap((day) => day.rows).find((row) => row.isNext) ?? null, [weeks]);
 
   if (isLoading) {
     return (
@@ -211,6 +330,46 @@ export default function WorkoutPlanDetail() {
     onDelete: () => setConfirmDelete(true),
   });
 
+  /** The plan entry a schedule row came from, for the owner's remove control. */
+  const entryFor = (row: ScheduleRow): PlanEntry | null =>
+    (plan.workouts ?? []).find((entry) => entry.week === row.week && entry.day === row.day && (entry.order ?? 1) === row.order && entry.workout?._id === row.workoutId) ?? null;
+
+  /**
+   * Everything that changes the enrolment, in one quiet overflow. Nothing
+   * here is irreversible inside the app: a pause resumes, a shift moves the
+   * suggested week and nothing else, a completion can be taken back for a
+   * day, and leaving asks first.
+   */
+  const enrolmentMenu: MenuItem[] = [
+    ...(status === 'active' ? [{ label: 'Pause', icon: <Pause size={18} />, onSelect: () => patch.mutate({ patch: { status: 'paused' }, message: 'Plan paused' }) }] : []),
+    ...(status === 'paused' ? [{ label: 'Resume', icon: <Play size={18} />, onSelect: () => patch.mutate({ patch: { status: 'active' }, message: 'Plan resumed' }) }] : []),
+    ...((status === 'active' || status === 'paused') && view?.pointer
+      ? [
+          {
+            label: 'Shift schedule to this week',
+            description: 'Moves the suggested week. Nothing you have done changes.',
+            icon: <Layers size={18} />,
+            onSelect: () => patch.mutate({ patch: { weekAnchor: shiftAnchor(view.pointer?.week ?? 1) }, message: 'Schedule shifted to this week' }),
+          },
+        ]
+      : []),
+    ...(view?.canMarkComplete ? [{ label: 'Mark plan complete', icon: <Check size={18} />, onSelect: () => complete.mutate() }] : []),
+    ...(status !== 'completed' ? [{ label: 'Leave plan', icon: <Minus size={18} />, danger: true, divider: true, onSelect: () => setConfirmLeave(true) }] : []),
+  ];
+
+  /** Per slot: mark it, take the mark back, skip it, put it back, or open the workout. */
+  const slotMenu = (row: ScheduleRow): MenuItem[] => [
+    ...(row.state === 'done'
+      ? [{ label: 'Mark not done', icon: <Minus size={18} />, onSelect: () => slotWrite.mutate({ row, action: 'unmark' }) }]
+      : [{ label: 'Mark done', icon: <Check size={18} />, onSelect: () => slotWrite.mutate({ row, action: 'mark' }) }]),
+    ...(row.state === 'skipped'
+      ? [{ label: 'Un-skip', icon: <Play size={18} />, onSelect: () => slotWrite.mutate({ row, action: 'unskip' }) }]
+      : row.state === 'done'
+        ? []
+        : [{ label: 'Skip', description: 'Reversible, and it stays in the plan.', icon: <Pause size={18} />, onSelect: () => slotWrite.mutate({ row, action: 'skip' }) }]),
+    ...(row.workoutId ? [{ label: 'Open workout', icon: <ExternalLink size={18} />, divider: true, to: `/workouts/${row.workoutId}` }] : []),
+  ];
+
   return (
     <RouteSheet title={plan.title} onClose={close}>
     <div className="space-y-section">
@@ -230,6 +389,28 @@ export default function WorkoutPlanDetail() {
           <Menu items={menu} label={`More options for ${plan.title}`} />
         </div>
       </div>
+
+      {/* The enrolment, above the fold and above the description: joining is the
+          decision this page exists for. The skeleton is the card's own height,
+          so the cover below it never moves when the read lands. */}
+      {showEnrolment ? (
+        enrolment.isPending ? (
+          <Skeleton className="h-[148px] w-full rounded-lg" />
+        ) : (
+          <EnrolmentCard
+            state={status}
+            progress={view?.progress}
+            suggestedWeek={view?.suggestedWeek}
+            durationWeeks={plan.durationWeeks}
+            sessionCount={sessions.length}
+            next={nextRow}
+            nextTo={nextRow?.workoutId ? TRAIN.liveSession({ from: nextRow.workoutId, program: { planId: plan._id, week: nextRow.week, day: nextRow.day, order: nextRow.order } }) : null}
+            onStart={() => startPlan.mutate()}
+            starting={startPlan.isPending}
+            menu={enrolmentMenu}
+          />
+        )
+      ) : null}
 
       <Card padded={false} className="overflow-hidden">
         {cover ? <img src={cover} alt="" className="aspect-[16/9] w-full object-cover md:aspect-auto md:h-64" /> : null}
@@ -268,10 +449,10 @@ export default function WorkoutPlanDetail() {
 
       <Section
         title="Schedule"
-        description={sessions.length ? 'Week by week. Open a session to see the exercises or log it.' : undefined}
+        description={sessions.length ? 'Week by week, Monday to Sunday. Every week is open — train them in the order that fits.' : undefined}
         action={
           isOwn ? (
-            <Button variant="primary" icon={<Plus size={18} />} onClick={() => setPickerOpen(true)}>
+            <Button variant={showEnrolment && !enrolled ? 'secondary' : 'primary'} icon={<Plus size={18} />} onClick={() => setPickerOpen(true)}>
               Add workout
             </Button>
           ) : undefined
@@ -286,53 +467,33 @@ export default function WorkoutPlanDetail() {
             action={isOwn ? { label: 'Add workout', onClick: () => setPickerOpen(true), icon: <Plus size={18} />, variant: 'secondary' } : undefined}
           />
         ) : (
-          <div className="space-y-3">
-            {weeks.map(({ week, entries }) => (
-              <Card key={week} padded={false}>
-                <div className="flex items-center justify-between gap-3 px-4 pt-4">
-                  <h3 className="type-heading text-sm text-text-1">Week {week}</h3>
-                  <span className="text-xs text-text-3">{entries.length ? `${formatStat(entries.length)} ${entries.length === 1 ? 'session' : 'sessions'}` : 'Rest week'}</span>
-                </div>
-                {entries.length === 0 ? (
-                  <p className="px-4 pb-4 pt-2 text-sm text-text-2">Nothing scheduled this week yet.</p>
-                ) : (
-                  <ul className="mt-2 divide-y divide-line">
-                    {entries.map((entry) => (
-                      <li key={`${entry.week}-${entry.day}-${entry.workout?._id}`} className="flex items-center gap-1 pr-2">
-                        <Link
-                          to={`/workouts/${entry.workout?._id}`}
-                          state={state}
-                          viewTransition
-                          className="flex min-h-12 min-w-0 flex-1 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2"
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-semibold text-text-1">{entry.workout?.title}</span>
-                            <span className="block text-xs text-text-2">
-                              {dayLabel(entry.day)}
-                              {entry.workout?.duration ? ` · ${formatStat(entry.workout.duration)} min` : ''}
-                              {entry.workout?.category ? ` · ${humanize(entry.workout.category)}` : ''}
-                            </span>
-                          </span>
-                          <Activity size={16} className="shrink-0 text-text-3" />
-                        </Link>
-                        {isOwn ? (
-                          <IconButton
-                            label={`Remove ${entry.workout?.title ?? 'session'} from week ${entry.week}`}
-                            variant="ghost"
-                            className="shrink-0 text-text-2 hover:text-danger"
-                            disabled={removeEntry.isPending}
-                            onClick={() => setPendingRemove(entry)}
-                          >
-                            <Trash size={18} />
-                          </IconButton>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-            ))}
-          </div>
+          <WeekList
+            weeks={weeks}
+            open={openSet}
+            onToggle={toggleWeek}
+            workoutTo={(workoutId) => `/workouts/${workoutId}`}
+            linkState={state}
+            menuFor={enrolled && status !== 'completed' ? slotMenu : undefined}
+            ownerAction={
+              isOwn
+                ? (row) => {
+                    const entry = entryFor(row);
+                    if (!entry) return null;
+                    return (
+                      <IconButton
+                        label={`Remove ${entry.workout?.title ?? 'session'} from week ${entry.week}`}
+                        variant="ghost"
+                        className="shrink-0 text-text-2 hover:text-danger"
+                        disabled={removeEntry.isPending}
+                        onClick={() => setPendingRemove(entry)}
+                      >
+                        <Trash size={18} />
+                      </IconButton>
+                    );
+                  }
+                : undefined
+            }
+          />
         )}
       </Section>
 
@@ -346,6 +507,16 @@ export default function WorkoutPlanDetail() {
         loading={removeEntry.isPending}
         onCancel={() => setPendingRemove(null)}
         onConfirm={() => pendingRemove && removeEntry.mutate(pendingRemove)}
+      />
+      <ConfirmDialog
+        open={confirmLeave}
+        title="Leave this plan?"
+        message={`Your progress on “${plan.title}” is kept. You can start it again whenever you want.`}
+        confirmLabel="Leave"
+        destructive
+        loading={leave.isPending}
+        onCancel={() => setConfirmLeave(false)}
+        onConfirm={() => leave.mutate()}
       />
       <ConfirmDialog
         open={confirmDelete}
