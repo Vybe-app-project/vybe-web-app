@@ -255,7 +255,9 @@ test('strangers see the friend-request callout instead of a composer and a dead 
   const src = read('src/pages/Messages.tsx');
   assert.match(src, /function ConsentCallout/);
   assert.match(src, /consentBlocked && peer \? \(\s*<ConsentCallout/);
-  assert.match(src, /const final = isConsentError\(e\)/);
+  assert.match(src, /const consentRefusal = isConsentError\(e\)/);
+  // A card the server refused (gone, invisible, flag off) is final too (P8b).
+  assert.match(src, /const final = consentRefusal \|\| cardRefusal;/);
   assert.match(src, /\{!item\.final \? \(\s*<button type="button" onClick=\{onRetry\}/, 'no Retry after a consent refusal');
   assert.match(src, /u\.canMessage === false \? \(\s*<span className="shrink-0 text-xs font-medium text-text-3">Friends only<\/span>/);
   assert.match(read('src/pages/PeopleSearch.tsx'), /Friends only/);

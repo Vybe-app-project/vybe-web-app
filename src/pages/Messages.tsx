@@ -33,7 +33,22 @@ import {
 } from '../lib/chat';
 import { linkifySegments } from '../lib/linkify';
 import { isPendingRequestRoom } from '../lib/messageRequests';
+import {
+  LINK_PREVIEW_EVENT,
+  SHARED_OBJECT_CARDS_FLAG,
+  applyLinkPreview,
+  attachmentBody,
+  attachmentErrorCopy,
+  isBareAttachment,
+  type LinkPreview,
+  type LinkPreviewEvent,
+  type SharedAttachment,
+  type ShareCandidate,
+} from '../lib/sharedCards';
+import { useFeature } from '../lib/capabilities';
 import { AcceptToReplyBanner, MessageRequestsView, RequestsEntryRow, useMessageRequests } from './messages/MessageRequests';
+import { LinkPreviewCard, SharedObjectCard } from './messages/SharedObjectCard';
+import { PendingAttachmentChip, SharePicker } from './messages/SharePicker';
 import PeopleSearch, { PersonRow, personName as nameOf, rememberPerson, usePeopleSearch, type Person } from './PeopleSearch';
 import {
   Avatar,
@@ -77,6 +92,7 @@ import {
   Image as ImageIcon,
   Inbox,
   LogOut,
+  Plus,
   Search,
   Send,
   Trash,
@@ -144,6 +160,14 @@ type ChatMessage = {
   readers?: string[];
   media?: MessageMedia[];
   sharedPost?: SharedPost | string | null;
+  /**
+   * A shared object card (`sharedObjectCards`). Stored as { type, id } and
+   * re-presented per reader, so `access` and `preview` can change between
+   * two loads; with the flag off it arrives bare and renders as nothing.
+   */
+  attachment?: SharedAttachment | null;
+  /** The server-built preview for the first URL in `text` (`linkUnfurl`). Never fetched here. */
+  linkPreview?: LinkPreview | null;
   isForwarded?: boolean;
   isGroup?: boolean;
   targetId?: string;
@@ -157,6 +181,8 @@ type OutboxItem = {
   tempId: string;
   text: string;
   media: UploadedMedia[];
+  /** The shared object riding with this message, if one was picked. */
+  attachment?: ShareCandidate | null;
   createdAt: string;
   status: 'sending' | 'failed';
   error?: string;
@@ -279,6 +305,8 @@ type SocketHandlers = {
   onRoomUpdate: () => void;
   onRead: (payload: ReadReceiptPayload) => void;
   onTyping: (payload: TypingPayload, active: boolean) => void;
+  /** The server finished unfurling a link in a message (services/linkUnfurl.js). */
+  onLinkPreview: (payload: LinkPreviewEvent) => void;
   onReconnect: () => void;
 };
 
@@ -310,6 +338,7 @@ function useChatSocket(handlers: SocketHandlers) {
     const onRead = (payload: ReadReceiptPayload) => ref.current.onRead(payload || {});
     const onTyping = (payload: TypingPayload) => ref.current.onTyping(payload || {}, true);
     const onStopTyping = (payload: TypingPayload) => ref.current.onTyping(payload || {}, false);
+    const onLinkPreview = (payload: LinkPreviewEvent) => ref.current.onLinkPreview(payload || {});
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDown);
@@ -322,6 +351,7 @@ function useChatSocket(handlers: SocketHandlers) {
     socket.on('messageRead', onRead);
     socket.on('typing', onTyping);
     socket.on('stop_typing', onStopTyping);
+    socket.on(LINK_PREVIEW_EVENT, onLinkPreview);
 
     return () => {
       socket.off('connect', onConnect);
@@ -335,6 +365,7 @@ function useChatSocket(handlers: SocketHandlers) {
       socket.off('messageRead', onRead);
       socket.off('typing', onTyping);
       socket.off('stop_typing', onStopTyping);
+      socket.off(LINK_PREVIEW_EVENT, onLinkPreview);
     };
   }, []);
 
@@ -1280,6 +1311,9 @@ function Bubble({
   const [revealed, setRevealed] = useState(false);
   const [sheet, setSheet] = useState(false);
   const shared = message.sharedPost && typeof message.sharedPost === 'object' ? (message.sharedPost as SharedPost) : null;
+  // A card whose flag is off for this reader arrives as a bare { type, id }:
+  // that is "no card", not an empty one.
+  const card = message.attachment && !isBareAttachment(message.attachment) ? message.attachment : null;
   const hasText = !!message.text;
 
   const copyText = async () => {
@@ -1327,13 +1361,15 @@ function Bubble({
             'select-text px-3.5 py-2 text-base leading-6 text-text-1 [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors dur-1',
             mine ? 'bg-brand-soft' : 'bg-surface-2',
             radius,
-            (!!message.media?.length || !!shared) && 'w-64 max-w-full sm:w-80',
+            (!!message.media?.length || !!shared || !!card || !!message.linkPreview) && 'w-64 max-w-full sm:w-80',
             touch && 'touch-manipulation',
           )}
         >
           {message.media?.length ? <MediaGrid media={message.media} mine={mine} onOpen={(i) => onOpenMedia(message.media || [], i)} /> : null}
           {message.text ? <LinkedText text={message.text} className={cx(!!message.media?.length && 'mt-2')} /> : null}
           {shared ? <SharedPostCard post={shared} /> : null}
+          {card ? <SharedObjectCard attachment={card} /> : null}
+          <LinkPreviewCard preview={message.linkPreview} />
         </div>
         <span
           className={cx(
@@ -1516,13 +1552,21 @@ function Composer({
   onSend,
   onTyping,
   focusKey,
+  attachment,
+  onPickAttachment,
+  onClearAttachment,
 }: {
   disabled?: boolean;
   offline: boolean;
   placeholder: string;
-  onSend: (text: string, media: UploadedMedia[]) => void;
+  onSend: (text: string, media: UploadedMedia[], attachment: ShareCandidate | null) => void;
   onTyping?: (active: boolean) => void;
   focusKey: string;
+  /** The shared object waiting to go with the next message, if any. */
+  attachment?: ShareCandidate | null;
+  /** Absent while the sharedObjectCards flag is off: no control, no dead end. */
+  onPickAttachment?: () => void;
+  onClearAttachment?: () => void;
 }) {
   const toast = useToast();
   const touch = useIsTouch();
@@ -1633,7 +1677,7 @@ function Composer({
     e?.preventDefault();
     if (!canSend) return;
     stopTyping();
-    onSend(trimmed, ready);
+    onSend(trimmed, ready, attachment ?? null);
     setText('');
     attachments.forEach((a) => URL.revokeObjectURL(a.previewUrl));
     setAttachments([]);
@@ -1656,6 +1700,8 @@ function Composer({
           You’re offline — sending resumes when you reconnect.
         </Callout>
       ) : null}
+
+      {attachment && onClearAttachment ? <PendingAttachmentChip candidate={attachment} onClear={onClearAttachment} /> : null}
 
       {attachments.length ? (
         <ul className="mb-2 flex gap-2 overflow-x-auto px-1 pb-1" aria-label="Attachments">
@@ -1709,6 +1755,11 @@ function Composer({
         <IconButton label="Add photo or video" size={44} onClick={() => fileRef.current?.click()} disabled={disabled || attachments.length >= MAX_ATTACHMENTS}>
           <ImageIcon size={22} />
         </IconButton>
+        {onPickAttachment ? (
+          <IconButton label="Share a workout or recap" size={44} onClick={onPickAttachment} disabled={disabled}>
+            <Plus size={22} />
+          </IconButton>
+        ) : null}
         <div className="min-w-0 flex-1">
           <Textarea
             label="Message"
@@ -1759,6 +1810,7 @@ function Thread({
   incoming,
   deletedIds,
   receipt,
+  preview,
   typing,
   connected,
   compact,
@@ -1772,6 +1824,8 @@ function Thread({
   incoming: ChatMessage[];
   deletedIds: Set<string>;
   receipt: { seq: number; payload: ReadReceiptPayload } | null;
+  /** A finished link preview, folded into the history this thread holds. */
+  preview: { seq: number; payload: LinkPreviewEvent } | null;
   typing: TypingState;
   connected: boolean;
   compact: boolean;
@@ -1807,6 +1861,12 @@ function Thread({
   const [history, setHistory] = useState<ThreadHistory<ChatMessage>>(EMPTY_HISTORY);
   const [older, setOlder] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [consent, setConsent] = useState<{ blocked: boolean; friendStatus?: string }>(() => ({ blocked: peer?.canMessage === false, friendStatus: peer?.friendStatus }));
+  const [sharePicker, setSharePicker] = useState(false);
+  const [pendingCard, setPendingCard] = useState<ShareCandidate | null>(null);
+  // Two flags, both off today. Without `sharedObjectCards` there is no share
+  // control at all rather than one that answers 404; without `linkUnfurl`
+  // nothing carries a preview, so the card simply never renders.
+  const cardsOn = useFeature(SHARED_OBJECT_CARDS_FLAG);
 
   // The draft header can mount from router state before GET /users/:id has
   // answered; the composer follows the consent flags once they arrive.
@@ -1903,6 +1963,16 @@ function Thread({
       return next === h.messages ? h : { ...h, messages: next };
     });
   }, [receipt]);
+
+  // Same for a link preview: the page in the cache is patched by the page
+  // component, the older history held here is patched from the event.
+  useEffect(() => {
+    if (!preview) return;
+    setHistory((h) => {
+      const next = applyLinkPreview(h.messages, preview.payload);
+      return next === h.messages ? h : { ...h, messages: next };
+    });
+  }, [preview]);
 
   // Fetched history + realtime deliveries for this room, minus anything deleted, oldest first.
   const merged = useMemo(
@@ -2006,6 +2076,8 @@ function Thread({
       const payload: Record<string, unknown> = room && (isGroup || !peer?._id) ? { chatRoomId: room._id } : { receiverIds: [peer?._id] };
       if (item.text) payload.text = item.text;
       if (item.media.length) payload.media = item.media.map((m) => ({ uri: m.key, type: m.type }));
+      // One card per message: the API takes a single { type, id }.
+      if (item.attachment) Object.assign(payload, attachmentBody(item.attachment.type, item.attachment.id));
       const { data } = await api.post('/messages/send', payload);
       return data as { message?: ChatMessage; chatRoom?: ChatRoom };
     },
@@ -2021,19 +2093,25 @@ function Thread({
       void thread.refetch();
     },
     onError: (e, item) => {
-      const final = isConsentError(e);
-      if (final) {
+      const consentRefusal = isConsentError(e);
+      if (consentRefusal) {
         const who = consentErrorUser(e);
         setConsent({ blocked: true, friendStatus: peer?.friendStatus });
         toast.error(null, errMsg(e, `${nameOf(who || peer)} only accepts messages from friends`));
       }
+      // A card the server refused (gone, invisible, or the flag off) cannot
+      // be retried into existence either.
+      const cardRefusal = Boolean(item.attachment) && !consentRefusal;
+      if (cardRefusal) toast.error(null, attachmentErrorCopy(e));
+      const final = consentRefusal || cardRefusal;
       setOutbox((prev) => prev.map((o) => (o.tempId === item.tempId ? { ...o, status: 'failed', error: errMsg(e, 'Not sent'), final } : o)));
     },
   });
 
-  const queue = (text: string, media: UploadedMedia[]) => {
-    const item: OutboxItem = { tempId: tempId(), text, media, createdAt: new Date().toISOString(), status: 'sending' };
+  const queue = (text: string, media: UploadedMedia[], attachment: ShareCandidate | null) => {
+    const item: OutboxItem = { tempId: tempId(), text, media, attachment, createdAt: new Date().toISOString(), status: 'sending' };
     setOutbox((prev) => [...prev, item]);
+    setPendingCard(null);
     atBottomRef.current = true;
     send.mutate(item);
   };
@@ -2271,8 +2349,28 @@ function Thread({
           onChanged={(status, canMessage) => setConsent({ blocked: !canMessage, friendStatus: status })}
         />
       ) : (
-        <Composer offline={!online} placeholder={isGroup ? 'Message the group' : `Message ${nameOf(peer).split(' ')[0]}`} onSend={queue} onTyping={onTyping} focusKey={threadKey} />
+        <Composer
+          offline={!online}
+          placeholder={isGroup ? 'Message the group' : `Message ${nameOf(peer).split(' ')[0]}`}
+          onSend={queue}
+          onTyping={onTyping}
+          focusKey={threadKey}
+          attachment={pendingCard}
+          onPickAttachment={cardsOn ? () => setSharePicker(true) : undefined}
+          onClearAttachment={() => setPendingCard(null)}
+        />
       )}
+
+      {cardsOn ? (
+        <SharePicker
+          open={sharePicker}
+          onClose={() => setSharePicker(false)}
+          onPick={(candidate) => {
+            setPendingCard(candidate);
+            setSharePicker(false);
+          }}
+        />
+      ) : null}
 
       {reportModal}
       <ConfirmDialog
@@ -2497,6 +2595,7 @@ export default function Messages() {
   const [live, setLive] = useState<ChatMessage[]>([]);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   const [receipt, setReceipt] = useState<{ seq: number; payload: ReadReceiptPayload } | null>(null);
+  const [preview, setPreview] = useState<{ seq: number; payload: LinkPreviewEvent } | null>(null);
   const [typing, setTyping] = useState<TypingState>({});
   // Rooms the user just archived or left: never looked up again while the
   // route is still catching up, so no request goes out for a room they are
@@ -2544,6 +2643,21 @@ export default function Messages() {
         });
         setLive((prev) => applyReadReceipts(prev, payload));
         setReceipt((r) => ({ seq: (r?.seq ?? 0) + 1, payload }));
+      },
+      [qc],
+    ),
+    // A preview lands minutes after the message did, so it is patched into
+    // every cached page and into the realtime buffer in place; nothing here
+    // fetches anything (the server did the fetching, behind its SSRF guard).
+    onLinkPreview: useCallback(
+      (payload: LinkPreviewEvent) => {
+        qc.setQueriesData<ThreadPage>({ queryKey: ['thread'] }, (page) => {
+          if (!page) return page;
+          const messages = applyLinkPreview(page.messages, payload);
+          return messages === page.messages ? page : { ...page, messages };
+        });
+        setLive((prev) => applyLinkPreview(prev, payload));
+        setPreview((p) => ({ seq: (p?.seq ?? 0) + 1, payload }));
       },
       [qc],
     ),
@@ -2682,6 +2796,7 @@ export default function Messages() {
           incoming={live}
           deletedIds={deletedIds}
           receipt={receipt}
+          preview={preview}
           typing={typing}
           connected={connected}
           compact={compact}
