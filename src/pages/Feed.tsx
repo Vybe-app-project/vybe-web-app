@@ -45,6 +45,7 @@ import { GymHeader } from '../components/GymHeader';
 import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors } from './PostCard';
 import { StoryTray } from './StoryTray';
 import FirstWeekCard from './FirstWeekCard';
+import RhythmCard from './RhythmCard';
 
 const MAX_CHARS = 2000;
 
@@ -580,6 +581,9 @@ export default function Feed() {
         <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
       </div>
       <FirstWeekCard className="my-4" />
+      {/* The Get started card owns the first week; the rhythm card takes the
+          same slot once that window has passed, so only one is ever here. */}
+      <RhythmCard className="my-4" />
 
       {isLoading ? (
         <div aria-busy="true" aria-label="Loading your feed">
