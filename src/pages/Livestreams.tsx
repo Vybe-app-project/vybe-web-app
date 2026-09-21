@@ -19,10 +19,10 @@ import {
   Input,
   Modal,
   PageHeader,
+  SegmentedControl,
   Select,
   Skeleton,
   SkeletonRow,
-  Tabs,
   Textarea,
   cx,
   useToast,
@@ -105,13 +105,13 @@ function Pager({
 
 function StreamCardSkeleton() {
   return (
-    <div className="card p-3">
+    <Card padded={false} className="p-3">
       <Skeleton className="aspect-video w-full rounded-md" />
       <div className="mt-3 space-y-2 px-1">
         <Skeleton className="h-4 w-3/4" />
         <SkeletonRow className="py-0" />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -132,36 +132,43 @@ function StreamCard({ stream, onOpen, mine }: { stream: Stream; onOpen: () => vo
   const host = hostOf(stream);
   const verb = mine ? (stream.status === 'live' ? 'manage your broadcast' : stream.status === 'scheduled' ? 'set up' : 'open') : stream.status === 'live' ? 'watch' : 'open';
   return (
-    <button type="button" onClick={onOpen} className="card card-interactive w-full p-3 text-left" aria-label={`${stream.title} — ${verb}`}>
-      <CardMedia ratio="16/9" className="relative">
-        {thumb ? (
-          <img src={thumb} alt="" loading="lazy" className="h-full w-full object-cover" />
-        ) : (
-          <span className="flex h-full w-full items-center justify-center text-text-3">
-            <Play size={30} />
-          </span>
-        )}
-        <StatusPill stream={stream} className="absolute left-2 top-2" />
-        {stream.status === 'live' ? (
-          <span className="absolute bottom-2 right-2 inline-flex h-6 items-center gap-1 rounded-xs bg-surface-1/90 px-2 text-2xs font-semibold text-text-1 backdrop-blur">
-            <Eye size={13} className="text-text-2" />
-            <span className="tabular">{viewersOf(stream)}</span>
-          </span>
-        ) : null}
-      </CardMedia>
-      <div className="mt-3 space-y-2 px-1 pb-1">
-        <p className="line-clamp-2 text-md font-semibold leading-snug text-text-1">{stream.title}</p>
-        <div className="flex items-center gap-2">
-          <Avatar src={host?.avatar} name={hostName(stream)} size="xs" />
-          <span className="min-w-0 truncate text-xs text-text-2">{mine ? 'You' : hostName(stream)}</span>
-          {stream.category ? (
-            <Badge tone="neutral" size="sm" className="ml-auto shrink-0">
-              {categoryLabel(stream.category)}
-            </Badge>
+    <Card interactive padded={false}>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="block w-full rounded-[inherit] p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        aria-label={`${stream.title} — ${verb}`}
+      >
+        <CardMedia ratio="16/9" className="relative">
+          {thumb ? (
+            <img src={thumb} alt="" loading="lazy" className="h-full w-full object-cover" />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-text-3">
+              <Play size={30} />
+            </span>
+          )}
+          <StatusPill stream={stream} className="absolute left-2 top-2" />
+          {stream.status === 'live' ? (
+            <span className="absolute bottom-2 right-2 inline-flex h-6 items-center gap-1 rounded-xs bg-surface-1/90 px-2 text-2xs font-semibold text-text-1 backdrop-blur">
+              <Eye size={13} className="text-text-2" />
+              <span className="tabular">{viewersOf(stream)}</span>
+            </span>
           ) : null}
+        </CardMedia>
+        <div className="mt-3 space-y-2 px-1 pb-1">
+          <p className="line-clamp-2 text-md font-semibold leading-snug text-text-1">{stream.title}</p>
+          <div className="flex items-center gap-2">
+            <Avatar src={host?.avatar} name={hostName(stream)} size="xs" />
+            <span className="min-w-0 truncate text-xs text-text-2">{mine ? 'You' : hostName(stream)}</span>
+            {stream.category ? (
+              <Badge tone="neutral" size="sm" className="ml-auto shrink-0">
+                {categoryLabel(stream.category)}
+              </Badge>
+            ) : null}
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+    </Card>
   );
 }
 
@@ -525,8 +532,9 @@ export default function Livestreams() {
     <div className="space-y-6">
       {header}
 
-      <Tabs
+      <SegmentedControl
         aria-label="Stream lists"
+        className="max-w-lg"
         tabs={[
           { value: 'live', label: 'Live now', icon: <Radio size={16} /> },
           { value: 'featured', label: 'Featured' },

@@ -362,6 +362,7 @@ export default function PostDetail() {
         {post ? (
           <PostCard
             post={post}
+            surface="card"
             linkToDetail={false}
             hideComposer
             expandMedia

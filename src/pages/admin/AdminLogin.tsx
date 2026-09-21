@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { errMsg } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { BrandMark, Button, Callout, Input } from '../../components/ui';
+import { BrandMark, Button, Callout, Card, Input } from '../../components/ui';
 import { Lock, Mail, ArrowLeft, ArrowRight } from '../../components/icons';
 import { useAdminScope } from './AdminLayout';
 
@@ -40,7 +40,9 @@ export function AdminAuthShell({
           </div>
         </div>
 
-        <div className="card p-5 shadow-2 sm:p-6">{children}</div>
+        <Card padded={false} className="p-5 shadow-2 sm:p-6">
+          {children}
+        </Card>
       </div>
     </div>
   );

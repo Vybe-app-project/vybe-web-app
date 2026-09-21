@@ -10,8 +10,8 @@ import {
   EmptyState,
   ErrorState,
   Modal,
+  SegmentedControl,
   Skeleton,
-  Tabs,
   Textarea,
   cx,
   humanize,
@@ -203,7 +203,8 @@ export default function AdminTrainers() {
         meta={<Badge tone="neutral"><span className="tabular">{plural(total, 'application')}</span></Badge>}
       />
 
-      <Tabs
+      <SegmentedControl
+        className="max-w-sm"
         aria-label="Application status"
         tabs={TABS}
         active={status}

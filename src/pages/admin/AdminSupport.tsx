@@ -11,8 +11,8 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  SegmentedControl,
   Skeleton,
-  Tabs,
   cx,
   plural,
   useToast,
@@ -107,7 +107,8 @@ export default function AdminSupport() {
         meta={<Badge tone="neutral"><span className="tabular">{plural(total, 'message')}</span></Badge>}
       />
 
-      <Tabs
+      <SegmentedControl
+        className="max-w-sm"
         aria-label="Message status"
         tabs={TABS}
         active={status}
