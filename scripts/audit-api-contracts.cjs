@@ -160,8 +160,13 @@ function clientIdentifiers(sourceFile) {
       continue;
     }
     const moduleName = statement.moduleSpecifier.text;
+    // A module inside src/lib imports the client as './api' (or '../api' from a
+    // subfolder): without this branch every request path in src/lib/*.ts was
+    // invisible to the inventory (exerciseLibrary, hooks, auth, accountPreferences, mealScan).
+    const importerUnderLib = /[\\/]src[\\/]lib[\\/]/.test(sourceFile.fileName);
     const isClientModule = moduleName === 'axios'
-      || /(?:^|\/)lib\/api$/.test(moduleName);
+      || /(?:^|\/)lib\/api$/.test(moduleName)
+      || (importerUnderLib && /^\.\.?\/api$/.test(moduleName));
     if (isClientModule && statement.importClause?.name) {
       identifiers.set(statement.importClause.name.text, {
         basePath: moduleName === 'axios' ? null : '/api',
