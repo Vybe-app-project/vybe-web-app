@@ -11,6 +11,7 @@ import { HOME_GYM_KEY, useHomeGym, useSetHomeGym } from '../lib/homeGym';
 import { exerciseKeys, fetchExerciseMeta } from '../lib/exerciseLibrary';
 import AccountPreferenceSections from './SettingsPreferences';
 import { SettingsCard, ToggleRow } from './SettingsPieces';
+import { PushDeviceSection } from './settings/PushDeviceCard';
 import {
   MAX_CREDENTIAL_URLS,
   MAX_TRAINER_FIELDS,
@@ -1091,7 +1092,7 @@ const GROUPS: Array<{ id: GroupId; label: string; hint: string; icon: IconCompon
   { id: 'account', label: 'Account', hint: 'Who you are and where you train', icon: UserIcon, cards: ['account', 'home-gym', 'invite-code', 'invites', 'coaching'] },
   { id: 'preferences', label: 'Preferences', hint: 'Appearance, units, comments, accessibility, workouts', icon: Palette, cards: ['appearance', 'units', 'comments', 'accessibility', 'workouts'] },
   { id: 'privacy', label: 'Privacy & safety', hint: 'Who can see you, your password and devices', icon: Shield, cards: ['privacy', 'password', 'sessions'] },
-  { id: 'notifications', label: 'Notifications', hint: 'Push and email', icon: Bell, cards: ['notifications', 'email'] },
+  { id: 'notifications', label: 'Notifications', hint: 'Push and email', icon: Bell, cards: ['push-device', 'notifications', 'email'] },
   { id: 'about', label: 'About & data', hint: 'Help, legal and your data', icon: Info, cards: ['about', 'legal', 'data', 'delete'] },
 ];
 
@@ -1131,6 +1132,9 @@ function GroupCards({ id }: { id: GroupId }) {
     case 'notifications':
       return (
         <>
+          {/* Whether this browser receives pushes at all, before the 18
+              preferences about which ones. */}
+          <PushDeviceSection />
           <NotificationsSection />
           <EmailPreferencesSection />
         </>

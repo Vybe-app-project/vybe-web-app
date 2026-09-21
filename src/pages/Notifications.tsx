@@ -12,6 +12,7 @@ import {
   type NotificationGlyph,
 } from '../lib/notificationCopy';
 import { isUnread } from '../lib/notificationInbox';
+import { PushPrompt } from '../components/PushPrompt';
 import {
   Avatar,
   Button,
@@ -336,6 +337,9 @@ export default function Notifications() {
         mobileActions={unreadCount > 0 ? markAllButton('sm') : null}
       />
       <div className="w-full max-w-form space-y-section">
+        {/* Renders nothing unless this browser has never been asked. */}
+        <PushPrompt />
+
         {query.isSuccess && notifications.length > 0 && subtitle ? (
           <p className="flex min-h-10 items-center text-sm text-text-2 lg:hidden">{subtitle}</p>
         ) : null}
