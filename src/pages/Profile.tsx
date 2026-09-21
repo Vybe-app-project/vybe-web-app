@@ -43,6 +43,8 @@ import { UserBadges } from './UserRow';
 import { homeGymLabel, useViewerGym, viewerGymHref, type ViewerGym } from './PostCard';
 import { PROFILE_TABS, ProfileMeals, ProfilePosts, ProfileSaved, ProfileWorkouts, isProfileTab, type ProfileTabKey } from './ProfileTabs';
 import { HighlightsRow } from './StoryTray';
+import { VybeScoreAbout, VybeScoreRow, scoreHeadline } from '../components/VybeScore';
+import { TREND_WINDOWS, fetchInsights, insightsKeys } from '../lib/insights';
 
 /** The shell owns the width; profile pages fill it and split in two from `xl`. */
 export const PAGE = 'w-full space-y-section';
@@ -156,6 +158,40 @@ function ShortcutCard({
         <span className="mt-0.5 block truncate text-2xs leading-tight text-text-3">{hint ?? '\u00a0'}</span>
       </div>
     </Card>
+  );
+}
+
+/**
+ * The Vybe score on your own profile: "Vybe score · 72 · OK" with the About
+ * sheet, and nothing else. It is consistency over what you logged this week,
+ * not a health reading and not a rank.
+ *
+ * It is private. This component is only ever mounted by /profile -- your own
+ * page -- and never by UserProfile, so no score reaches another member. It
+ * waits for the flag, then for the number: a calibrating score is your
+ * business on Progress, not a line on your profile, so nothing is drawn
+ * until the API has a total to show.
+ */
+function OwnVybeScoreRow() {
+  const enabled = useFeature('insightsV2');
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const insights = useQuery({
+    queryKey: insightsKeys.analytics(TREND_WINDOWS),
+    enabled,
+    // A 404 FEATURE_DISABLED is an answer, not a fault: no retry, no row.
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: () => fetchInsights(),
+  });
+  if (!enabled || insights.isError) return null;
+  const score = insights.data?.score ?? null;
+  const headline = scoreHeadline(score);
+  if (!headline || headline.calibrating) return null;
+  return (
+    <>
+      <VybeScoreRow headline={headline} onAbout={() => setAboutOpen(true)} className="mt-3 border-t border-line pt-1" />
+      <VybeScoreAbout open={aboutOpen} onClose={() => setAboutOpen(false)} score={score} withLink />
+    </>
   );
 }
 
@@ -511,6 +547,8 @@ export default function Profile() {
                 ]}
               />
             </div>
+
+            <OwnVybeScoreRow />
 
             <div className="mt-4 min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
