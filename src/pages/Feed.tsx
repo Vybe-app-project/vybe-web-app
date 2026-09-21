@@ -13,6 +13,7 @@ import {
   feedModeParams,
   isFeatureDisabled,
   readFeedMode,
+  servedMode,
   useFeedForYou,
   writeFeedMode,
   type FeedMode,
@@ -575,7 +576,7 @@ export default function Feed() {
    * minor who asked for For you (D-91). Both drop the preference rather
    * than leaving someone on a segment that is not what they are reading.
    */
-  const served = data?.pages[0]?.mode;
+  const served = servedMode(data?.pages[0], mode);
   const ageLimited = data?.pages[0]?.modeUnavailable === 'age';
   const refused = mode !== 'latest' && (isError && isFeatureDisabled(error));
   useEffect(() => {
@@ -594,8 +595,9 @@ export default function Feed() {
     window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
 
-  /** What the pill shows as active: the mode the answer came back in. */
-  const activeMode: FeedMode = served === 'foryou' || served === 'latest' ? served : mode;
+  /** What the pill shows as active: the mode the answer came back in, and
+      never a segment the pill does not offer. */
+  const activeMode: FeedMode = HOME_FEED_MODES.includes(served) ? served : 'latest';
 
   const showNew = async () => {
     setShowingNew(true);

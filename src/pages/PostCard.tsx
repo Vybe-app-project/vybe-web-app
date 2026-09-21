@@ -664,7 +664,8 @@ export function PostContent({
 /* Action bar button                                                   */
 /* ------------------------------------------------------------------ */
 
-function ActionButton({
+/** Exported for tests/favorites-contract: the action row's two states render from props alone. */
+export function ActionButton({
   label,
   pressed,
   active,

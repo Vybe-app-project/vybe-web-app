@@ -88,7 +88,8 @@ type RowProps = {
   onRemoved: (commentId: string) => void;
 };
 
-function CommentRow({
+/** Exported for tests/comments-thread-contract: the thread renders from props alone. */
+export function CommentRow({
   comment,
   postId,
   postAuthorId,
