@@ -107,9 +107,13 @@ test('a flagged surface is detected twice: the capabilities flag and the route\'
   assert.match(card, /isFeatureDisabled\(welcome\.error\)/);
   assert.match(card, /isFeatureDisabled\(insights\.error\)/);
   assert.equal(count(card, /retry: false,/g), 4, 'every read in the card refuses to retry an answer');
-  assert.match(progress, /const insightsHidden = insights\.isError;/);
-  assert.match(progress, /insightsOn && !insightsHidden/);
-  assert.match(progress, /loadOn && !insightsHidden/);
+  // Progress waits for the read to succeed, not merely to settle: a card that
+  // drew a skeleton and then left on a 404 would close a hole under itself.
+  assert.match(progress, /\{insightsOn && insights\.isSuccess \? \(/);
+  assert.match(progress, /\{loadOn && insights\.isSuccess \? <TrainingLoad load=\{insights\.data\.trainingLoad\} \/> : null\}/);
+  assert.match(progress, /focusEnabled=\{focusOn && focus\.isSuccess\}/);
+  assert.doesNotMatch(progress, /<InsightsCard[\s\S]{0,300}?loading=/, 'no skeleton before the route has answered');
+  assert.doesNotMatch(progress, /<TrainingLoad[^>]*loading=/, 'no skeleton before the route has answered');
   assert.match(profile, /if \(!enabled \|\| insights\.isError\) return null;/);
   // Never an ErrorState, never a Callout, never a retry button on any of them.
   for (const [name, text] of Object.entries({ card, insightsCard, trainingLoad, score })) {
@@ -168,6 +172,10 @@ test('the card\'s geometry is fixed, so its skeleton is its exact height', () =>
 test('the score is private: the owner\'s own surfaces and nowhere else', () => {
   // Three placements, all owner-only: Progress, the Home card, /profile.
   assert.match(progress, /<InsightsCard/);
+  // On Progress the two cards sit beside the records shelf, where a late
+  // insert moves nothing under them (the CLS the 390 px drive measures).
+  assert.ok(progress.indexOf('<RecordsShelf') < progress.indexOf('<InsightsCard'));
+  assert.ok(progress.indexOf('<InsightsCard') < progress.indexOf('<TrainingLoad load='));
   assert.match(card, /<VybeScoreMetric headline=\{headline\} size="compact"/);
   assert.match(profile, /<OwnVybeScoreRow \/>/);
   // Never on another member's profile, never on a card, never in a list.

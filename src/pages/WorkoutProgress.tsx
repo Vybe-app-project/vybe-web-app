@@ -347,8 +347,6 @@ export default function WorkoutProgress() {
   const yearNote = period === 'year' ? (calendarHidden ? PROGRESS_STRINGS.yearAllQuarterNote : PROGRESS_STRINGS.yearSummaryNote) : null;
   const heatRangeLabel = heatRange === yearRange ? periodLabel(yearRange) : null;
 
-  // Feature-detected twice: the flag above, and the route's own answer here.
-  const insightsHidden = insights.isError;
   const data = summary.data;
   const nothingLogged = !!data && data.sessions === 0 && (data.prs?.length ?? 0) === 0;
   const exerciseRow = exerciseId ? data?.exercises?.find((row) => row.exerciseId === exerciseId) : undefined;
@@ -379,19 +377,6 @@ export default function WorkoutProgress() {
       ) : (
         <>
           <ProgressTiles summary={data} unit={unit} days={range.days} loading={summary.isPending} />
-
-          {insightsOn && !insightsHidden ? (
-            <InsightsCard
-              score={insights.data?.score ?? null}
-              focus={focus.data ?? null}
-              focusEnabled={focusOn && !focus.isError}
-              onAbout={() => setAboutOpen(true)}
-              onEditFocus={() => setFocusOpen(true)}
-              loading={insights.isPending}
-            />
-          ) : null}
-
-          {loadOn && !insightsHidden ? <TrainingLoad load={insights.data?.trainingLoad ?? null} loading={insights.isPending} /> : null}
 
           {calendarLoading ? (
             <SkeletonCard media={false} />
@@ -436,6 +421,24 @@ export default function WorkoutProgress() {
                   }
                 />
               )}
+
+              {/* Insights v2 sits beside the records shelf rather than above
+                  the page: the reads are flagged twice over, so a card that
+                  only appears once its route has answered must appear where a
+                  late insert moves nothing under it. Neither card draws a
+                  skeleton -- a 404 FEATURE_DISABLED would then leave a hole
+                  that closes, which is the shift the zero rule forbids. */}
+              {insightsOn && insights.isSuccess ? (
+                <InsightsCard
+                  score={insights.data.score}
+                  focus={focus.data ?? null}
+                  focusEnabled={focusOn && focus.isSuccess}
+                  onAbout={() => setAboutOpen(true)}
+                  onEditFocus={() => setFocusOpen(true)}
+                />
+              ) : null}
+
+              {loadOn && insights.isSuccess ? <TrainingLoad load={insights.data.trainingLoad} /> : null}
             </>
           )}
         </>
