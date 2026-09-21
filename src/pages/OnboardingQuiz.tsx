@@ -225,57 +225,88 @@ export default function OnboardingQuiz({ open, onDone }: { open: boolean; onDone
         </div>
       }
     >
-      <div className="space-y-3">
-        {error ? <Callout tone="danger">{error}</Callout> : null}
-
-        {step === 'goal' ? (
-          <ul className="space-y-2">
-            {TRAINING_GOALS.map((goal: TrainingGoal) => (
-              <li key={goal}>
-                <AnswerTile label={GOAL_LABELS[goal]} selected={answers.goal === goal} onSelect={() => answer('goal', goal)} />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-
-        {step === 'days' ? (
-          <ul className="grid grid-cols-2 gap-2">
-            {WEEKLY_TARGET_OPTIONS.map((days) => (
-              <li key={days}>
-                <AnswerTile
-                  label={`${days} days`}
-                  selected={answers.weeklyTargetDays === days}
-                  onSelect={() => answer('weeklyTargetDays', days)}
-                />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-
-        {step === 'experience' ? (
-          <ul className="space-y-2">
-            {EXPERIENCE_LEVELS.map((level: ExperienceLevel) => (
-              <li key={level}>
-                <AnswerTile label={EXPERIENCE_LABELS[level]} selected={answers.experience === level} onSelect={() => answer('experience', level)} />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-
-        {step === 'gym' ? (
-          <>
-            <GymStep chosen={gym} onChoose={setGym} />
-            {suggestion ? (
-              <p className="flex items-start gap-2 rounded-md bg-surface-2 p-3 text-xs text-text-2">
-                <MapPin size={16} className="mt-0.5 shrink-0 text-brand" aria-hidden="true" />
-                <span>
-                  We will open on <span className="font-semibold text-text-1">{suggestion.title}</span>.
-                </span>
-              </p>
-            ) : null}
-          </>
-        ) : null}
-      </div>
+      <QuizStepPanel
+        step={step}
+        answers={answers}
+        error={error}
+        gym={gym}
+        suggestion={suggestion}
+        onAnswer={answer}
+        onChooseGym={setGym}
+      />
     </Modal>
+  );
+}
+
+/**
+ * The body of one step. Split out of the sheet so it renders on its own --
+ * the Modal draws nothing without a document, and these four screens are
+ * the part worth testing.
+ */
+export function QuizStepPanel({
+  step,
+  answers,
+  error,
+  gym,
+  suggestion,
+  onAnswer,
+  onChooseGym,
+}: {
+  step: QuizStepKey;
+  answers: QuizAnswers;
+  error?: string | null;
+  gym: { osmId: string; name: string } | null;
+  suggestion?: PremadePlan | null;
+  onAnswer: <K extends keyof QuizAnswers>(key: K, value: QuizAnswers[K]) => void;
+  onChooseGym: (place: { osmId: string; name: string } | null) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {error ? <Callout tone="danger">{error}</Callout> : null}
+
+      {step === 'goal' ? (
+        <ul className="space-y-2">
+          {TRAINING_GOALS.map((goal: TrainingGoal) => (
+            <li key={goal}>
+              <AnswerTile label={GOAL_LABELS[goal]} selected={answers.goal === goal} onSelect={() => onAnswer('goal', goal)} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {step === 'days' ? (
+        <ul className="grid grid-cols-2 gap-2">
+          {WEEKLY_TARGET_OPTIONS.map((days) => (
+            <li key={days}>
+              <AnswerTile label={`${days} days`} selected={answers.weeklyTargetDays === days} onSelect={() => onAnswer('weeklyTargetDays', days)} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {step === 'experience' ? (
+        <ul className="space-y-2">
+          {EXPERIENCE_LEVELS.map((level: ExperienceLevel) => (
+            <li key={level}>
+              <AnswerTile label={EXPERIENCE_LABELS[level]} selected={answers.experience === level} onSelect={() => onAnswer('experience', level)} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {step === 'gym' ? (
+        <>
+          <GymStep chosen={gym} onChoose={onChooseGym} />
+          {suggestion ? (
+            <p className="flex items-start gap-2 rounded-md bg-surface-2 p-3 text-xs text-text-2">
+              <MapPin size={16} className="mt-0.5 shrink-0 text-brand" aria-hidden="true" />
+              <span>
+                We will open on <span className="font-semibold text-text-1">{suggestion.title}</span>.
+              </span>
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </div>
   );
 }

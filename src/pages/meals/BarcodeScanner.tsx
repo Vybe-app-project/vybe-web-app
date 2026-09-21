@@ -194,7 +194,6 @@ export default function BarcodeScanner({
     look(gtin);
   };
 
-  const attribution = attributionLine(answer);
   const cameraLine =
     camera === 'unsupported' ? CAMERA_UNAVAILABLE : camera === 'blocked' ? CAMERA_BLOCKED : null;
 
@@ -247,37 +246,59 @@ export default function BarcodeScanner({
           </p>
         ) : null}
 
-        {answer?.found ? <FoundFood answer={answer} onAdd={() => onFound(answer.food)} /> : null}
-
-        {answer && !answer.found ? (
-          <div className="space-y-2 rounded-md border border-line bg-surface-1 p-3" data-testid="barcode-not-found">
-            <p className="text-sm font-semibold text-text-1">{NOT_FOUND_TITLE}</p>
-            <p className="tabular text-xs text-text-2">{answer.code}</p>
-            <p className="text-sm text-text-2">{missCopy(answer)}</p>
-            {onCreateFood ? (
-              <Button variant="primary" size="sm" onClick={() => onCreateFood(answer.code)}>
-                {CREATE_FOOD}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* Open Food Facts data is ODbL: the sentence and its link are the
-            server's, printed as sent, on a hit and on a miss alike. */}
-        {attribution ? (
-          <p className="text-2xs text-text-3">
-            {attribution.href ? (
-              <a href={attribution.href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
-                {attribution.text}
-                <span className="sr-only"> (opens in a new tab)</span>
-              </a>
-            ) : (
-              attribution.text
-            )}
-          </p>
-        ) : null}
+        <BarcodeResult answer={answer} onAdd={() => answer?.found && onFound(answer.food)} onCreateFood={onCreateFood} />
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The answer, either way, with the attribution under it. Split out of the
+ * sheet so it can be rendered on its own (the Modal draws nothing without a
+ * document) and so the found and not-found states stay side by side.
+ */
+export function BarcodeResult({
+  answer,
+  onAdd,
+  onCreateFood,
+}: {
+  answer: BarcodeAnswer | null;
+  onAdd: () => void;
+  onCreateFood?: (gtin: string) => void;
+}) {
+  const attribution = attributionLine(answer);
+  return (
+    <>
+      {answer?.found ? <FoundFood answer={answer} onAdd={onAdd} /> : null}
+
+      {answer && !answer.found ? (
+        <div className="space-y-2 rounded-md border border-line bg-surface-1 p-3" data-testid="barcode-not-found">
+          <p className="text-sm font-semibold text-text-1">{NOT_FOUND_TITLE}</p>
+          <p className="tabular text-xs text-text-2">{answer.code}</p>
+          <p className="text-sm text-text-2">{missCopy(answer)}</p>
+          {onCreateFood ? (
+            <Button variant="primary" size="sm" onClick={() => onCreateFood(answer.code)}>
+              {CREATE_FOOD}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Open Food Facts data is ODbL: the sentence and its link are the
+          server's, printed as sent, on a hit and on a miss alike. */}
+      {attribution ? (
+        <p className="text-2xs text-text-3">
+          {attribution.href ? (
+            <a href={attribution.href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              {attribution.text}
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          ) : (
+            attribution.text
+          )}
+        </p>
+      ) : null}
+    </>
   );
 }
 

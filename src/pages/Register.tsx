@@ -170,6 +170,29 @@ function useUsernameAvailability(username: string, fullName: string, enabled: bo
     : { state: 'taken', username: debounced, suggestions: query.data.suggestions ?? [] };
 }
 
+/**
+ * The under-age refusal. Exported so it can be rendered on its own: it is
+ * the one screen in sign-up that has to be read exactly as written.
+ */
+export function AgeBlock() {
+  return (
+    <Callout
+      tone="warning"
+      title={UNDER_MIN_TITLE}
+      action={
+        <Link
+          to={UNDER_MIN_SUPPORT_HREF}
+          className="inline-flex min-h-11 items-center rounded-sm px-2 text-sm font-semibold text-text-1 underline-offset-2 hover:underline"
+        >
+          {UNDER_MIN_SUPPORT}
+        </Link>
+      }
+    >
+      {UNDER_MIN_BODY}
+    </Callout>
+  );
+}
+
 type FromState = { from?: FromLocation } | null;
 type ConflictBody = { message?: string; field?: string; suggestions?: string[] };
 
@@ -564,22 +587,7 @@ export default function Register() {
 
         {/* The age block. It states the rule and offers the one door left;
             it does not scold, and it says plainly that nothing was created. */}
-        {step === 3 && underAge ? (
-          <Callout
-            tone="warning"
-            title={UNDER_MIN_TITLE}
-            action={
-              <Link
-                to={UNDER_MIN_SUPPORT_HREF}
-                className="inline-flex min-h-11 items-center rounded-sm px-2 text-sm font-semibold text-text-1 underline-offset-2 hover:underline"
-              >
-                {UNDER_MIN_SUPPORT}
-              </Link>
-            }
-          >
-            {UNDER_MIN_BODY}
-          </Callout>
-        ) : null}
+        {step === 3 && underAge ? <AgeBlock /> : null}
 
         {step === 3 && !underAge && (
           <form onSubmit={register} className="space-y-4" noValidate>

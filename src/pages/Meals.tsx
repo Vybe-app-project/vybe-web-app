@@ -1392,7 +1392,7 @@ function MealListSkeleton({ count = 3 }: { count?: number }) {
  * never "0 kcal", and the average is over the days that were logged, so
  * three days out of seven average over three.
  */
-function WeekRows({ meals }: { meals: Meal[] }) {
+export function WeekRows({ meals }: { meals: Meal[] }) {
   const rows = useMemo(() => weekRows(meals), [meals]);
   const averages = useMemo(() => weekAverages(rows), [rows]);
   return (
