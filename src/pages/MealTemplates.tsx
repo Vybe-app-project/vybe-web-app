@@ -23,7 +23,7 @@ import {
   Select,
   Skeleton,
   Stepper,
-  Tabs,
+  SegmentedControl,
   Textarea,
   cx,
   formatStat,
@@ -744,7 +744,7 @@ function CardSkeletons({ count = 6 }: { count?: number }) {
   return (
     <CardGrid min="20rem" aria-busy="true" aria-label="Loading templates">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="card space-y-3 p-4 sm:p-5">
+        <Card key={i} className="space-y-3">
           <Skeleton className="h-5 w-2/3" />
           <Skeleton className="h-3 w-1/2" />
           <Skeleton className="h-3 w-full" />
@@ -753,7 +753,7 @@ function CardSkeletons({ count = 6 }: { count?: number }) {
             <Skeleton className="h-11 w-28" />
             <Skeleton className="h-11 w-11" />
           </div>
-        </div>
+        </Card>
       ))}
     </CardGrid>
   );
@@ -883,8 +883,8 @@ export default function MealTemplates() {
       />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Tabs
-          variant="segmented"
+        <SegmentedControl
+          className="sm:max-w-md"
           aria-label="Template collections"
           tabs={TABS.map((t) => ({
             key: t.key,

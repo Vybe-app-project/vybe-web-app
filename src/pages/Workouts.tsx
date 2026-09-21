@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatSeconds } from '../lib/duration';
+import { useHomeGym } from '../lib/homeGym';
 import { displayWeight, useUnits, weightUnit } from '../lib/units';
 import {
   Avatar,
@@ -12,21 +13,27 @@ import {
   ButtonLink,
   Card,
   CardGrid,
+  Chip,
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  IconButton,
   Menu,
   PageHeader,
   SearchField,
   SegmentedControl,
+  Skeleton,
   SkeletonCard,
+  StatStrip,
   cx,
   formatStat,
+  hasMetric,
   humanize,
   useToast,
   type MenuItem,
+  type StatStripItem,
 } from './ui';
-import { ArrowRight, Clock, Copy, Edit, Flag, Globe, IllustrationTrain, Layers, Play, Plus, ShareUp, Trash } from './icons';
+import { ArrowRight, Clock, Copy, Edit, Flag, Globe, Layers, Play, Plus, ShareUp, Trash } from './icons';
 import { useReportModal } from './Report';
 import { MetaList, categoryTone, exerciseCount } from './workouts/cards';
 import {
@@ -47,15 +54,18 @@ import { LOGS_KEY, fetchLogs, lastDoneByTitle, parseLogDate, relativeDay, sortLo
 import { TRAIN, useSheetNav } from './workouts/sheet';
 
 /**
- * The Train hub. The band above carries the week (sessions this week, or the
- * next action when there are none) and the one primary control, "Start a
- * session". Below it: the week's strip, then the library as Mine · Plans ·
- * Explore · Premade. Detail and editor routes open as sheets over this page
- * on desktop (src/pages/workouts/*); the schedule pickers stay modals.
+ * The Train hub. The shell header carries the page's one primary control,
+ * "Start a session", with "New workout" beside it as a text button. Below:
+ * the week as a StatStrip (or one line while there is nothing to count), then
+ * ONE control row — the library as Mine · Plans · Explore · Premade and a
+ * filter field — and the cards. Explore and Premade switch between single
+ * workouts and programs with a chip pair inside the pane. Detail and editor
+ * routes open as sheets over this page on desktop (src/pages/workouts/*);
+ * the schedule pickers stay modals.
  *
  * Production has no gyms and most members have no history yet, so nothing
- * here renders a zero: an empty week shows the first-session prompt, a card
- * with no sessions behind it shows no session line, and a member whose
+ * here renders a zero: a strip cell without a datum shows its fallback, a
+ * card with no sessions behind it shows no session line, and a member whose
  * library is empty lands on Premade.
  */
 
@@ -75,9 +85,13 @@ const TABS = [
 type TabKey = (typeof TABS)[number]['key'];
 const isTabKey = (v: string | null): v is TabKey => TABS.some((t) => t.key === v);
 
-/** Explore and Premade each hold two catalogues: single workouts and multi-week programs. */
+/** Explore and Premade each hold two catalogues: single workouts and multi-week programs. A chip pair inside the pane switches between them. */
 type KindKey = 'workouts' | 'programs';
-const isKindKey = (v: string | null): v is KindKey => v === 'workouts' || v === 'programs';
+const KINDS: ReadonlyArray<{ key: KindKey; label: string }> = [
+  { key: 'workouts', label: 'Workouts' },
+  { key: 'programs', label: 'Programs' },
+];
+const isKindKey = (v: string | null): v is KindKey => KINDS.some((k) => k.key === v);
 
 /* ------------------------------------------------------------ small bits */
 
@@ -100,106 +114,64 @@ const firstName = (a?: { fullName?: string; username?: string } | null) => (a?.f
 
 /* -------------------------------------------------------------- the week */
 
-type StripItem = { key: string; value: ReactNode; label: string };
-
 /**
- * The week in one strip. Cells whose number would be zero are left out, and a
- * week with nothing in it yet shows last week instead, so the strip is always
- * a true sentence about training, never a row of zeros.
+ * The week as StatStrip cells: sessions, minutes and weight lifted, plus the
+ * weeks kept from two upwards. A week with no session yet borrows last week's
+ * numbers (labelled as such) rather than showing a row of prompts; a cell
+ * whose own number is missing shows its fallback, never a zero. An empty
+ * array means there is nothing to count yet and the caller draws one line.
  */
-function weekStrip(logs: WorkoutLog[], system: 'metric' | 'imperial', now = new Date()): StripItem[] {
+function weekItems(logs: readonly WorkoutLog[], system: 'metric' | 'imperial', now = new Date()): StatStripItem[] {
   const { week, lastWeek } = weekTotals(logs, now);
   const shown = week.sessions > 0 ? { t: week, when: 'this week' } : lastWeek.sessions > 0 ? { t: lastWeek, when: 'last week' } : null;
-  const items: StripItem[] = [];
-  if (shown) {
-    items.push({ key: 'sessions', value: formatStat(shown.t.sessions), label: `${shown.t.sessions === 1 ? 'session' : 'sessions'} ${shown.when}` });
-    if (shown.t.minutes > 0) items.push({ key: 'minutes', value: formatStat(shown.t.minutes), label: `minutes ${shown.when}` });
-    if (shown.t.volumeKg > 0) {
-      const v = displayWeight(shown.t.volumeKg, system);
-      items.push({
-        key: 'volume',
-        value: (
-          <>
-            {formatStat(Math.round(v), { compact: v >= 100_000 })}
-            <span className="ml-1 text-xs font-semibold text-text-2 [font-variation-settings:'wdth'_100]">{weightUnit(system)}</span>
-          </>
-        ),
-        label: `volume ${shown.when}`,
-      });
-    }
-  }
+  if (!shown) return [];
+  const { t, when } = shown;
+  const items: StatStripItem[] = [
+    { label: `${t.sessions === 1 ? 'session' : 'sessions'} ${when}`, value: t.sessions, to: TRAIN.history },
+    { label: `minutes ${when}`, value: t.minutes, fallback: 'Not timed', to: TRAIN.history },
+    { label: `${weightUnit(system)} lifted ${when}`, value: Math.round(displayWeight(t.volumeKg, system)), fallback: 'No weights', to: TRAIN.history },
+  ];
   const kept = weeksKept(logs, now);
-  if (kept > 1) items.push({ key: 'weeks', value: formatStat(kept), label: 'weeks kept' });
-  const last = sortLogs(logs)[0];
-  const lastDate = last ? parseLogDate(last.date) : null;
-  if (last && lastDate) {
-    items.push({
-      key: 'last',
-      value: <span className="truncate text-lg">{[last.name || 'Workout', last.duration ? `${formatStat(last.duration)} min` : null].filter(Boolean).join(' · ')}</span>,
-      label: `Last session · ${relativeDay(lastDate, now).toLowerCase()}`,
-    });
-  }
+  if (kept > 1) items.push({ label: 'weeks kept', value: kept, to: TRAIN.history });
   return items;
 }
 
-function WeekStrip({ items }: { items: StripItem[] }) {
-  return (
-    <Card padded={false} className="overflow-hidden" aria-label="Your week">
-      <ul className="grid gap-px bg-line" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr))' }}>
-        {items.map((item) => (
-          <li key={item.key} className="min-w-0 bg-surface-1 px-4 py-3">
-            <span className="type-stat block truncate text-stat-sm text-text-1">{item.value}</span>
-            <span className="type-label mt-0.5 block truncate text-text-2">{item.label}</span>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
-/** Replaces the strip until the first session exists. One quiet action; the band already holds the primary. */
-function FirstSessionPrompt() {
-  return (
-    // A container cannot query its own width, so the row lives one level in.
-    <Card container>
-      <div className="flex flex-col gap-4 @md:flex-row @md:items-center @md:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="hidden size-14 shrink-0 place-items-center rounded-full bg-surface-2 text-text-2 @sm:grid">
-            <IllustrationTrain size={40} />
-          </span>
-          <div className="min-w-0">
-            <h2 className="type-heading text-md text-text-1">Your first session goes here</h2>
-            <p className="mt-1 max-w-prose text-sm text-text-2">Log what you did today, or start from a premade. Your sessions, minutes and volume fill in from the first one.</p>
-          </div>
-        </div>
-        <ButtonLink to={TRAIN.tab('premade')} variant="secondary" className="shrink-0 self-start @md:self-auto">
-          Browse premade
-        </ButtonLink>
-      </div>
-    </Card>
-  );
-}
-
-/** What the band shows in place of the week figure when the week has no session yet. */
-function BandNextAction({ last }: { last: WorkoutLog | null }) {
+/**
+ * One line in the strip's place when there is no week to count: the first
+ * session has not happened, or the last one is more than two weeks back. The
+ * header already holds "Start a session", so this says only what is true and
+ * offers the one action the header cannot: repeating the last session. Same
+ * height as the strip, so the block never shifts whichever way the data goes.
+ */
+function WeekLine({ last, state }: { last: WorkoutLog | null; state: unknown }) {
   const lastDate = last ? parseLogDate(last.date) : null;
   return (
-    <div>
-      <p className="text-md font-semibold">{last ? 'No session yet this week' : 'Start with a Premade'}</p>
-      <p className="text-sm text-band-ink-2">{last && lastDate ? `Last one: ${last.name || 'Workout'}, ${relativeDay(lastDate).toLowerCase()}.` : 'A ready-made session is the quickest first log.'}</p>
-      <Link to={TRAIN.tab('premade')} className="inline-flex min-h-11 items-center text-sm font-semibold text-band-ink underline underline-offset-4 hover:text-band-ink-2">
-        Browse premade
-      </Link>
+    <div className="flex min-h-16 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+      <p className="t-body text-text-2">
+        {last && lastDate
+          ? `No session in the last two weeks. The last one was ${last.name || 'a workout'}, ${relativeDay(lastDate).toLowerCase()}.`
+          : 'No sessions yet. Sessions, minutes and weight lifted fill in here from the first one.'}
+      </p>
+      {last ? (
+        <Link to={TRAIN.newSession({ repeat: last._id })} state={state} viewTransition className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-text-1 hover:underline">
+          Log it again <ArrowRight size={14} aria-hidden="true" />
+        </Link>
+      ) : null}
     </div>
   );
 }
 
 /* -------------------------------------------------------------- workout card */
 
-type SessionLine = { who: { name: string; avatar?: string; self: boolean }; text: string } | null;
+type SessionLine = { who: { name: string; avatar?: string; self: boolean } | null; text: string } | null;
 
-/** "You, yesterday — bench press 82.5 kg × 5" from your own logs; "Maya shared it yesterday" from the author. Nothing invented. */
-function sessionLine(workout: SocialWorkout, lastDone: WorkoutLog | undefined, viewer: { name: string; avatar?: string } | null, system: 'metric' | 'imperial', isOwn: boolean): SessionLine {
+/**
+ * "You, yesterday — bench press 82.5 kg × 5" from your own logs; "Maya shared
+ * it yesterday" from the author; failing both, "No one at {gym} has shared
+ * this one yet" — only when the viewer has a gym to scope it to (`who` is
+ * null: no avatar to draw). Nothing invented.
+ */
+function sessionLine(workout: SocialWorkout, lastDone: WorkoutLog | undefined, viewer: { name: string; avatar?: string } | null, system: 'metric' | 'imperial', isOwn: boolean, gym: string | null): SessionLine {
   const when = lastDone ? parseLogDate(lastDone.date) : null;
   if (lastDone && when) {
     const top = topSet(lastDone);
@@ -219,6 +191,7 @@ function sessionLine(workout: SocialWorkout, lastDone: WorkoutLog | undefined, v
     const name = firstName(workout.createdBy);
     if (d && name) return { who: { name: workout.createdBy.fullName || workout.createdBy.username || name, avatar: workout.createdBy.avatar, self: false }, text: `${name} shared it ${relativeDay(d).toLowerCase()}` };
   }
+  if (!isOwn && gym) return { who: null, text: `No one at ${gym} has shared this one yet` };
   return null;
 }
 
@@ -226,6 +199,7 @@ function WorkoutCard({
   workout,
   ownerView,
   lastDone,
+  gym,
   onDelete,
   onReport,
   onAddToPlan,
@@ -233,6 +207,8 @@ function WorkoutCard({
   workout: SocialWorkout;
   ownerView: boolean;
   lastDone?: WorkoutLog;
+  /** The viewer's gym name, for the card's gym-scoped line; null when there is none. */
+  gym: string | null;
   onDelete?: (w: SocialWorkout) => void;
   onReport?: (w: SocialWorkout) => void;
   onAddToPlan?: (w: SocialWorkout) => void;
@@ -244,7 +220,7 @@ function WorkoutCard({
   const isOwn = ownerView || Boolean(user && workout.createdBy && workout.createdBy._id === user._id);
   const href = TRAIN.workout(workout._id);
   const count = workout.exercises?.length ?? 0;
-  const line = sessionLine(workout, lastDone, user ? { name: user.fullName || user.username, avatar: user.avatar } : null, system, isOwn);
+  const line = sessionLine(workout, lastDone, user ? { name: user.fullName || user.username, avatar: user.avatar } : null, system, isOwn, gym);
   const lastDate = lastDone ? parseLogDate(lastDone.date) : null;
   const recent = lastDate ? Date.now() - lastDate.getTime() < 7 * 86_400_000 : false;
 
@@ -277,10 +253,14 @@ function WorkoutCard({
       </div>
 
       {line ? (
-        <p className="flex items-center gap-2.5 rounded-md bg-surface-2 px-3 py-2.5 text-sm text-text-1">
-          <Avatar src={line.who.avatar} name={line.who.name} alt="" size="xs" seed={line.who.self ? user?._id : workout.createdBy?._id} />
-          <span className="min-w-0 truncate">{line.text}</span>
-        </p>
+        line.who ? (
+          <p className="flex items-center gap-2.5 rounded-md bg-surface-2 px-3 py-2.5 text-sm text-text-1">
+            <Avatar src={line.who.avatar} name={line.who.name} alt="" size="xs" seed={line.who.self ? user?._id : workout.createdBy?._id} />
+            <span className="min-w-0 truncate">{line.text}</span>
+          </p>
+        ) : (
+          <p className="truncate text-sm text-text-2">{line.text}</p>
+        )
       ) : workout.description ? (
         <p className="line-clamp-2 text-sm text-text-2">{workout.description}</p>
       ) : null}
@@ -290,7 +270,8 @@ function WorkoutCard({
           <i aria-hidden="true" className={cx('h-2 w-2 shrink-0 rounded-full', recent ? 'bg-text-1' : 'bg-text-3')} />
           <span className="truncate">{lastDate ? relativeDay(lastDate) : 'Not logged yet'}</span>
         </span>
-        <ButtonLink to={TRAIN.newSession({ from: workout._id })} state={state} variant="secondary" size="sm" icon={<Play size={14} />} className={cx('relative z-[2] shrink-0', recent && 'btn-ink')}>
+        {/* A workout trained this week keeps the blue: the one action this card is for. Never the ink fill. */}
+        <ButtonLink to={TRAIN.newSession({ from: workout._id })} state={state} variant={recent ? 'primary' : 'secondary'} size="sm" icon={<Play size={14} />} className="relative z-[2] shrink-0">
           {lastDone || !workout.isPremade ? 'Start' : 'Try it'}
         </ButtonLink>
       </div>
@@ -406,6 +387,9 @@ export default function Workouts() {
   const { report, reportModal } = useReportModal();
   const { state: sheetState, open } = useSheetNav();
   const system = useUnits((s) => s.system);
+  // The viewer's gym scopes the cards' "no one at {gym} has shared this one yet" line; with no gym the line is omitted.
+  const homeGym = useHomeGym();
+  const gymName = homeGym.gym?.name ?? null;
 
   const qc = useQueryClient();
   const toast = useToast();
@@ -549,9 +533,11 @@ export default function Workouts() {
   };
 
   const lastDone = useMemo(() => lastDoneByTitle(logs), [logs]);
-  const { week } = useMemo(() => weekTotals(logs), [logs]);
-  const strip = useMemo(() => weekStrip(logs, system), [logs, system]);
-  const hasHistory = logs.length > 0;
+  const strip = useMemo(() => weekItems(logs, system), [logs, system]);
+  // The library decides the landing tab. Until it answers, no tab is drawn as
+  // chosen, so the thumb never slides from Mine to Premade on a cold load.
+  const landing = !isTabKey(tabParam) && mine.isPending;
+  const creating = tab === 'plans' ? { label: 'New plan', to: TRAIN.newPlan } : { label: 'New workout', to: TRAIN.newWorkout };
 
   const newWorkoutAction = { label: 'New workout', to: TRAIN.newWorkout, state: sheetState, icon: <Plus size={18} />, variant: 'secondary' as const };
   const newPlanAction = { label: 'New plan', to: TRAIN.newPlan, state: sheetState, icon: <Plus size={18} />, variant: 'secondary' as const };
@@ -583,116 +569,115 @@ export default function Workouts() {
     <div className="space-y-section">
       <PageHeader
         title="Workouts"
-        mobileActions={null}
-        band={{
-          context: 'Your week at {gym}',
-          figure: week.sessions,
-          figureLabel: week.sessions === 1 ? 'session this week' : 'sessions this week',
-          action: (
-            <ButtonLink to={TRAIN.newSession()} state={sheetState} variant="primary" size="lg" icon={<Plus size={20} />}>
+        actions={
+          <>
+            <ButtonLink to={creating.to} state={sheetState} variant="quiet">
+              {creating.label}
+            </ButtonLink>
+            <ButtonLink to={TRAIN.newSession()} state={sheetState} variant="primary" icon={<Play size={18} />}>
               Start a session
             </ButtonLink>
-          ),
-          children: logsQuery.isSuccess ? <BandNextAction last={logs[0] ?? null} /> : undefined,
-        }}
+          </>
+        }
+        mobileActions={
+          <IconButton label="Start a session" to={TRAIN.newSession()} state={sheetState}>
+            <Play size={22} />
+          </IconButton>
+        }
       />
 
-      {logsQuery.isSuccess ? hasHistory && strip.length ? <WeekStrip items={strip} /> : <FirstSessionPrompt /> : null}
+      {/* The week: a strip once there is something to count, one line until then, a same-height skeleton before either. */}
+      {logsQuery.isError ? null : logsQuery.isPending ? (
+        <Skeleton className="h-[66px] w-full rounded-lg" />
+      ) : strip.length ? (
+        <StatStrip aria-label="Your week" items={strip} />
+      ) : (
+        <WeekLine last={logs[0] ?? null} state={sheetState} />
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <SegmentedControl
           aria-label="Workout library"
-          className="min-w-0 flex-1 basis-[20rem]"
-          tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] }))}
-          value={tab}
+          className="min-w-0 flex-1 basis-[22rem]"
+          tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: hasMetric(counts[t.key]) ? counts[t.key] : undefined }))}
+          value={landing ? '' : tab}
           onChange={(k: string) => {
             if (isTabKey(k)) setTab(k);
           }}
         />
-        {tab === 'explore' || tab === 'premade' ? (
-          <SegmentedControl
-            aria-label={tab === 'premade' ? 'Premade catalogue' : 'Community catalogue'}
-            size="sm"
-            className="shrink-0"
-            tabs={[
-              { key: 'workouts', label: 'Workouts' },
-              { key: 'programs', label: 'Programs' },
-            ]}
-            value={kind}
-            onChange={(k: string) => {
-              if (isKindKey(k)) setKind(k);
-            }}
-          />
-        ) : null}
         <SearchField
           label={`Filter ${filterLabel}`}
           hideLabel
-          containerClassName="min-w-48 flex-1 basis-[14rem]"
+          containerClassName="min-w-0 flex-1 basis-[14rem]"
           placeholder={pane.plans ? 'Filter plans by name or goal' : 'Filter by title, category or tag'}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {tab === 'plans' ? (
-          <ButtonLink to={TRAIN.newPlan} state={sheetState} variant="secondary" icon={<Layers size={18} />} className="shrink-0">
-            New plan
-          </ButtonLink>
-        ) : (
-          <ButtonLink to={TRAIN.newWorkout} state={sheetState} variant="secondary" icon={<Plus size={18} />} className="shrink-0">
-            New workout
-          </ButtonLink>
-        )}
       </div>
 
-      {pane.loading ? (
-        <GridSkeleton />
-      ) : pane.error ? (
-        <ErrorState error={pane.error} title={`Could not load ${filterLabel}`} onRetry={() => pane.refetch()} />
-      ) : filtered.length === 0 ? (
-        query ? (
-          <EmptyState
-            variant="no-results"
-            title={`No matches for “${search.trim()}”`}
-            message={pane.plans ? 'Try a different name or goal, or clear the filter.' : 'Try a different title, category or tag, or clear the filter.'}
-            action={{ label: 'Clear filter', onClick: () => setSearch(''), variant: 'secondary' }}
-          />
-        ) : (
-          <EmptyState family="train" title={emptyCopy[tab].title} message={emptyCopy[tab].message} action={emptyCopy[tab].action} secondaryAction={emptyCopy[tab].secondary} />
-        )
-      ) : pane.plans ? (
-        <CardGrid min="20rem">
-          {(filtered as WorkoutPlan[]).map((plan) => (
-            <PlanCard key={plan._id} plan={plan} ownerView={tab === 'plans'} onAddWorkout={(p) => setAddingTo(p)} onDelete={(p) => setPendingPlanDelete(p)} />
-          ))}
-        </CardGrid>
-      ) : (
-        <>
+      <div className="space-y-4">
+        {tab === 'explore' || tab === 'premade' ? (
+          <div role="group" aria-label={tab === 'premade' ? 'Premade catalogue' : 'Community catalogue'} className="flex flex-wrap gap-2">
+            {KINDS.map((k) => (
+              <Chip key={k.key} selected={kind === k.key} onClick={() => setKind(k.key)}>
+                {k.label}
+              </Chip>
+            ))}
+          </div>
+        ) : null}
+
+        {pane.loading ? (
+          <GridSkeleton />
+        ) : pane.error ? (
+          <ErrorState error={pane.error} title={`Could not load ${filterLabel}`} onRetry={() => pane.refetch()} />
+        ) : filtered.length === 0 ? (
+          query ? (
+            <EmptyState
+              variant="no-results"
+              title={`No matches for “${search.trim()}”`}
+              message={pane.plans ? 'Try a different name or goal, or clear the filter.' : 'Try a different title, category or tag, or clear the filter.'}
+              action={{ label: 'Clear filter', onClick: () => setSearch(''), variant: 'secondary' }}
+            />
+          ) : (
+            <EmptyState family="train" title={emptyCopy[tab].title} message={emptyCopy[tab].message} action={emptyCopy[tab].action} secondaryAction={emptyCopy[tab].secondary} />
+          )
+        ) : pane.plans ? (
           <CardGrid min="20rem">
-            {(filtered as SocialWorkout[]).map((workout) => (
-              <WorkoutCard
-                key={workout._id}
-                workout={workout}
-                ownerView={tab === 'mine'}
-                lastDone={lastDone.get(workout.title.trim().toLowerCase())}
-                onDelete={(w) => setPendingDelete(w)}
-                onReport={(w) => report({ targetType: 'workout', targetId: w._id, targetLabel: 'workout' })}
-                onAddToPlan={(w) => setAddToPlan(w)}
-              />
+            {(filtered as WorkoutPlan[]).map((plan) => (
+              <PlanCard key={plan._id} plan={plan} ownerView={tab === 'plans'} onAddWorkout={(p) => setAddingTo(p)} onDelete={(p) => setPendingPlanDelete(p)} />
             ))}
           </CardGrid>
-          {pane.hasMore || (pane.total !== undefined && pane.total > pane.items.length) ? (
-            <div className="flex flex-col items-center gap-2 pt-2">
-              <p className="text-xs text-text-3">
-                Showing {formatStat(pane.items.length)} of {formatStat(pane.total ?? pane.items.length)} {filterLabel}
-              </p>
-              {pane.hasMore ? (
-                <Button variant="secondary" loading={pane.fetchingMore} onClick={() => pane.fetchMore?.()}>
-                  Load more
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </>
-      )}
+        ) : (
+          <>
+            <CardGrid min="20rem">
+              {(filtered as SocialWorkout[]).map((workout) => (
+                <WorkoutCard
+                  key={workout._id}
+                  workout={workout}
+                  ownerView={tab === 'mine'}
+                  lastDone={lastDone.get(workout.title.trim().toLowerCase())}
+                  gym={gymName}
+                  onDelete={(w) => setPendingDelete(w)}
+                  onReport={(w) => report({ targetType: 'workout', targetId: w._id, targetLabel: 'workout' })}
+                  onAddToPlan={(w) => setAddToPlan(w)}
+                />
+              ))}
+            </CardGrid>
+            {pane.hasMore || (pane.total !== undefined && pane.total > pane.items.length) ? (
+              <div className="flex flex-col items-center gap-2 pt-2">
+                <p className="text-xs text-text-3">
+                  Showing {formatStat(pane.items.length)} of {formatStat(pane.total ?? pane.items.length)} {filterLabel}
+                </p>
+                {pane.hasMore ? (
+                  <Button variant="secondary" loading={pane.fetchingMore} onClick={() => pane.fetchMore?.()}>
+                    Load more
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
 
       {addingTo ? <AddWorkoutPicker plan={addingTo} open onClose={() => setAddingTo(null)} /> : null}
       <AddToPlanModal

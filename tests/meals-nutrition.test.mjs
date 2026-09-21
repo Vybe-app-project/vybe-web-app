@@ -154,7 +154,9 @@ test('the Health page renders the nutrition analytics the API already returns', 
   assert.match(health, /aria-label="Top foods"/);
   assert.match(health, /aria-label="Meals by type"/);
   assert.match(health, /title="Macros per day"/);
-  assert.match(health, /<ReferenceLine y=\{calorieGoal\}/);
+  // The goal line is drawn in the lazy chart module (Recharts off the hub's critical path); Health hands the goal across.
+  assert.match(health, /<CaloriesChart data=\{calorieSeries\} goal=\{calorieGoal\} \/>/);
+  assert.match(read('src/pages/health/HealthCharts.tsx'), /<ReferenceLine y=\{goal\}/);
   assert.match(health, /api\.get<\{ data: HealthGoalsSummary \}>\('\/health-goals'\)/);
 });
 

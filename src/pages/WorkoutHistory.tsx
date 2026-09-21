@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { eachDayOfInterval, format, isValid, parseISO, startOfDay, subDays } from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import { formatSeconds } from '../lib/duration';
@@ -22,8 +21,6 @@ import {
   SkeletonTile,
   StatGrid,
   StatTile,
-  VIZ,
-  chartTheme,
   cx,
   formatStat,
   humanize,
@@ -35,6 +32,9 @@ import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, TrendingUp, 
 import { MetaList } from './workouts/cards';
 import { LOGS_KEY, dayKey, dayLabel, dayStreak, fetchLogs, parseLogDate, relativeDay, sessionVolume, sortLogs, weekTotals, weeksKept, type LogsResponse, type WorkoutLog } from './workouts/sessions';
 import { TRAIN, useSheetNav } from './workouts/sheet';
+
+// Recharts lives in the chart's own chunk; the 13 rem box keeps its height while it loads.
+const HistoryChart = lazy(() => import('./workouts/HistoryChart'));
 
 /**
  * History (was "Workout log"): every session you have logged, newest first,
@@ -145,23 +145,9 @@ function WeekChart({ data, metric, onMetric, unit }: { data: Array<{ day: string
         <SegmentedControl aria-label="Chart metric" size="sm" tabs={METRICS.map((m) => ({ key: m.key, label: m.label }))} value={metric} onChange={(k) => onMetric(k as Metric)} />
       </div>
       <div className="relative h-52 w-full" role="img" aria-label={`${meta.label} for the last 7 days`}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: -12 }} barCategoryGap="28%">
-            <CartesianGrid {...chartTheme.cartesianGrid} strokeDasharray="3 3" />
-            <XAxis dataKey="day" {...chartTheme.axisProps} />
-            <YAxis {...chartTheme.axisProps} allowDecimals={false} width={44} tickFormatter={(v: number) => formatStat(v, { compact: true })} />
-            <Tooltip
-              {...chartTheme.tooltip}
-              formatter={(value) => [`${formatStat(Number(value ?? 0))}${suffix}`, meta.label]}
-              labelFormatter={(_label, payload) => {
-                const iso = (payload?.[0]?.payload as { date?: string } | undefined)?.date;
-                const d = iso ? parseISO(iso) : null;
-                return d && isValid(d) ? format(d, 'EEEE d MMM') : String(_label);
-              }}
-            />
-            <Bar dataKey={metric} fill={VIZ.brand} radius={[6, 6, 0, 0]} maxBarSize={40} animationDuration={chartTheme.animationDuration} />
-          </BarChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<Skeleton className="h-full w-full rounded-md" />}>
+          <HistoryChart data={data} metric={metric} label={meta.label} suffix={suffix} />
+        </Suspense>
       </div>
     </Card>
   );
@@ -325,14 +311,14 @@ export default function WorkoutHistory() {
           <div className="space-y-3" aria-hidden="true">
             <Skeleton className="h-4 w-24" />
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="card space-y-3 p-4">
+              <Card key={i} padded={false} className="space-y-3 p-4">
                 <Skeleton className="h-5 w-1/2" />
                 <Skeleton className="h-3 w-1/3" />
                 <div className="grid gap-1.5 sm:grid-cols-2">
                   <Skeleton className="h-10 w-full" />
                   <Skeleton className="h-10 w-full" />
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         </>

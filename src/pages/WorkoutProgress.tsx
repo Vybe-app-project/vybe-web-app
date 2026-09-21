@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth';
 import { useFeatureGate } from '../lib/capabilities';
 import { localDayParams } from '../lib/timezone';
 import { useUnits, weightUnit } from '../lib/units';
-import { CardGrid, EmptyState, ErrorState, PageHeader, PageSkeleton, SkeletonCard, Tabs } from './ui';
+import { CardGrid, EmptyState, ErrorState, PageHeader, PageSkeleton, SkeletonCard, SegmentedControl } from './ui';
 import { Plus } from './icons';
 import {
   PERIODS,
@@ -150,8 +150,7 @@ export default function WorkoutProgress() {
       <PageHeader title={PROGRESS_STRINGS.title} subtitle={PROGRESS_STRINGS.subtitle} />
 
       <div className="space-y-2">
-        <Tabs
-          variant="segmented"
+        <SegmentedControl
           aria-label={PROGRESS_STRINGS.period}
           tabs={PERIODS.filter((p) => enabled || p.key !== 'year').map((p) => ({ key: p.key, label: p.label }))}
           value={period}

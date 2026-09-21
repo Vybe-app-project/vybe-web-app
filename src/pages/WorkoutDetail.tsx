@@ -61,7 +61,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${formatStat(n)} $
 function DetailSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true" aria-label="Loading workout">
-      <div className="card overflow-hidden">
+      <Card padded={false} className="overflow-hidden">
         <Skeleton className="aspect-[16/9] w-full rounded-none md:aspect-auto md:h-72 lg:h-80" />
         <div className="space-y-3 p-4 sm:p-5">
           <SkeletonText lines={2} />
@@ -70,18 +70,20 @@ function DetailSkeleton() {
             <Skeleton className="h-6 w-24 rounded-xs" />
           </div>
         </div>
-      </div>
+      </Card>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="card p-4">
+          <Card key={i} padded={false} className="p-4">
             <Skeleton className="h-3 w-1/2" />
             <Skeleton className="mt-3 h-8 w-2/3" />
-          </div>
+          </Card>
         ))}
       </div>
       <div className="space-y-2">
         {Array.from({ length: 4 }).map((_, i) => (
-          <SkeletonRow key={i} className="card px-4" />
+          <Card key={i} padded={false} className="px-4">
+            <SkeletonRow />
+          </Card>
         ))}
       </div>
     </div>
@@ -469,7 +471,8 @@ export default function WorkoutDetail() {
               // Your own comments, and every comment on your workout, can be removed.
               const canDelete = Boolean(user && (isOwn || (authorId && authorId === user._id)));
               return (
-                <li key={c._id} className="card flex gap-3 p-4">
+                <li key={c._id}>
+                  <Card padded={false} className="flex gap-3 p-4">
                   <Avatar src={who?.avatar} name={name} alt="" size="sm" className="shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
@@ -502,6 +505,7 @@ export default function WorkoutDetail() {
                       <Trash size={18} />
                     </IconButton>
                   ) : null}
+                  </Card>
                 </li>
               );
             })}
