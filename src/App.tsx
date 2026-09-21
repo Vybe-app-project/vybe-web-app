@@ -18,6 +18,7 @@ import { AccountPreferencesSync } from './lib/accountPreferences';
 import { lazyPage } from './lib/navigation';
 import { SHEET_MEDIA, backgroundLocationOf } from './components/RouteSheet';
 import { useMediaQuery } from './components/ui';
+import { isTextEntryActive, shouldAutoReload, stampReload } from './lib/clientPolicy';
 
 /**
  * Every feature page is code-split. The app has ~35 screens and a single
@@ -306,7 +307,23 @@ function RedirectLive() {
   return <Navigate to={streamId ? `/live/${streamId}` : '/live'} replace />;
 }
 
-/** Service-worker lifecycle: prompt to reload when a new build is waiting. */
+/**
+ * Service-worker lifecycle. A waiting build is TAKEN, not announced.
+ *
+ * `registerType: 'prompt'` leaves the new shell waiting until someone acts, and
+ * `needRefresh` goes true again on every single load while it waits — so an
+ * update nobody dismissed permanently re-asked on every launch ("A new version
+ * of Vybe is ready", forever). Reported 2026-09-21 and reproduced: four loads,
+ * four toasts, and only clicking Reload ever ended it.
+ *
+ * So the default is silent: swap to the new build and reload. That is safe
+ * exactly when nothing would be lost — at a fresh load there is no unsaved
+ * state, and `isTextEntryActive()` catches the one case that matters, someone
+ * mid-sentence in a composer or a set field. Then, and only then, we ask.
+ * `shouldAutoReload()`/`stampReload()` are the same one-per-minute guard the
+ * 426 path uses, so a build that cannot activate degrades to one prompt
+ * instead of a reload loop.
+ */
 function PwaUpdates() {
   const toast = useToast();
   const {
@@ -319,6 +336,12 @@ function PwaUpdates() {
   });
   useEffect(() => {
     if (!needRefresh) return;
+    if (!isTextEntryActive() && shouldAutoReload()) {
+      stampReload();
+      setNeedRefresh(false);
+      void updateServiceWorker(true);
+      return;
+    }
     toast.info('A new version of Vybe is ready.', {
       action: { label: 'Reload', onClick: () => void updateServiceWorker(true) },
       duration: 60_000,
