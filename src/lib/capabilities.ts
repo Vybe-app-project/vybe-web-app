@@ -109,6 +109,35 @@ export function useWorkoutLogIdempotency(): boolean {
 }
 
 /**
+ * The identity providers this deployment has credentials for
+ * (`services/providerCapabilities.js`): `googleOAuth` is true once
+ * `GOOGLE_CLIENT_ID` — or `CLIENT_ID_IOS` plus `WEB_CLIENT_ID` — is set,
+ * `appleOAuth` once `APPLE_CLIENT_ID` is. Both are false on this server
+ * today, so the one-tap buttons are not drawn at all: a "Continue with
+ * Google" that answers 503 is worse than an email field.
+ *
+ * `any` is the server's own `oauth` capability (either provider), which is
+ * what decides whether the divider above the buttons is drawn.
+ */
+export function useOAuthProviders(): { google: boolean; apple: boolean; any: boolean; isLoading: boolean } {
+  const capabilities = useCapabilities();
+  const caps = capabilities.data?.capabilities;
+  const google = caps?.googleOAuth === true;
+  const apple = caps?.appleOAuth === true;
+  return { google, apple, any: google || apple, isLoading: capabilities.isLoading };
+}
+
+/**
+ * `GET /food/barcode/:gtin` can answer on this deployment: the route is in
+ * the build and at least one lookup tier (Open Food Facts or USDA) is
+ * configured. False until the server has answered, so the scan button never
+ * flashes in and out on a cold load.
+ */
+export function useFoodBarcode(): boolean {
+  return useCapabilities().data?.capabilities.foodBarcode === true;
+}
+
+/**
  * Shared by the shell (to hide entry points for features this server does
  * not run) and by the feature pages (to explain why). One query key per
  * session state, so the sidebar and the Live page never disagree; the

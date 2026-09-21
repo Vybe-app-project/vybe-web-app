@@ -78,6 +78,14 @@ type AuthState = {
   setUser: (u: User | null) => void;
   login: (email: string, password: string, options?: LoginOptions) => Promise<void>;
   /**
+   * Store a `{ token, user }` the API already minted. `POST /auth/login`,
+   * `/auth/google/mobile` and `/auth/apple/mobile` answer the same shape, so
+   * the provider buttons land the session through exactly the path the email
+   * form does — including the pending-deletion branch, which every sign-in
+   * must honour or the first request after it 401s.
+   */
+  adoptSession: (payload: { token: string; user: User }, options?: LoginOptions) => void;
+  /**
    * Re-read the session user from the API. The stored user carries signed
    * media URLs (avatar, cover) that expire after a while; components mounting
    * later with the stale copy would show initials instead of the photo.
@@ -196,6 +204,21 @@ export const useAuth = create<AuthState>((set, get) => ({
     rememberSnapshot(u);
     // Settings writers hand back the account without hasPassword; keep it.
     set((s) => ({ user: u ? mergeAccount(s.user, u) : null }));
+  },
+
+  adoptSession: ({ token, user }, { remember = true }: LoginOptions = {}) => {
+    tokenStore.set(token, remember ? 'local' : 'session');
+    if ((user as User | undefined)?.pendingDeletion === true) {
+      set({
+        user: null,
+        loading: false,
+        sessionStale: false,
+        pendingDeletion: { scheduledFor: user.deletion?.scheduledFor ?? null },
+      });
+      return;
+    }
+    rememberSnapshot(user);
+    set({ user, loading: false, sessionStale: false, pendingDeletion: null });
   },
 
   login: async (email, password, { remember = true }: LoginOptions = {}) => {

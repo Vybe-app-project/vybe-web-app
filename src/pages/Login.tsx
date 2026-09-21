@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
-import { signOutReason } from '../lib/api';
+import { api, signOutReason } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useOAuthProviders } from '../lib/capabilities';
 import {
   loginFailure,
   loginNoticeFor,
@@ -12,8 +13,19 @@ import {
   type LoginNotice,
 } from '../lib/authRedirect';
 import { clearDraftEmail, readDraftEmail, writeDraftEmail } from '../lib/authDrafts';
+import {
+  OAUTH_LABELS,
+  oauthApiErrorCopy,
+  oauthSignInRequest,
+  rememberOAuth,
+  readOAuthReturn,
+  startOAuth,
+  usableClientId,
+  type OAuthProvider,
+} from '../lib/oauth';
+import { signupLocale } from '../lib/signupLocale';
 import { isEmail } from '../lib/hooks';
-import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, cx, useDocumentTitle } from './ui';
+import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, Spinner, cx, useDocumentTitle } from './ui';
 import { Dumbbell, Eye, EyeOff, Users, Zap } from './icons';
 import { PendingDeletionInterstitial, SignInLifecycleNotice } from './settings/SignInLifecycleNotice';
 
@@ -176,10 +188,129 @@ export function LegalLine({ className }: { className?: string }) {
   );
 }
 
+/* ------------------------------------------------------------------ *
+ * One-tap sign-in.
+ *
+ * Read property by property so Vite can inline each one (lib/api does the
+ * same with the build identity). The ids are the owner's to configure: the
+ * Google **web** client id and the Apple **Services** id. A server that has
+ * provider credentials but a bundle that has no client id cannot start a
+ * flow, so both halves are required before a button is drawn.
+ * ------------------------------------------------------------------ */
+const OAUTH_ENV = {
+  VITE_GOOGLE_CLIENT_ID: import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined,
+  VITE_APPLE_SERVICES_ID: import.meta.env.VITE_APPLE_SERVICES_ID as string | undefined,
+};
+
+/** Apple's mark is black or white only, so it takes the button's own colour. */
+function AppleMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M16.36 12.66c.02 2.5 2.19 3.33 2.21 3.34-.02.06-.35 1.2-1.15 2.37-.69 1.02-1.41 2.03-2.55 2.05-1.11.02-1.47-.66-2.75-.66-1.27 0-1.67.64-2.73.68-1.09.04-1.92-1.1-2.62-2.11-1.43-2.07-2.52-5.85-1.05-8.4.73-1.27 2.03-2.07 3.45-2.09 1.07-.02 2.08.72 2.74.72.65 0 1.88-.89 3.17-.76.54.02 2.06.22 3.03 1.64-.08.05-1.81 1.06-1.79 3.16M14.3 5.6c.58-.71.98-1.7.87-2.68-.84.03-1.86.56-2.46 1.27-.54.62-1.01 1.62-.88 2.58.94.07 1.89-.47 2.47-1.17" />
+    </svg>
+  );
+}
+
+/**
+ * Google's G in its brand colours. The one place raw hex is right: the mark
+ * is a third-party asset whose colours are fixed by Google's guidelines, and
+ * a token would be wrong in both themes.
+ */
+function GoogleMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+      <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.2-.4-4.7H24v8.9h11.8c-.5 2.7-2 5-4.3 6.6v5.5h7c4.1-3.8 6.6-9.4 6.6-16.3" />
+      <path fill="#34A853" d="M24 46c5.8 0 10.7-1.9 14.3-5.2l-7-5.5c-1.9 1.3-4.4 2.1-7.3 2.1-5.6 0-10.4-3.8-12.1-8.9H4.7v5.7C8.3 41.4 15.6 46 24 46" />
+      <path fill="#FBBC05" d="M11.9 28.5c-.4-1.3-.7-2.7-.7-4.1s.2-2.8.7-4.1v-5.7H4.7C3.2 17.5 2.4 20.6 2.4 24s.8 6.5 2.3 9.3z" />
+      <path fill="#EA4335" d="M24 10.6c3.2 0 6 1.1 8.2 3.2l6.2-6.2C34.7 4.2 29.8 2 24 2 15.6 2 8.3 6.6 4.7 14.6l7.2 5.7c1.7-5.1 6.5-8.9 12.1-8.9" />
+    </svg>
+  );
+}
+
+const PROVIDER_MARKS: Record<OAuthProvider, (props: { size?: number }) => ReactNode> = {
+  google: GoogleMark,
+  apple: AppleMark,
+};
+
+/** Apple leads on Apple hardware, which is where people expect it first. */
+function providerOrder(): OAuthProvider[] {
+  const platform = typeof navigator === 'undefined' ? '' : `${navigator.platform || ''} ${navigator.userAgent || ''}`;
+  return /Mac|iPhone|iPad|iPod/i.test(platform) ? ['apple', 'google'] : ['google', 'apple'];
+}
+
+/**
+ * The provider buttons above the email form. Nothing is drawn until the
+ * server reports the provider is configured (`capabilities.googleOAuth` /
+ * `appleOAuth`, both false today) and this build carries the matching client
+ * id — so the signed-out page on the live host is exactly what it is now.
+ *
+ * Neither button is the screen's filled blue: the email submit is, and there
+ * is only ever one. Starting a flow is a top-level navigation to the
+ * provider, so nothing here needs a CSP host.
+ */
+export function ProviderSignIn({
+  returnTo,
+  disabled,
+  onError,
+}: {
+  returnTo: string;
+  disabled?: boolean;
+  onError: (message: string) => void;
+}) {
+  const { google, apple } = useOAuthProviders();
+  const ids: Record<OAuthProvider, string | null> = {
+    google: usableClientId(OAUTH_ENV.VITE_GOOGLE_CLIENT_ID),
+    apple: usableClientId(OAUTH_ENV.VITE_APPLE_SERVICES_ID),
+  };
+  const enabled: Record<OAuthProvider, boolean> = { google, apple };
+  const providers = providerOrder().filter((p) => enabled[p] && ids[p]);
+  if (providers.length === 0) return null;
+
+  const begin = (provider: OAuthProvider) => {
+    const started = startOAuth({ provider, clientId: ids[provider], origin: window.location.origin, returnTo });
+    if (!started) {
+      onError(`${OAUTH_LABELS[provider]} is not configured for this site yet.`);
+      return;
+    }
+    rememberOAuth(sessionStorage, started.pending);
+    window.location.assign(started.url);
+  };
+
+  return (
+    <div className="mb-5 space-y-3">
+      <div className="grid gap-2">
+        {providers.map((provider) => {
+          const Mark = PROVIDER_MARKS[provider];
+          return (
+            <Button
+              key={provider}
+              type="button"
+              variant="secondary"
+              size="lg"
+              block
+              disabled={disabled}
+              onClick={() => begin(provider)}
+              icon={<Mark size={18} />}
+            >
+              {OAUTH_LABELS[provider]}
+            </Button>
+          );
+        })}
+      </div>
+      <p className="flex items-center gap-3 text-2xs uppercase tracking-wide text-text-3">
+        <span aria-hidden="true" className="h-px flex-1 bg-line" />
+        or
+        <span aria-hidden="true" className="h-px flex-1 bg-line" />
+      </p>
+    </div>
+  );
+}
+
 type LoginState = { from?: FromLocation; email?: string } | null;
 
 export default function Login() {
   const login = useAuth((s) => s.login);
+  const adoptSession = useAuth((s) => s.adoptSession);
   // An account in its deletion grace period signs in to the interstitial, not the app.
   const pendingDeletion = useAuth((s) => s.pendingDeletion);
   const navigate = useNavigate();
@@ -208,10 +339,43 @@ export default function Login() {
         : null),
   );
   const [submitting, setSubmitting] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [providerBusy, setProviderBusy] = useState(false);
 
   useEffect(() => {
     writeDraftEmail(sessionStorage, email.trim());
   }, [email]);
+
+  /**
+   * The provider redirect lands back here with `#id_token=…&state=…`. The
+   * state is checked against the one this tab stored before anything is
+   * posted, the fragment is wiped from history at once (it is a credential),
+   * and the session is stored through the same store action the email form
+   * uses. Runs once: a re-run after the fragment is gone reads null.
+   */
+  useEffect(() => {
+    const answer = readOAuthReturn(window.location.hash, sessionStorage);
+    if (!answer) return;
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    if (answer.kind === 'error') {
+      setProviderError(answer.message);
+      return;
+    }
+    // The two routes are written out rather than indexed, so the contract
+    // audit can see them (scripts/audit-api-contracts.cjs resolves literals).
+    const { body } = oauthSignInRequest(answer.provider, answer.idToken, signupLocale());
+    setProviderBusy(true);
+    (answer.provider === 'google' ? api.post('/auth/google/mobile', body) : api.post('/auth/apple/mobile', body))
+      .then(({ data }) => {
+        if (!data?.token) throw new Error('Sign-in did not return a session.');
+        adoptSession({ token: data.token, user: data.user });
+        clearDraftEmail(sessionStorage);
+        if (!useAuth.getState().pendingDeletion) navigate(answer.returnTo, { replace: true });
+      })
+      .catch((e) => setProviderError(oauthApiErrorCopy(e, answer.provider)))
+      .finally(() => setProviderBusy(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The interstitial replaces the form for a pending-deletion account. Forget
   // the typed password then, so "Sign out" from it does not hand the next
   // person at a shared computer a form with the password still in it.
@@ -282,6 +446,17 @@ export default function Login() {
       ) : null}
 
       {pendingDeletion ? <PendingDeletionInterstitial target={target} /> : null}
+      {providerError ? (
+        <Callout tone="danger" className="mb-5">
+          {providerError}
+        </Callout>
+      ) : null}
+      {providerBusy ? (
+        <p className="mb-5 inline-flex items-center gap-2 text-sm text-text-2" aria-live="polite">
+          <Spinner size={16} /> Finishing sign-in…
+        </p>
+      ) : null}
+      {!pendingDeletion ? <ProviderSignIn returnTo={target} disabled={submitting || providerBusy} onError={setProviderError} /> : null}
       <form onSubmit={onSubmit} className="space-y-4" noValidate hidden={!!pendingDeletion}>
         <Input
           id="login-email"

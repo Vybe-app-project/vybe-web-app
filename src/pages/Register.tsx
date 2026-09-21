@@ -27,7 +27,7 @@ import {
 } from '../lib/hooks';
 import { Button, Callout, Checkbox, Input, Spinner, cx, useToast } from './ui';
 import { Check, X } from './icons';
-import { AuthShell, LegalLine, PasswordField, focusField } from './Login';
+import { AuthShell, LegalLine, PasswordField, ProviderSignIn, focusField } from './Login';
 
 type Step = RegisterStep;
 
@@ -452,6 +452,11 @@ export default function Register() {
             {error}
           </Callout>
         ) : null}
+
+        {/* One tap first, the email field under it — and only when the server
+            has provider credentials. The flow ends on /login, which stores
+            the session and lands on the same `target` this page would. */}
+        {step === 1 ? <ProviderSignIn returnTo={target} disabled={busy} onError={setError} /> : null}
 
         {step === 1 && (
           <form onSubmit={sendOtp} className="space-y-4" noValidate>
