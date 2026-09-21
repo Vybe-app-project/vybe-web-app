@@ -266,6 +266,15 @@ function HomeGymSection() {
     );
   };
 
+  /** Clearing is the counterpart to Change; without it a home gym can never be unset. */
+  const clearHomeGym = () => {
+    if (setHomeGym.isPending) return;
+    setHomeGym.mutate(null, {
+      onSuccess: () => toast.success('Home gym cleared'),
+      onError: (e) => toast.error(fieldErrorsOf(e).homeGym || errMsg(e, 'Could not clear your home gym.')),
+    });
+  };
+
   let row: ReactNode;
   if (loading) {
     // The account points at a gym whose details are still loading: the same 56 px row, as a skeleton.
@@ -301,9 +310,22 @@ function HomeGymSection() {
             Set as home
           </button>
         ) : (
-          <Link to={NO_GYM_COPY.href} viewTransition className={ROW_ACTION}>
-            Change
-          </Link>
+          <>
+            <Link to={NO_GYM_COPY.href} viewTransition className={ROW_ACTION}>
+              Change
+            </Link>
+            {/* Setting a home gym must be reversible: PUT /users/settings { homeGym: null }
+                clears it (API.md section 1, idempotent). Quiet, because clearing is rare. */}
+            <button
+              type="button"
+              onClick={clearHomeGym}
+              disabled={setHomeGym.isPending}
+              aria-label={`Clear ${gym.name} as your home gym`}
+              className={cx(ROW_ACTION, 'text-text-2 hover:text-text-1')}
+            >
+              Clear
+            </button>
+          </>
         )}
       </div>
     );
