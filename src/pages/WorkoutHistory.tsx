@@ -32,6 +32,8 @@ import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, TrendingUp, 
 import { MetaList } from './workouts/cards';
 import { LOGS_KEY, dayKey, dayLabel, dayStreak, fetchLogs, parseLogDate, relativeDay, sessionVolume, sortLogs, weekTotals, weeksKept, type LogsResponse, type WorkoutLog } from './workouts/sessions';
 import { usePortabilitySupport } from '../lib/portability';
+import { periodRange } from '../lib/progress';
+import { fetchRecordsSummary, isNotDeployed, recordKeys } from '../lib/records';
 import { SessionResumeBar } from './workouts/session/ResumeBar';
 import { TRAIN, useSheetNav } from './workouts/sheet';
 
@@ -48,6 +50,11 @@ const HistoryChart = lazy(() => import('./workouts/HistoryChart'));
  * Coming from another app (P4): the header menu and the empty state both lead
  * to /workouts/import, and both disappear once lib/portability has seen a
  * 404 NOT_FOUND from the import route on this deployment.
+ *
+ * "PR" on a row comes from the period summary's own `prs[]`, each of which
+ * carries the `workoutId` that set it: the badge is never derived here. The
+ * summary is capped at 92 days, so a session older than the quarter carries no
+ * badge — absent, not "no PR", which is the zero rule.
  */
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatStat(n)} ${n === 1 ? one : many}`;
@@ -59,7 +66,7 @@ const IMPORT_MENU: MenuItem[] = [{ label: IMPORT_LABEL, description: 'A CSV expo
 
 /* --------------------------------------------------------------- session card */
 
-function SessionCard({ log, onEdit, onRepeat, onDelete, state }: { log: WorkoutLog; onEdit: (log: WorkoutLog) => void; onRepeat: (log: WorkoutLog) => void; onDelete: (log: WorkoutLog) => void; state: unknown }) {
+function SessionCard({ log, onEdit, onRepeat, onDelete, state, pr = false }: { log: WorkoutLog; onEdit: (log: WorkoutLog) => void; onRepeat: (log: WorkoutLog) => void; onDelete: (log: WorkoutLog) => void; state: unknown; pr?: boolean }) {
   const system = useUnits((s) => s.system);
   const unit = weightUnit(system);
   const d = parseLogDate(log.date);
@@ -85,6 +92,11 @@ function SessionCard({ log, onEdit, onRepeat, onDelete, state }: { log: WorkoutL
               <span>Unknown time</span>
             )}
             {log.type ? <Badge size="sm">{humanize(log.type)}</Badge> : null}
+            {pr ? (
+              <Badge size="sm" tone="accent" data-testid="log-pr">
+                PR<span className="sr-only"> — a personal record in this session</span>
+              </Badge>
+            ) : null}
           </p>
         </div>
         <Menu items={menu} label={`Options for ${log.name || 'workout'}`} className="relative z-[2] -mr-2 -mt-1.5" />
@@ -182,6 +194,23 @@ export default function WorkoutHistory() {
   const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: LOGS_KEY, queryFn: fetchLogs });
   const logs = useMemo(() => sortLogs(data?.workouts ?? []), [data]);
 
+  // Which sessions set a record, straight from the summary's prs[] (92-day cap,
+  // so the quarter is the widest window one read can answer for).
+  const prWindow = useMemo(() => {
+    const range = periodRange('quarter');
+    return { from: range.from, to: range.to };
+  }, []);
+  const records = useQuery({
+    queryKey: recordKeys.summary(prWindow),
+    retry: false,
+    staleTime: 60_000,
+    queryFn: () => fetchRecordsSummary(prWindow),
+  });
+  const prWorkouts = useMemo(() => {
+    if (records.isError && isNotDeployed(records.error)) return new Set<string>();
+    return new Set((records.data?.prs ?? []).map((pr) => pr.workoutId).filter((id): id is string => typeof id === 'string' && !!id));
+  }, [records.data, records.isError, records.error]);
+
   // Deep links from before the session route existed: ?log=1 opened the form here, ?from=<workoutId> prefilled it from a
   // library workout, ?starter=1 (the first-week card's "Start here") with the starter session. Forward them, seed intact.
   const wantsLog = params.get('log') === '1';
@@ -220,6 +249,8 @@ export default function WorkoutHistory() {
       qc.invalidateQueries({ queryKey: LOGS_KEY });
       // The progress hub's tiles, calendar, movements and records count this session too.
       qc.invalidateQueries({ queryKey: ['workout-progress'] });
+      // And so do the records reads behind the PR badges and the bests shelf.
+      qc.invalidateQueries({ queryKey: recordKeys.all });
     },
   });
 
@@ -424,7 +455,7 @@ export default function WorkoutHistory() {
                 </div>
                 <div className="space-y-3">
                   {g.items.map((log) => (
-                    <SessionCard key={log._id} log={log} state={state} onEdit={(l) => open(TRAIN.session(l._id, { edit: true }))} onRepeat={(l) => open(TRAIN.newSession({ repeat: l._id }))} onDelete={setPendingDelete} />
+                    <SessionCard key={log._id} log={log} state={state} pr={prWorkouts.has(log._id)} onEdit={(l) => open(TRAIN.session(l._id, { edit: true }))} onRepeat={(l) => open(TRAIN.newSession({ repeat: l._id }))} onDelete={setPendingDelete} />
                   ))}
                 </div>
               </section>
