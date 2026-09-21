@@ -1,20 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { format, isValid, parseISO, subDays } from 'date-fns';
 import { api, errMsg } from '../lib/api';
 import { displayWeight, useUnits, weightUnit } from '../lib/units';
@@ -40,10 +26,20 @@ import {
   VIZ,
   chartTheme,
   formatStat,
+  hasMetric,
   useIsCompact,
   useToast,
 } from './ui';
 import { Activity, Dumbbell, Edit, Flame, Footprints, Plate, Plus, Scale, Trash, Trophy } from './icons';
+
+// Recharts lives in the charts' own chunk (src/pages/health/HealthCharts.tsx); each
+// chart mounts into a fixed 14 rem box that keeps its height while the chunk loads.
+const charts = () => import('./health/HealthCharts');
+const WeightTrendChart = lazy(() => charts().then((m) => ({ default: m.WeightTrendChart })));
+const CaloriesChart = lazy(() => charts().then((m) => ({ default: m.CaloriesChart })));
+const MacrosChart = lazy(() => charts().then((m) => ({ default: m.MacrosChart })));
+const VolumeChart = lazy(() => charts().then((m) => ({ default: m.VolumeChart })));
+const ChartLoading = () => <Skeleton className="h-full w-full rounded-md" />;
 
 /* ------------------------------------------------------------------ types */
 
@@ -160,12 +156,11 @@ const entryDateLabel = (value: string) => {
   return isValid(d) ? format(d, 'EEEE d MMMM') : value;
 };
 
-const CHART_MARGIN = { top: 8, right: 8, bottom: 0, left: -12 };
-
 /**
  * Body numbers are neutral (DP-005): the weight line and the "minutes" bars
  * draw in the strong neutral ink, never in the action colour, so nothing on
- * this page reads as blue-good / red-bad.
+ * this page reads as blue-good / red-bad. The charts themselves read the same
+ * token in HealthCharts.tsx; this copy colours the legend dots beside them.
  */
 const INK_STRONG = 'var(--primary-strong, var(--text-1))';
 
@@ -514,25 +509,23 @@ export default function Health() {
   const weightDelta = weightSeries.length >= 2 ? Math.round((weightSeries[weightSeries.length - 1].weight - weightSeries[0].weight) * 10) / 10 : null;
   const macroGoal = goals.data?.macroGoals;
 
-  const animation = chartTheme.animationDuration;
-  const chartAnim = { isAnimationActive: animation > 0, animationDuration: animation };
-
-  // Body-hub figure: the latest weight when one exists, else the step average.
   // Body and nutrition numbers are neutral throughout (DP-005): no tile tone,
   // no red or green, and a weight delta is a fact, not a verdict.
   const latestWeight = metrics?.weight != null ? displayWeight(metrics.weight, system) : null;
   const avgSteps = Math.round(metrics?.averageDailySteps ?? 0);
-  const bandFigure = latestWeight ?? (avgSteps > 0 ? avgSteps : null);
-  const bandFigureLabel = latestWeight != null ? 'latest weight' : 'average daily steps';
-  const bandFigureUnit = latestWeight != null ? wUnit : undefined;
 
-  const tiles: TileSpec[] = [];
+  // A tile appears only with a datum behind it (hasMetric), so first run is
+  // never a wall of zeros, and a hint that would read "0 min" is left off.
+  // Weight and steps — the two numbers this page's own action logs — lead the
+  // grid once anything at all is logged, the missing one carrying the next
+  // step in its number's place.
+  const others: TileSpec[] = [];
   if (data) {
-    if ((data.fitnessScore ?? 0) > 0) {
-      tiles.push({ key: 'score', node: <StatTile label="Fitness score" value={formatStat(data.fitnessScore)} unit="/ 100" icon={<Activity size={18} />} hint="Logging consistency, not a medical score" /> });
+    if (hasMetric(data.fitnessScore)) {
+      others.push({ key: 'score', node: <StatTile label="Fitness score" value={formatStat(data.fitnessScore)} unit="/ 100" icon={<Activity size={18} />} hint="Logging consistency, not a medical score" /> });
     }
-    if ((data.workoutStats.totalWorkouts ?? 0) > 0) {
-      tiles.push({
+    if (hasMetric(data.workoutStats.totalWorkouts)) {
+      others.push({
         key: 'workouts',
         node: (
           <StatTile
@@ -540,13 +533,13 @@ export default function Health() {
             value={formatStat(data.workoutStats.totalWorkouts)}
             icon={<Dumbbell size={18} />}
             spark={compact ? undefined : volumeSeries.map((v) => v.workouts)}
-            hint={`${formatStat(data.workoutStats.totalDuration ?? 0)} min in total`}
+            hint={hasMetric(data.workoutStats.totalDuration) ? `${formatStat(data.workoutStats.totalDuration)} min in total` : undefined}
           />
         ),
       });
     }
-    if ((data.nutritionStats.totalCalories ?? 0) > 0) {
-      tiles.push({
+    if (hasMetric(data.nutritionStats.totalCalories)) {
+      others.push({
         key: 'kcal',
         node: (
           <StatTile
@@ -555,82 +548,93 @@ export default function Health() {
             unit="kcal"
             icon={<Plate size={18} />}
             spark={compact ? undefined : calorieSeries.map((c) => c.calories)}
-            hint={`${formatStat(data.nutritionStats.totalMeals ?? 0)} ${data.nutritionStats.totalMeals === 1 ? 'meal' : 'meals'} logged`}
+            hint={hasMetric(data.nutritionStats.totalMeals) ? `${formatStat(data.nutritionStats.totalMeals)} ${data.nutritionStats.totalMeals === 1 ? 'meal' : 'meals'} logged` : undefined}
           />
         ),
       });
     }
-    if (avgSteps > 0) {
-      tiles.push({
-        key: 'steps',
-        node: (
-          <StatTile
-            label="Average daily steps"
-            value={formatStat(avgSteps)}
-            icon={<Footprints size={18} />}
-            spark={compact ? undefined : stepsSpark}
-            hint={`${formatStat(metrics?.manualEntryDays ?? 0)} ${dayUnit(metrics?.manualEntryDays ?? 0)} logged`}
-          />
-        ),
-      });
-    }
-    if (latestWeight != null) {
-      tiles.push({
-        key: 'weight',
-        node: (
-          <StatTile
-            label="Weight"
-            value={formatStat(latestWeight)}
-            unit={wUnit}
-            icon={<Scale size={18} />}
-            spark={compact ? undefined : weightSpark}
-            delta={weightDelta != null ? { value: `${weightDelta > 0 ? '+' : ''}${formatStat(weightDelta)} ${wUnit}`, direction: 'flat', label: 'since first entry' } : undefined}
-            hint={metrics?.bmi != null ? `BMI ${formatStat(metrics.bmi)}` : undefined}
-          />
-        ),
-      });
-    }
-    if ((data.streaks.workout ?? 0) > 0) {
-      tiles.push({ key: 'streak-w', node: <StatTile label="Workout streak" value={formatStat(data.streaks.workout)} unit={dayUnit(data.streaks.workout)} icon={<Flame size={18} />} hint="Consecutive days with a session" /> });
-    }
-    if ((data.streaks.nutrition ?? 0) > 0) {
-      tiles.push({ key: 'streak-n', node: <StatTile label="Nutrition streak" value={formatStat(data.streaks.nutrition)} unit={dayUnit(data.streaks.nutrition)} icon={<Flame size={18} />} hint="Consecutive days with a meal logged" /> });
-    }
-    if ((data.streaks.longestStreak ?? 0) > 0) {
-      tiles.push({ key: 'streak-best', node: <StatTile label="Longest streak" value={formatStat(data.streaks.longestStreak)} unit={dayUnit(data.streaks.longestStreak)} icon={<Trophy size={18} />} hint="Your best run so far" /> });
+    for (const [key, label, n, hint] of [
+      ['streak-w', 'Workout streak', data.streaks.workout, 'Consecutive days with a session'],
+      ['streak-n', 'Nutrition streak', data.streaks.nutrition, 'Consecutive days with a meal logged'],
+      ['streak-best', 'Longest streak', data.streaks.longestStreak, 'Your best run so far'],
+    ] as const) {
+      if (hasMetric(n)) {
+        others.push({ key, node: <StatTile label={label} value={formatStat(n)} unit={dayUnit(n)} icon={key === 'streak-best' ? <Trophy size={18} /> : <Flame size={18} />} hint={hint} /> });
+      }
     }
   }
+  const anyData = others.length > 0 || latestWeight != null || avgSteps > 0 || sortedEntries.length > 0;
+  const tiles: TileSpec[] =
+    data && anyData
+      ? [
+          {
+            key: 'weight',
+            node: (
+              <StatTile
+                label="Weight"
+                value={latestWeight != null ? formatStat(latestWeight) : null}
+                unit={latestWeight != null ? wUnit : undefined}
+                icon={<Scale size={18} />}
+                spark={compact || latestWeight == null ? undefined : weightSpark}
+                delta={weightDelta != null ? { value: `${weightDelta > 0 ? '+' : ''}${formatStat(weightDelta)} ${wUnit}`, direction: 'flat', label: 'since first entry' } : undefined}
+                hint={metrics?.bmi != null ? `BMI ${formatStat(metrics.bmi)}` : undefined}
+                fallback="Log one"
+                onClick={latestWeight == null ? openNewEntry : undefined}
+              />
+            ),
+          },
+          {
+            key: 'steps',
+            node: (
+              <StatTile
+                label="Average daily steps"
+                value={avgSteps > 0 ? formatStat(avgSteps) : null}
+                icon={<Footprints size={18} />}
+                spark={compact || avgSteps === 0 ? undefined : stepsSpark}
+                hint={avgSteps > 0 && hasMetric(metrics?.manualEntryDays) ? `${formatStat(metrics?.manualEntryDays)} ${dayUnit(metrics?.manualEntryDays ?? 0)} logged` : undefined}
+                fallback="Log today’s"
+                onClick={avgSteps > 0 ? undefined : openNewEntry}
+              />
+            ),
+          },
+          ...others,
+        ]
+      : others;
+
+  // The "log to start" line is the page subtitle only when there is nothing at
+  // all to show — never above populated tiles, and never before every query
+  // has answered (an empty state must not render ahead of its data).
+  const settled = overview.isSuccess && entries.isSuccess && nutrition.isSuccess && workouts.isSuccess;
+  const noDataYet = settled && tiles.length === 0 && sortedEntries.length === 0 && !hasCalories && !hasVolume;
+
+  // Week · Month · Year drives the tiles and every chart but the weight trend.
+  // It lives in the Calories card's header, so the page has one control row.
+  const windowControl = (
+    <SegmentedControl
+      size="sm"
+      fill={false}
+      aria-label="Time window"
+      tabs={WINDOWS.map((w) => ({ key: w.key, label: w.label }))}
+      value={timeWindow}
+      onChange={(k: string) => setTimeWindow(k as TimeWindow)}
+    />
+  );
 
   return (
     <div className="space-y-section">
       <PageHeader
         title="Health"
-        band={{
-          context: format(new Date(), 'EEEE d MMMM'),
-          figure: bandFigure,
-          figureUnit: bandFigureUnit,
-          figureLabel: bandFigureLabel,
-          action: (
-            <Button variant="primary" size="lg" icon={<Plus size={18} />} onClick={openNewEntry}>
-              Log weight or steps
-            </Button>
-          ),
-          children: overview.isLoading ? null : (
-            <div>
-              <p className="text-base font-semibold">Log a weight or your steps to start</p>
-              <p className="gym-band-body-copy">One entry a day is enough; the trend builds from there.</p>
-            </div>
-          ),
-        }}
-        mobileActions={<IconButton label="Log weight or steps" onClick={openNewEntry}><Plus size={22} /></IconButton>}
-      />
-
-      <SegmentedControl
-        fill={false}
-        aria-label="Time window"
-        tabs={WINDOWS.map((w) => ({ key: w.key, label: w.label }))}
-        value={timeWindow}
-        onChange={(k: string) => setTimeWindow(k as TimeWindow)}
+        subtitle={noDataYet ? 'Log a weight or your steps to start. One entry a day is enough; the trend builds from there.' : undefined}
+        actions={
+          <Button variant="primary" icon={<Plus size={18} />} onClick={openNewEntry}>
+            Log weight or steps
+          </Button>
+        }
+        mobileActions={
+          <IconButton label="Log weight or steps" onClick={openNewEntry}>
+            <Plus size={22} />
+          </IconButton>
+        }
       />
 
       {overview.isError ? (
@@ -663,21 +667,15 @@ export default function Health() {
             </>
           ) : (
             <div className="h-56 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={weightSeries} margin={CHART_MARGIN}>
-                  <CartesianGrid {...chartTheme.cartesianGrid} />
-                  <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
-                  <YAxis {...chartTheme.axisProps} width={44} domain={['dataMin - 2', 'dataMax + 2']} />
-                  <Tooltip {...chartTheme.tooltip} formatter={(v) => [`${formatStat(Number(v ?? 0))} ${wUnit}`, 'Weight']} />
-                  <Line type="monotone" dataKey="weight" stroke={INK_STRONG} strokeWidth={2} dot={{ r: 3, fill: INK_STRONG, strokeWidth: 0 }} activeDot={{ r: 5 }} {...chartAnim} />
-                </LineChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<ChartLoading />}>
+                <WeightTrendChart data={weightSeries} unit={wUnit} />
+              </Suspense>
             </div>
           )}
         </Card>
 
         <Card>
-          <CardHeader title="Calories eaten" subtitle="From the meals you log" />
+          <CardHeader title="Calories eaten" subtitle={`From the meals you log ${WINDOW_NOUN[timeWindow]}`} action={windowControl} />
           {nutrition.isLoading ? (
             <Skeleton className="h-56 w-full rounded-md" />
           ) : nutrition.isError ? (
@@ -694,24 +692,9 @@ export default function Health() {
           ) : (
             <>
               <div className="h-56 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={calorieSeries} margin={CHART_MARGIN}>
-                    <defs>
-                      <linearGradient id="healthCaloriesFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={VIZ.kcal} stopOpacity={chartTheme.areaFill.start} />
-                        <stop offset="100%" stopColor={VIZ.kcal} stopOpacity={chartTheme.areaFill.end} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid {...chartTheme.cartesianGrid} />
-                    <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
-                    <YAxis {...chartTheme.axisProps} width={44} />
-                    <Tooltip {...chartTheme.tooltip} formatter={(v) => [`${formatStat(Math.round(Number(v ?? 0)))} kcal`, 'Calories']} />
-                    {calorieGoal > 0 ? (
-                      <ReferenceLine y={calorieGoal} {...chartTheme.goalLine} ifOverflow="extendDomain" label={{ value: `Goal ${formatStat(calorieGoal)}`, position: 'insideTopRight', fill: chartTheme.text, fontSize: 11 }} />
-                    ) : null}
-                    <Area type="monotone" dataKey="calories" stroke={VIZ.kcal} strokeWidth={2} fill="url(#healthCaloriesFill)" {...chartAnim} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <Suspense fallback={<ChartLoading />}>
+                  <CaloriesChart data={calorieSeries} goal={calorieGoal} />
+                </Suspense>
               </div>
               {nutritionInsights ? (
                 <p className="mt-3 text-xs text-text-2">
@@ -741,20 +724,9 @@ export default function Health() {
             <Card container>
               <CardHeader title="Macros per day" subtitle="Grams of protein, carbs and fat, stacked" level={3} />
               <div className="h-56 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={calorieSeries} margin={CHART_MARGIN} barGap={2}>
-                    <CartesianGrid {...chartTheme.cartesianGrid} />
-                    <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
-                    <YAxis {...chartTheme.axisProps} width={44} />
-                    <Tooltip
-                      {...chartTheme.tooltip}
-                      formatter={(v, name) => [`${formatStat(Math.round(Number(v ?? 0)))} g`, name === 'protein' ? 'Protein' : name === 'carbs' ? 'Carbs' : 'Fat']}
-                    />
-                    <Bar dataKey="protein" stackId="macros" fill={chartTheme.macro.protein} maxBarSize={28} {...chartAnim} />
-                    <Bar dataKey="carbs" stackId="macros" fill={chartTheme.macro.carbs} maxBarSize={28} {...chartAnim} />
-                    <Bar dataKey="fat" stackId="macros" fill={chartTheme.macro.fat} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <Suspense fallback={<ChartLoading />}>
+                  <MacrosChart data={calorieSeries} />
+                </Suspense>
               </div>
               <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs">
                 {(
@@ -837,22 +809,9 @@ export default function Health() {
         ) : (
           <>
             <div className="h-56 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={volumeSeries} margin={CHART_MARGIN} barGap={2}>
-                  <CartesianGrid {...chartTheme.cartesianGrid} />
-                  <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
-                  <YAxis {...chartTheme.axisProps} width={44} />
-                  <Tooltip
-                    {...chartTheme.tooltip}
-                    formatter={(v, name) => [
-                      name === 'duration' ? `${formatStat(Number(v ?? 0))} min` : `${formatStat(Number(v ?? 0))} kcal`,
-                      name === 'duration' ? 'Duration' : 'Calories burned',
-                    ]}
-                  />
-                  <Bar dataKey="duration" fill={INK_STRONG} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
-                  <Bar dataKey="calories" fill={VIZ.alt} radius={[6, 6, 0, 0]} maxBarSize={28} {...chartAnim} />
-                </BarChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<ChartLoading />}>
+                <VolumeChart data={volumeSeries} />
+              </Suspense>
             </div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs">
               <span className="inline-flex items-center gap-1.5 text-text-2">
