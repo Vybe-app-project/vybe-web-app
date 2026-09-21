@@ -30,6 +30,17 @@ import {
   type StoryFont,
 } from '../lib/storyLogic';
 import {
+  answerSticker,
+  highlightsKey,
+  setStickerReminder,
+  slideSticker,
+  stickerErrorCopy,
+  voteOnSticker,
+  type StorySticker,
+} from '../lib/stories';
+import { StickerLayer, type StickerAction } from './stories/StickerLayer';
+import { StickerResultsSheet } from './stories/StickerResultsSheet';
+import {
   Avatar,
   Badge,
   Button,
@@ -96,6 +107,15 @@ export type Story = {
   viewerReaction?: string | null;
   hasViewed?: boolean;
   hashtags?: string[];
+  /**
+   * What the story carries over its picture: a poll, an emoji slider, a
+   * question, a countdown, plus the quiet kinds the mobile app can place.
+   * Every payload has carried this since Wave C; the web simply never read
+   * it (src/lib/stories.ts).
+   */
+  stickers?: StorySticker[];
+  /** The highlights retaining this story, so the viewer can offer to remove it from one. */
+  highlights?: string[];
   content?: {
     text?: string;
     media?: string;
@@ -410,11 +430,27 @@ export function StoryViewer({
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [responsesFor, setResponsesFor] = useState<string | null>(null);
   const [localReaction, setLocalReaction] = useState<Record<string, ReactionKey>>({});
+  // A sticker write answers with the caller's new footprint (and, when the
+  // author allows it, the tally). Patching it in here is what makes a vote
+  // turn into bars without refetching the whole tray under the viewer.
+  const [stickerPatch, setStickerPatch] = useState<Record<string, Partial<StorySticker>>>({});
+  const [stickerBusy, setStickerBusy] = useState<string | null>(null);
+  const [stickerActive, setStickerActive] = useState(false);
+  const [answeredStickers, setAnsweredStickers] = useState<Set<string>>(() => new Set());
+  const [resultsSticker, setResultsSticker] = useState<StorySticker | null>(null);
 
   const group = groups[gi];
   const story = group?.stories?.[si];
-  const paused = holdPaused || userPaused || Boolean(deleteTarget) || Boolean(responsesFor);
+  const paused =
+    holdPaused || userPaused || stickerActive || Boolean(deleteTarget) || Boolean(responsesFor) || Boolean(resultsSticker);
   const durationMs = clampStoryDuration(story?.duration, DEFAULT_STORY_SECONDS) * 1000;
+
+  /** The story's stickers with this session's answers folded in. */
+  const stickers = useMemo(() => {
+    const list = story?.stickers || [];
+    if (!list.length) return list;
+    return list.map((s) => (stickerPatch[s._id] ? { ...s, ...stickerPatch[s._id] } : s));
+  }, [story?.stickers, stickerPatch]);
 
   useLockBody(true);
   useFocusTrap(true, panelRef);
@@ -499,6 +535,44 @@ export function StoryViewer({
     onSuccess: () => qc.invalidateQueries({ queryKey: TRAY_KEY }),
   });
 
+  /**
+   * One mutation for all four sticker writes. The answer carries the
+   * caller's `viewerResponse` and — only when the author turned
+   * `showResults` on — the tally, so the patch takes whatever came back
+   * rather than guessing a count. A refusal is final more often than not
+   * (the author's own sticker, a story that ended, a third answer), so it
+   * is a toast, never a retry.
+   */
+  const respondToSticker = useMutation({
+    mutationFn: async ({ storyId, action }: { storyId: string; action: StickerAction }) => {
+      const id = action.sticker._id;
+      if (action.kind === 'vote') return { action, data: await voteOnSticker(storyId, id, action.option) };
+      if (action.kind === 'slide') return { action, data: await slideSticker(storyId, id, action.value) };
+      if (action.kind === 'answer') return { action, data: await answerSticker(storyId, id, action.text) };
+      return { action, data: await setStickerReminder(storyId, id, action.on) };
+    },
+    onMutate: ({ action }) => setStickerBusy(action.sticker._id),
+    onSettled: () => setStickerBusy(null),
+    onSuccess: ({ action, data }) => {
+      const id = action.sticker._id;
+      setStickerPatch((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          viewerResponse: data.viewerResponse ?? null,
+          ...(data.results ? { results: data.results } : {}),
+        },
+      }));
+      if (action.kind === 'answer') {
+        setAnsweredStickers((prev) => new Set(prev).add(id));
+        toast.success(data.delivered === 'dm' ? `Answer sent to ${authorName(group?.author)}` : 'Answer sent');
+      }
+      // The tray's copy of the story is now stale (the author's count moved).
+      qc.invalidateQueries({ queryKey: TRAY_KEY });
+    },
+    onError: (e) => toast.error(null, stickerErrorCopy(e)),
+  });
+
   const sendReply = useMutation({
     mutationFn: async ({ storyId, text }: { storyId: string; text: string }) => {
       await api.post(`/story/${storyId}/reply`, { text });
@@ -528,7 +602,7 @@ export function StoryViewer({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (deleteTarget || responsesFor) return; // the dialog on top owns the keyboard
+      if (deleteTarget || responsesFor || resultsSticker) return; // the dialog on top owns the keyboard
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
       if (e.key === 'Escape') onClose();
@@ -544,7 +618,7 @@ export function StoryViewer({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [next, prev, onClose, deleteTarget, responsesFor, story?.type]);
+  }, [next, prev, onClose, deleteTarget, responsesFor, resultsSticker, story?.type]);
 
   if (!group || !story) return null;
   const mine = story.author?._id === me?._id;
@@ -645,6 +719,20 @@ export function StoryViewer({
           <button type="button" aria-label="Next story" onClick={next} className="absolute inset-y-0 right-0 flex w-1/3 justify-end outline-offset-[-4px]">
             <ChevronRight size={28} className="mr-2 opacity-0 transition-opacity dur-1 hover:opacity-70" />
           </button>
+
+          {/* Above the paging zones on purpose: a tap on a sticker is an
+              answer, never a page turn, and the layer swallows the pointer
+              events that would otherwise pause the clock under a finger. */}
+          <StickerLayer
+            stickers={stickers}
+            mine={mine}
+            pendingId={stickerBusy}
+            answeredIds={answeredStickers}
+            onActive={setStickerActive}
+            onOpenResults={setResultsSticker}
+            onAction={(action) => respondToSticker.mutate({ storyId: story._id, action })}
+          />
+
           {paused ? <span className="sr-only" role="status">Paused</span> : null}
         </div>
 
@@ -697,6 +785,13 @@ export function StoryViewer({
       </div>
 
       <StoryResponsesModal storyId={responsesFor} open={Boolean(responsesFor)} onClose={() => setResponsesFor(null)} />
+
+      <StickerResultsSheet
+        storyId={story._id}
+        sticker={resultsSticker}
+        open={Boolean(resultsSticker)}
+        onClose={() => setResultsSticker(null)}
+      />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
@@ -1148,7 +1243,7 @@ export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'pag
 
 /* ------------------------------------------------------------ highlights */
 
-export const highlightsKey = (userId?: string) => ['stories', 'highlights', userId] as const;
+export { highlightsKey };
 
 export function useHighlights(userId?: string, enabled = true) {
   return useQuery({
