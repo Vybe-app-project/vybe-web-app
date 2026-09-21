@@ -27,11 +27,13 @@ import {
   type MenuItem,
   useToast,
 } from './ui';
-import { Activity, ChevronRight, Clock, Copy, Dumbbell, Edit, Flag, Flame, Layers, MessageCircle, Play, Send, ShareUp, Trash } from './icons';
+import { Activity, ChevronRight, Clock, Copy, Dumbbell, Edit, Flag, Flame, Layers, Link as LinkIcon, MessageCircle, Play, Send, ShareUp, Trash } from './icons';
 import { RouteSheet } from '../components/RouteSheet';
 import { LikeButton, MetaList, categoryTone } from './workouts/cards';
 import { shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise, type WorkoutPlan } from './workouts/model';
 import { AddToPlanModal } from './workouts/planPickers';
+import { programsFeature } from '../lib/programs';
+import { ShareLinkDialog } from './workouts/folders';
 import { TRAIN, useSheetClose, useSheetNav } from './workouts/sheet';
 import { useReportModal } from './Report';
 
@@ -131,6 +133,8 @@ export default function WorkoutDetail() {
   const [comment, setComment] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addToPlan, setAddToPlan] = useState(false);
+  const [sharingLink, setSharingLink] = useState(false);
+  const { shareLinks: shareLinksOn } = programsFeature();
   const [pendingComment, setPendingComment] = useState<WorkoutComment | null>(null);
   const { report, reportModal } = useReportModal();
   const composerRef = useRef<HTMLFormElement>(null);
@@ -274,6 +278,9 @@ export default function WorkoutDetail() {
         { label: 'Add to plan', description: 'Schedule it into one of your plans', icon: <Layers size={18} />, onSelect: () => setAddToPlan(true) },
         { label: 'Share', icon: <ShareUp size={18} />, onSelect: () => void shareWorkout(data, toast, 'share') },
         { label: 'Copy link', icon: <Copy size={18} />, onSelect: () => void shareWorkout(data, toast, 'copy') },
+        // A share link is the owner's to mint (the route answers 404 for anyone
+        // else) and only exists while `routineShareLinks` is on for this member.
+        ...(isOwn && shareLinksOn ? [{ label: 'Share link', description: 'A link anyone can open and save from', icon: <LinkIcon size={18} />, onSelect: () => setSharingLink(true) }] : []),
         ...(!isOwn
           ? [{ label: 'Report', icon: <Flag size={18} />, divider: true, onSelect: () => report({ targetType: 'workout', targetId: data._id, targetLabel: 'workout' }) }]
           : []),
@@ -534,6 +541,7 @@ export default function WorkoutDetail() {
       </p>
 
       <AddToPlanModal workout={addToPlan ? data : null} onClose={() => setAddToPlan(false)} />
+      <ShareLinkDialog workout={sharingLink ? data : null} onClose={() => setSharingLink(false)} />
       <ConfirmDialog
         open={Boolean(pendingComment)}
         title="Delete comment?"

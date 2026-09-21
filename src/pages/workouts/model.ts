@@ -55,6 +55,8 @@ export type SocialWorkout = {
   likes?: string[];
   comments?: unknown[];
   createdAt?: string;
+  /** v2-be-programs-routines: the RoutineFolder this routine is filed in; null (or absent) is Unfiled. */
+  folder?: string | null;
 };
 
 export type PlanEntry = { workout?: SocialWorkout | null; day: number; week: number; order?: number };

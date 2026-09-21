@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
-import { enrolledMeta } from '../lib/programs';
+import { enrolledMeta, useRoutineFolders } from '../lib/programs';
 import { displayWeight, useUnits, weightUnit } from '../lib/units';
 import {
   Button,
@@ -21,7 +21,7 @@ import {
   type MenuItem,
   type StatStripItem,
 } from './ui';
-import { ArrowRight, Copy, Edit, Flag, Layers, Play, Plus, ShareUp, Trash } from './icons';
+import { ArrowRight, Copy, Edit, Flag, Inbox, Layers, Play, Plus, ShareUp, Trash } from './icons';
 import { useReportModal } from './Report';
 import { useContinueProgram, useEnrolments } from './workouts/continue';
 import {
@@ -37,6 +37,7 @@ import {
   type WorkoutPage,
   type WorkoutPlan,
 } from './workouts/model';
+import { ALL_FOLDERS, FolderChips, MoveToFolderDialog, folderChips, folderTotal, inFolder, type FolderFilter } from './workouts/folders';
 import { AddToPlanModal, AddWorkoutPicker } from './workouts/planPickers';
 import { PlanRow, ROW_ACTION, RowList, RowSkeleton, WorkoutRow } from './workouts/rows';
 import { LOGS_KEY, fetchLogs, lastDoneByTitle, parseLogDate, relativeDay, sortLogs, weekTotals, weeksKept, type WorkoutLog } from './workouts/sessions';
@@ -181,6 +182,8 @@ export default function Workouts() {
   const [addToPlan, setAddToPlan] = useState<SocialWorkout | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SocialWorkout | null>(null);
   const [pendingPlanDelete, setPendingPlanDelete] = useState<WorkoutPlan | null>(null);
+  const [moving, setMoving] = useState<SocialWorkout | null>(null);
+  const [folder, setFolder] = useState<FolderFilter>(ALL_FOLDERS);
   const { report, reportModal } = useReportModal();
   const { state: sheetState, open } = useSheetNav();
   const system = useUnits((s) => s.system);
@@ -198,9 +201,17 @@ export default function Workouts() {
   const mine = useInfiniteQuery({ queryKey: ['workouts', 'mine', 'paged'], queryFn: ({ pageParam }) => fetchMyWorkoutsPage(pageParam as number), initialPageParam: 1, getNextPageParam: nextPage });
   const logsQuery = useQuery({ queryKey: LOGS_KEY, queryFn: fetchLogs });
   const logs = useMemo(() => sortLogs(logsQuery.data?.workouts ?? []), [logsQuery.data]);
-  const mineItems = useMemo(() => mine.data?.pages.flatMap((p) => p.items) ?? [], [mine.data]);
-  const mineTotal = mine.data?.pages[0]?.pagination?.total ?? mineItems.length;
-  const mineEmpty = mine.isSuccess && mineItems.length === 0;
+  const loadedMine = useMemo(() => mine.data?.pages.flatMap((p) => p.items) ?? [], [mine.data]);
+  const loadedTotal = mine.data?.pages[0]?.pagination?.total ?? loadedMine.length;
+  const mineEmpty = mine.isSuccess && loadedMine.length === 0;
+
+  // Folders are a filing cabinet the member opted into: the chip row exists
+  // only once they have made one, and it filters what is loaded (the count on
+  // the chip is the server's, so "Showing 3 of 8" stays honest while paging).
+  const folders = useRoutineFolders(tab === 'mine');
+  const chips = useMemo(() => folderChips(folders.data?.folders ?? [], folders.data?.unfiled ?? 0, loadedTotal), [folders.data, loadedTotal]);
+  const mineItems = useMemo(() => (folder === ALL_FOLDERS ? loadedMine : loadedMine.filter((w) => inFolder(w, folder))), [loadedMine, folder]);
+  const mineTotal = folderTotal(chips, folder) ?? loadedTotal;
 
   const setTab = (next: TabKey) => {
     setParams(
@@ -295,6 +306,8 @@ export default function Workouts() {
   const ownMenu = (workout: SocialWorkout): MenuItem[] => [
     { label: 'Edit', icon: <Edit size={18} />, onSelect: () => open(TRAIN.editWorkout(workout._id)) },
     { label: 'Add to plan', description: 'Schedule it into one of your plans', icon: <Layers size={18} />, onSelect: () => setAddToPlan(workout) },
+    // Absent while the `programs` flag is off: the folders read answers 404 and there is nothing to move into.
+    ...(folders.data ? [{ label: 'Move to folder…', description: 'File it, or make a folder', icon: <Inbox size={18} />, onSelect: () => setMoving(workout) }] : []),
     { label: 'Share', icon: <ShareUp size={18} />, onSelect: () => void shareWorkout(workout, toast, 'share') },
     { label: 'Copy link', icon: <Copy size={18} />, onSelect: () => void shareWorkout(workout, toast, 'copy') },
     { label: 'Delete', icon: <Trash size={18} />, onSelect: () => setPendingDelete(workout), danger: true, divider: true },
@@ -411,10 +424,11 @@ export default function Workouts() {
                 ) : null}
               </div>
             ) : (
-              <>
+              <div className="space-y-3">
+                <FolderChips chips={chips} value={folder} onChange={setFolder} />
                 <RowList>{mineItems.map((w) => workoutRow(w, true))}</RowList>
                 <LoadMore shown={mineItems.length} total={mineTotal} hasMore={mine.hasNextPage} fetching={mine.isFetchingNextPage} onMore={() => mine.fetchNextPage()} />
-              </>
+              </div>
             )}
           </Section>
 
@@ -513,6 +527,7 @@ export default function Workouts() {
       )}
 
       {addingTo ? <AddWorkoutPicker plan={addingTo} open onClose={() => setAddingTo(null)} /> : null}
+      <MoveToFolderDialog workout={moving} folders={folders.data?.folders ?? []} onClose={() => setMoving(null)} />
       <AddToPlanModal
         workout={addToPlan}
         onClose={() => setAddToPlan(null)}
