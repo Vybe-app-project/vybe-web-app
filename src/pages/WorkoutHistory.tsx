@@ -21,8 +21,6 @@ import {
   SkeletonTile,
   StatGrid,
   StatTile,
-  VIZ,
-  chartTheme,
   cx,
   formatStat,
   humanize,
