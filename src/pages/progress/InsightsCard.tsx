@@ -16,7 +16,7 @@ import {
  * and the "About this score" disclosure.
  *
  * The score is consistency over what the member logged this week — never a
- * health reading, a fitness level or a verdict. The band is a word in the ink
+ * reading of their health, a level reached, or a verdict. The band is a word in the ink
  * colour; `movedBy` is neutral hint text with no arrow and no verdict colour,
  * the rule the period tiles beside this card already follow. While any part
  * is short the number's place reads "Calibrating" with the API's exact gap,

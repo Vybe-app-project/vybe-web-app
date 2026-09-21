@@ -12,8 +12,10 @@ import { localDayParams } from './timezone';
  * and every verdict on the wire is a key, not a sentence: `score.band`
  * (`low | ok | high`), `part.state` / `part.reason`, `trainingLoad.label`
  * (five words, never a colour), `trainingLoad.offer`. This module is the one
- * place those keys become English, one rendering per key and nothing more —
- * the web never re-derives a score, a band or a label.
+ * place those keys become English, one rendering per key and nothing more --
+ * the web never re-derives a score, a band or a label. The one number is the
+ * Vybe score: consistency over what the member logged, and never a reading of
+ * their health or a level they have reached.
  *
  * The reason copy is the backend's own table, verbatim
  * (`services/rhythmSuggestions.js COPY.reason`, pinned there by
@@ -202,8 +204,8 @@ export async function ackWelcomeBack(body: WelcomeBackAckBody): Promise<void> {
  * (~/scratch/2026-09-18-vybe-v2/waveG-prep/design-insights-recap-v2.md §5:
  * `score.*`, `part.*`, `load.*`), rendered verbatim so web and app say the
  * same words. The one number is the **Vybe score**: a bounded consistency
- * summary of what the member logged, never a health reading, a fitness level
- * or a verdict. The band is a word in the ink colour — never red, never
+ * summary of what the member logged, and nothing about their health or the
+ * level they have reached. The band is a word in the ink colour — never red, never
  * green — and `movedBy` is neutral hint text, the way the Progress tiles
  * print their comparison.
  */
@@ -274,6 +276,13 @@ export function reasonCopy(reason: string | null | undefined, missing: number | 
 }
 
 const whole = (n: number) => Math.round(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+/** A number the API actually sent: an absent key is read before it is coerced. */
+const numberOf = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
 
 const GOAL_SOURCE: Readonly<Record<string, string>> = Object.freeze({
   setting: 'your setting',
@@ -469,7 +478,10 @@ export function loadBars(load: Pick<TrainingLoad, 'weekly'> | null | undefined):
   const weeks = Array.isArray(load?.weekly) ? load.weekly : [];
   const max = weeks.reduce((top, week) => Math.max(top, Number(week.load) > 0 ? Number(week.load) : 0), 0);
   return weeks.map((week) => {
-    const value = Number.isFinite(Number(week.load)) ? Number(week.load) : null;
+    // `null` is a week the API could not total (an unrated session and no
+    // median yet), not a zero: Number(null) is 0, so the key is read first.
+    const raw = week.load;
+    const value = raw === null || raw === undefined || !Number.isFinite(Number(raw)) ? null : Number(raw);
     return {
       weekKey: String(week.weekKey ?? ''),
       load: value,
@@ -522,10 +534,10 @@ export function focusValue(focus: Focus | null | undefined): string | null {
  */
 export function welcomeBackLine(record: WelcomeBack | null | undefined): string | null {
   if (!record) return null;
-  const idle = Number(record.idleDays);
-  if (!Number.isFinite(idle) || idle < 1) return 'Welcome back.';
-  const kept = Number(record.target?.weeksKept);
-  const chain = Number.isFinite(kept) && kept >= 1 ? ` Your ${plural(kept, 'week')} kept are still here.` : '';
+  const idle = numberOf(record.idleDays);
+  if (idle === null || idle < 1) return 'Welcome back.';
+  const kept = numberOf(record.target?.weeksKept);
+  const chain = kept !== null && kept >= 1 ? ` Your ${plural(kept, 'week')} kept are still here.` : '';
   return `Welcome back — ${plural(idle, 'day')} since your last session.${chain}`;
 }
 
@@ -539,12 +551,12 @@ export type WelcomeBackOffer = { action: WelcomeBackAction; label: string; count
  */
 export function welcomeBackOffer(record: WelcomeBack | null | undefined): WelcomeBackOffer | null {
   if (!record) return null;
-  const weeks = Number(record.breakOffer?.weeks);
-  if (Number.isFinite(weeks) && weeks >= 1) {
+  const weeks = numberOf(record.breakOffer?.weeks);
+  if (weeks !== null && weeks >= 1) {
     return { action: 'keep_target', label: `Count ${plural(weeks, 'week')} as a break`, countAsBreak: true };
   }
-  const lowerTo = Number(record.target?.lowerTo);
-  if (Number.isFinite(lowerTo) && lowerTo >= 1) {
+  const lowerTo = numberOf(record.target?.lowerTo);
+  if (lowerTo !== null && lowerTo >= 1) {
     return { action: 'lower_target', label: `Lower to ${plural(lowerTo, 'day')} a week` };
   }
   return null;

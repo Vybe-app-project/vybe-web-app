@@ -6,8 +6,9 @@
  *
  * What it is, and what it is not. It is a bounded **consistency** summary of
  * what the member logged this week: Sessions 40 + Movement 30 + Meals 30
- * (`services/insightsScore.js`). It is not a health reading, not a fitness
- * level, not a diagnosis and not a verdict, so nothing here calls it one.
+ * (`services/insightsScore.js`). It is not a reading of their health, not a
+ * level they have reached, not a diagnosis and not a verdict, so nothing here
+ * calls it one.
  * The band is a word in the ink colour — never red, never green — and the
  * one comparison the API makes rides as neutral hint text, the way the
  * Progress tiles print theirs: no arrow, no verdict colour.

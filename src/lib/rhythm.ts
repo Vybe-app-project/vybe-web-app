@@ -221,6 +221,17 @@ export function weekCells(week: Pick<RhythmCurrentWeek, 'days'> | null | undefin
 const days = (n: number) => plural(n, 'day');
 
 /**
+ * A number the API actually sent. `Number(null)` is 0 and `Number(undefined)`
+ * is NaN, so an absent key is read before it is coerced -- a missing target is
+ * not a target of zero.
+ */
+const numberOf = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
  * The card's one `.t-body` line. Every clause is a restatement of what the
  * fold already decided — the status, the count, the target, the days left —
  * and nothing else. A closed week reuses the wording of the notice the
@@ -259,8 +270,8 @@ export function weekLine(week: RhythmCurrentWeek | null | undefined, pause?: Rhy
 export const WEEKS_KEPT_FLOOR = 2;
 
 export function weeksKeptLabel(weeksKept: number | null | undefined): string | null {
-  const n = Number(weeksKept);
-  if (!Number.isFinite(n) || n < WEEKS_KEPT_FLOOR) return null;
+  const n = numberOf(weeksKept);
+  if (n === null || n < WEEKS_KEPT_FLOOR) return null;
   return `${n} weeks kept`;
 }
 
@@ -271,16 +282,16 @@ export function weeksKeptLabel(weeksKept: number | null | undefined): string | n
  * nothing to offer and a zero is not a fact.
  */
 export function restBankLine(tokens: RhythmRestTokens | null | undefined): string | null {
-  const bank = Number(tokens?.bank);
-  if (!Number.isFinite(bank) || bank < 1) return null;
+  const bank = numberOf(tokens?.bank);
+  if (bank === null || bank < 1) return null;
   return `${plural(bank, 'rest week')} banked. A banked week covers one that comes up short.`;
 }
 
 /** "3 weeks to 12" from `nextMilestone`; absent when the API sent none. */
 export function milestoneLine(milestone: RhythmMilestone | null | undefined): string | null {
-  const weeks = Number(milestone?.weeks);
-  const away = Number(milestone?.in);
-  if (!Number.isFinite(weeks) || !Number.isFinite(away) || away < 1) return null;
+  const weeks = numberOf(milestone?.weeks);
+  const away = numberOf(milestone?.in);
+  if (weeks === null || away === null || away < 1) return null;
   return `${plural(away, 'week')} to ${weeks}`;
 }
 
@@ -293,9 +304,9 @@ export function milestoneLine(milestone: RhythmMilestone | null | undefined): st
 export function suggestionLine(suggestion: RhythmSuggestion | null | undefined): string | null {
   if (!suggestion) return null;
   const basis = Array.isArray(suggestion.basis) ? suggestion.basis : [];
-  const from = Number(suggestion.from);
-  const to = Number(suggestion.to);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  const from = numberOf(suggestion.from);
+  const to = numberOf(suggestion.to);
+  if (from === null || to === null) return null;
   if (suggestion.kind === 'raise') {
     const kept = basis.filter((week) => week.status === 'kept').length;
     const head = kept > 0 ? `${plural(kept, 'week')} kept at ${days(from)}` : `${days(from)} a week`;
@@ -308,8 +319,8 @@ export function suggestionLine(suggestion: RhythmSuggestion | null | undefined):
 
 /** The label on the suggestion's one blue text action. */
 export function suggestionAcceptLabel(suggestion: RhythmSuggestion | null | undefined): string | null {
-  const to = Number(suggestion?.to);
-  return Number.isFinite(to) ? `Move to ${days(to)}` : null;
+  const to = numberOf(suggestion?.to);
+  return to === null ? null : `Move to ${days(to)}`;
 }
 
 /** One basis row, spelled out for the "how this was judged" disclosure. */
