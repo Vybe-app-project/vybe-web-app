@@ -34,11 +34,15 @@ import {
   highlightsKey,
   setStickerReminder,
   slideSticker,
+  stickerDraftBody,
+  stickerDraftError,
   stickerErrorCopy,
   voteOnSticker,
+  type StickerDraft,
   type StorySticker,
 } from '../lib/stories';
-import { StickerLayer, type StickerAction } from './stories/StickerLayer';
+import { DEFAULT_STICKER_PLACEMENT, StickerLayer, type StickerAction } from './stories/StickerLayer';
+import { StickerComposer } from './stories/StickerComposer';
 import { StickerResultsSheet } from './stories/StickerResultsSheet';
 import {
   Avatar,
@@ -824,6 +828,7 @@ export function CreateStoryModal({ open, onClose }: { open: boolean; onClose: ()
   const [duration, setDuration] = useState(DEFAULT_STORY_SECONDS);
   const [look, setLook] = useState(STORY_BACKGROUNDS[0].id);
   const [font, setFont] = useState<StoryFont>('default');
+  const [sticker, setSticker] = useState<StickerDraft | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -839,6 +844,7 @@ export function CreateStoryModal({ open, onClose }: { open: boolean; onClose: ()
       setDuration(DEFAULT_STORY_SECONDS);
       setLook(STORY_BACKGROUNDS[0].id);
       setFont('default');
+      setSticker(null);
       if (fileRef.current) fileRef.current.value = '';
     }
   }, [open]);
@@ -898,7 +904,10 @@ export function CreateStoryModal({ open, onClose }: { open: boolean; onClose: ()
         .split(/[\s,]+/)
         .map((t) => t.replace(/^#/, '').trim().toLowerCase())
         .filter(Boolean);
-      const { data } = await api.post('/story', { type, privacy, content, duration, hashtags: tags });
+      // One interactive sticker, placed in the lower third: the API's own
+      // default is dead centre, which lands on a photo's subject.
+      const stickers = sticker ? [{ ...stickerDraftBody(sticker), ...DEFAULT_STICKER_PLACEMENT }] : undefined;
+      const { data } = await api.post('/story', { type, privacy, content, duration, hashtags: tags, ...(stickers ? { stickers } : {}) });
       return data;
     },
     onSuccess: () => {
@@ -909,7 +918,8 @@ export function CreateStoryModal({ open, onClose }: { open: boolean; onClose: ()
     onError: (e) => toast.error(e, 'Could not post the story.'),
   });
 
-  const valid = type === 'text' ? text.trim().length > 0 : !!media;
+  const stickerError = stickerDraftError(sticker);
+  const valid = (type === 'text' ? text.trim().length > 0 : !!media) && !stickerError;
   const busy = create.isPending || uploading;
   const mediaAccept = type === 'video' ? ACCEPTED_VIDEO_TYPES.join(',') : ACCEPTED_IMAGE_TYPES.join(',');
 
@@ -1044,6 +1054,8 @@ export function CreateStoryModal({ open, onClose }: { open: boolean; onClose: ()
             />
           </div>
         ) : null}
+
+        <StickerComposer draft={sticker} onChange={setSticker} disabled={busy} />
 
         <Input
           label="Hashtags"
