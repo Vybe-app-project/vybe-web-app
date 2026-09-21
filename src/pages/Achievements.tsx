@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -34,14 +34,15 @@ import {
   Modal,
   PageHeader,
   Ring,
+  SegmentedControl,
   Select,
   Skeleton,
   Spinner,
   StatGrid,
   StatTile,
-  Tabs,
   cx,
   formatStat,
+  hasMetric,
   useToast,
 } from '../components/ui';
 import {
@@ -50,18 +51,11 @@ import {
   CheckCircle,
   Clock,
   Dumbbell,
-  Flame,
-  Footprints,
-  Heart,
   Medal,
-  Plate,
   Sparkles,
-  Star,
   Target,
   Trophy,
   Users,
-  Zap,
-  type IconProps,
 } from '../components/icons';
 import {
   AchievementGrid,
@@ -126,73 +120,6 @@ const DETAIL_CLOSE_ID = 'achievement-detail-close';
 
 const focusViews = () =>
   document.querySelector<HTMLElement>(`#${VIEWS_ID} [role="tab"][aria-selected="true"]`)?.focus();
-
-/* ------------------------------------------------------------- badge art */
-
-/**
- * The catalogue names each badge's glyph in the mobile client's icon
- * vocabulary (`icon: 'ribbon'`, `iconColor: '#00D4AA'`). Known names map to
- * our stroke icons; anything else keeps the category glyph. The colour is
- * catalogue data, not a design token, so it tints the tile and is mixed
- * toward the text colour for the glyph, which holds contrast in both themes.
- */
-const BADGE_ICONS: Readonly<Record<string, (props: IconProps) => ReactNode>> = {
-  ribbon: (p) => <Medal {...p} />,
-  medal: (p) => <Medal {...p} />,
-  trophy: (p) => <Trophy {...p} />,
-  award: (p) => <Award {...p} />,
-  star: (p) => <Star {...p} />,
-  sparkles: (p) => <Sparkles {...p} />,
-  flame: (p) => <Flame {...p} />,
-  fire: (p) => <Flame {...p} />,
-  flash: (p) => <Zap {...p} />,
-  bolt: (p) => <Zap {...p} />,
-  barbell: (p) => <Dumbbell {...p} />,
-  fitness: (p) => <Dumbbell {...p} />,
-  dumbbell: (p) => <Dumbbell {...p} />,
-  nutrition: (p) => <Plate {...p} />,
-  restaurant: (p) => <Plate {...p} />,
-  people: (p) => <Users {...p} />,
-  users: (p) => <Users {...p} />,
-  heart: (p) => <Heart {...p} />,
-  footsteps: (p) => <Footprints {...p} />,
-  walk: (p) => <Footprints {...p} />,
-  calendar: (p) => <CalendarDays {...p} />,
-  target: (p) => <Target {...p} />,
-  'checkmark-circle': (p) => <CheckCircle {...p} />,
-  time: (p) => <Clock {...p} />,
-};
-
-const HEX_COLOUR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
-
-export function badgeGlyph(achievement: Pick<Achievement, 'icon' | 'category'>): (props: IconProps) => ReactNode {
-  const key = String(achievement.icon || '')
-    .trim()
-    .toLowerCase()
-    .replace(/-(outline|sharp)$/, '');
-  return BADGE_ICONS[key] ?? CATEGORY_ICON[categoryOf(achievement)];
-}
-
-export function badgeTint(iconColor?: string | null): CSSProperties | undefined {
-  const value = (iconColor || '').trim();
-  if (!HEX_COLOUR.test(value)) return undefined;
-  return {
-    background: `color-mix(in oklab, ${value} 22%, var(--surface-1))`,
-    color: `color-mix(in oklab, ${value} 65%, var(--text-1))`,
-  };
-}
-
-/** The badge's own art where the catalogue supplies it; the rarity tile otherwise. */
-function BadgeArt({ achievement, earned }: { achievement: Achievement; earned: boolean }) {
-  const tint = badgeTint(achievement.iconColor);
-  if (!tint) return <BadgeTile achievement={achievement} size="lg" earned={earned} />;
-  const Glyph = badgeGlyph(achievement);
-  return (
-    <div className={cx('flex h-16 w-16 shrink-0 items-center justify-center rounded-md', !earned && 'opacity-70 saturate-50')} style={tint} aria-hidden="true">
-      {Glyph({ size: 30 })}
-    </div>
-  );
-}
 
 /* --------------------------------------------------------------- sub views */
 
@@ -274,7 +201,7 @@ function DetailModal({
       {achievement ? (
         <div className="space-y-5">
           <div className="flex items-center gap-4">
-            <BadgeArt achievement={achievement} earned={earned || met} />
+            <BadgeTile achievement={achievement} size="lg" earned={earned || met} />
             <div className="min-w-0 space-y-1.5">
               <RarityChip rarity={rarity} />
               <p className="text-sm leading-relaxed text-text-2">{achievement.description}</p>
@@ -645,6 +572,7 @@ export default function Achievements() {
               icon={<Trophy size={20} />}
               tone="brand"
               loading={summaryLoading}
+              fallback="None yet"
               hint={summary.length ? `${Math.round((earnedCount / summary.length) * 100)}% of all badges` : undefined}
             />
             {flagUnknown ? (
@@ -662,6 +590,7 @@ export default function Achievements() {
                 icon={<Sparkles size={20} />}
                 tone={stats.newAwards > 0 ? 'accent' : 'neutral'}
                 loading={summaryLoading}
+                fallback="None new"
                 hint={stats.newAwards > 0 ? 'Since you last looked' : 'Awards arrive on their own'}
               />
             ) : (
@@ -671,15 +600,17 @@ export default function Achievements() {
                 icon={<Sparkles size={20} />}
                 tone={claimableCount > 0 ? 'accent' : 'neutral'}
                 loading={summaryLoading}
+                fallback="None waiting"
                 hint={claimableCount > 0 ? `${formatStat(pendingPoints)} pts waiting` : 'Nothing pending'}
               />
             )}
             <StatTile
               label="Points banked"
-              value={formatStat(totalPoints)}
+              value={hasMetric(totalPoints) ? formatStat(totalPoints) : 0}
               unit="pts"
               icon={<Medal size={20} />}
               loading={summaryLoading}
+              fallback="None yet"
             />
             {stats.weeksKept ? (
               <StatTile
@@ -689,6 +620,7 @@ export default function Achievements() {
                 icon={<CalendarDays size={20} />}
                 tone={stats.weeksKept.progress > 0 ? 'accent' : 'neutral'}
                 loading={summaryLoading}
+                fallback="Log a session"
                 hint="Weekly Rhythm"
               />
             ) : (
@@ -699,7 +631,8 @@ export default function Achievements() {
                 icon={<Target size={20} />}
                 tone={stats.milestones.earned > 0 ? 'brand' : 'neutral'}
                 loading={summaryLoading}
-                hint={stats.milestones.total ? 'Long-run targets' : 'None yet'}
+                fallback="None yet"
+                hint={stats.milestones.total ? 'Long-run targets' : undefined}
               />
             )}
           </>
@@ -771,7 +704,7 @@ export default function Achievements() {
       ) : null}
 
       <div id={VIEWS_ID}>
-        <Tabs
+        <SegmentedControl
           aria-label="Achievement views"
           active={tab}
           onChange={(k) => setTab(k as TabKey)}

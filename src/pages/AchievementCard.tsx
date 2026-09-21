@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type CSSProperties, type ReactNode } from 'react';
 import { format, isValid, parseISO } from 'date-fns';
 import {
   Badge,
@@ -14,15 +14,22 @@ import {
   Award,
   CalendarDays,
   Check,
+  CheckCircle,
   ChevronRight,
+  Clock,
   Dumbbell,
   Flame,
+  Footprints,
+  Heart,
+  Medal,
   Plate,
   Sparkles,
   Star,
   Target,
   Trophy,
   Users,
+  Zap,
+  type IconProps,
 } from '../components/icons';
 import {
   CATEGORIES,
@@ -128,6 +135,61 @@ export const CATEGORY_ICON: Record<Category, (props: { size?: number; filled?: b
   seasonal: (p) => <CalendarDays {...p} />,
 };
 
+/* ------------------------------------------------------------- badge art */
+
+/**
+ * The catalogue names each badge's glyph in the mobile client's icon
+ * vocabulary (`icon: 'ribbon'`, `iconColor: '#00D4AA'`). Known names map to
+ * our stroke icons; anything else keeps the category glyph. The colour is
+ * catalogue data, not a design token, so it tints the tile and is mixed
+ * toward the text colour for the glyph, which holds contrast in both themes.
+ */
+const BADGE_ICONS: Readonly<Record<string, (props: IconProps) => ReactNode>> = {
+  ribbon: (p) => <Medal {...p} />,
+  medal: (p) => <Medal {...p} />,
+  trophy: (p) => <Trophy {...p} />,
+  award: (p) => <Award {...p} />,
+  star: (p) => <Star {...p} />,
+  sparkles: (p) => <Sparkles {...p} />,
+  flame: (p) => <Flame {...p} />,
+  fire: (p) => <Flame {...p} />,
+  flash: (p) => <Zap {...p} />,
+  bolt: (p) => <Zap {...p} />,
+  barbell: (p) => <Dumbbell {...p} />,
+  fitness: (p) => <Dumbbell {...p} />,
+  dumbbell: (p) => <Dumbbell {...p} />,
+  nutrition: (p) => <Plate {...p} />,
+  restaurant: (p) => <Plate {...p} />,
+  people: (p) => <Users {...p} />,
+  users: (p) => <Users {...p} />,
+  heart: (p) => <Heart {...p} />,
+  footsteps: (p) => <Footprints {...p} />,
+  walk: (p) => <Footprints {...p} />,
+  calendar: (p) => <CalendarDays {...p} />,
+  target: (p) => <Target {...p} />,
+  'checkmark-circle': (p) => <CheckCircle {...p} />,
+  time: (p) => <Clock {...p} />,
+};
+
+const HEX_COLOUR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+export function badgeGlyph(achievement: Pick<Achievement, 'icon' | 'category'>): (props: IconProps) => ReactNode {
+  const key = String(achievement.icon || '')
+    .trim()
+    .toLowerCase()
+    .replace(/-(outline|sharp)$/, '');
+  return BADGE_ICONS[key] ?? CATEGORY_ICON[categoryOf(achievement)];
+}
+
+export function badgeTint(iconColor?: string | null): CSSProperties | undefined {
+  const value = (iconColor || '').trim();
+  if (!HEX_COLOUR.test(value)) return undefined;
+  return {
+    background: `color-mix(in oklab, ${value} 22%, var(--surface-1))`,
+    color: `color-mix(in oklab, ${value} 65%, var(--text-1))`,
+  };
+}
+
 /**
  * The card's whole-surface details button carries a stable id so the page can
  * hand focus to it once a Claim control has replaced itself with "Details".
@@ -189,6 +251,7 @@ export function RarityChip({ rarity, size = 'md' }: { rarity: Rarity; size?: 'sm
   );
 }
 
+/** The badge's art: the catalogue's own glyph and colour where it names them, else the category glyph on the rarity tile. */
 export function BadgeTile({
   achievement,
   size = 'md',
@@ -201,19 +264,21 @@ export function BadgeTile({
   earned?: boolean;
 }) {
   const rarity = rarityOf(achievement);
-  const Icon = CATEGORY_ICON[categoryOf(achievement)];
+  const Glyph = badgeGlyph(achievement);
+  const tint = badgeTint(achievement.iconColor);
   return (
     <div
       className={cx(
         'flex shrink-0 items-center justify-center rounded-md',
         size === 'lg' ? 'h-16 w-16' : 'h-12 w-12',
-        RARITY_STYLE[rarity].tile,
+        !tint && RARITY_STYLE[rarity].tile,
         earned === false && 'opacity-70 saturate-50',
         className,
       )}
+      style={tint}
       aria-hidden="true"
     >
-      {Icon({ size: size === 'lg' ? 30 : 22 })}
+      {Glyph({ size: size === 'lg' ? 30 : 22 })}
     </div>
   );
 }
