@@ -1,35 +1,31 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, matchPath, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
+import type { NavigationType } from 'react-router-dom';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLiveEnabled } from '../lib/capabilities';
-import { useFeature } from '../lib/capabilities';
 import type { PublicUser } from '../lib/hooks';
 import { getSocket } from '../lib/socket';
 import { UNREAD_COUNT_KEY, useLiveNotifications } from '../lib/notificationsLive';
 import type { UnreadCount } from '../lib/notificationInbox';
 import { pathOf, preload, preloadWhenIdle, selectNavigating, usePendingNavigation } from '../lib/navigation';
-import { useHomeGym, useSetHomeGym } from '../lib/homeGym';
-import type { HomeGymState } from '../lib/homeGym';
-import { PlaceImage } from './PlaceImage';
+import { usePageChromeField } from './PageChrome';
 import { SHEET_MEDIA, backgroundLocationOf } from './RouteSheet';
 import {
   Avatar,
   Brand,
   BrandMark,
   Button,
-  ButtonLink,
+  Card,
   Chip,
   CountBadge,
-  GymBand,
   IconButton,
   Menu,
   Modal,
-  NO_GYM_COPY,
   PageSkeleton,
   SearchField,
   Skeleton,
@@ -39,11 +35,10 @@ import {
   formatStat,
   useMediaQuery,
   useOnline,
-  usePageChromeStore,
   useToast,
   useScrollEdges,
 } from './ui';
-import type { GymBandGym, MenuItem, PageBand } from './ui';
+import type { MenuItem } from './ui';
 import {
   ArrowLeft,
   Award,
@@ -60,7 +55,6 @@ import {
   Inbox,
   LifeBuoy,
   LogOut,
-  MapPin,
   Palette,
   Plus,
   Radio,
@@ -94,7 +88,7 @@ export type RouteMeta = {
   parent?: string;
   /** Section-tab group rendered under the top bar. */
   hub?: HubKey;
-  /** Tab roots: large title, no back chevron. */
+  /** Tab roots: no back chevron. */
   root?: boolean;
   /** Feed-width content with the desktop right rail. */
   rail?: boolean;
@@ -104,7 +98,9 @@ export type RouteMeta = {
 /**
  * Every routed consumer feature, in match order (static before params).
  * Section pages carry hub tabs so sub-features are one tap away; nothing is
- * reachable only by typing a URL.
+ * reachable only by typing a URL. The title here is what the header shows on
+ * the first frame of a route; a page with a live name (a profile, a gym, a
+ * meal) publishes its own through PageChrome and the header swaps the text.
  */
 export const ROUTES: RouteMeta[] = [
   { pattern: '/', title: 'Home', tab: 'home', nav: '/', root: true, rail: true },
@@ -125,7 +121,7 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/settings', title: 'Settings', tab: 'you', nav: '/settings', parent: '/profile' },
   { pattern: '/support', title: 'Support', tab: 'you', nav: '/support', parent: '/settings' },
   { pattern: '/gyms', title: 'Gyms', tab: 'gyms', nav: '/gyms', root: true, hub: 'community' },
-  // The gym page carries its own tabs on the band (Feed · Today · Members · About): no hub row under it.
+  // The gym page carries its own tabs in its profile header (Feed · Today · Members · About): no hub row under it.
   { pattern: '/gyms/:gymId', title: 'Gym', tab: 'gyms', nav: '/gyms', parent: '/gyms' },
   { pattern: '/communities', title: 'Communities', tab: 'gyms', nav: '/communities', hub: 'community' },
   { pattern: '/communities/:communityId', title: 'Community', tab: 'gyms', nav: '/communities', parent: '/communities' },
@@ -192,6 +188,7 @@ export const HUBS: Record<HubKey, Array<{ to: string; label: string; badge?: 'ch
   ],
 };
 
+/** Routes without a row (the not-found page, a session landing): the app's own name until the page publishes one. */
 const FALLBACK_META: RouteMeta = { pattern: '*', title: 'Vybe', tab: 'home', nav: '/' };
 
 export function routeMeta(pathname: string): RouteMeta {
@@ -485,32 +482,13 @@ function SearchBox({ className }: { className?: string }) {
 }
 
 /**
- * The create action. Compact (phone top bar) is a plus in the mint circle —
- * the brand mark it used to show sat where apps put the avatar and read as a
- * logo, not "add". The desktop button keeps its label.
+ * The create action. Compact (phone header) is a plus in the blue disc — the
+ * one blue on the phone shell; the brand mark it used to show sat where apps
+ * put the avatar and read as a logo, not "add". The desktop button is the
+ * sidebar's primary, always present, and keeps its label from xl.
  */
-function LogButton({ className, compact = false, band = false, mint = false }: { className?: string; compact?: boolean; band?: boolean; mint?: boolean }) {
+function LogButton({ className, compact = false }: { className?: string; compact?: boolean }) {
   const setOpen = useLogSheet((s) => s.setOpen);
-  if (band) {
-    // On the band: a tonal chip unless the screen has no other primary control
-    // (`mint`), so a hub keeps exactly one brand-coloured action. Icon-only on
-    // phones (the chrome row also carries search, inbox and the bell at 320 px).
-    return (
-      <button
-        type="button"
-        aria-label="Log something"
-        onClick={() => setOpen(true)}
-        className={cx(
-          'inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full px-0 text-sm font-semibold transition-colors dur-1 sm:px-3.5',
-          mint ? 'bg-brand text-on-brand hover:bg-brand-hover' : 'gym-band-chip hover:bg-band-chip-line',
-          className,
-        )}
-      >
-        <Plus size={20} />
-        <span className="hidden sm:inline">Log</span>
-      </button>
-    );
-  }
   if (compact) {
     return (
       <button
@@ -519,7 +497,7 @@ function LogButton({ className, compact = false, band = false, mint = false }: {
         onClick={() => setOpen(true)}
         className={cx('inline-flex h-11 w-11 items-center justify-center', className)}
       >
-        <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand text-on-brand shadow-1 transition-transform dur-1 active:scale-95">
+        <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand text-on-brand transition-transform dur-1 active:scale-95">
           <Plus size={22} />
         </span>
       </button>
@@ -553,7 +531,7 @@ function LogSheet() {
                 setOpen(false);
                 if (willNavigateHere(e) && pathOf(to) !== pathname) start(pathOf(to));
               }}
-              className="flex min-h-16 items-center gap-4 rounded-md px-3 py-2.5 transition-colors dur-1 hover:bg-surface-2 focus-visible:bg-surface-2"
+              className="pressable flex min-h-16 items-center gap-4 rounded-md px-3 py-2.5 focus-visible:bg-surface-2"
             >
               <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-text">
                 <Icon size={24} />
@@ -574,7 +552,8 @@ function LogSheet() {
 const LOGOUT_SCOPE = 'Signs you out on every device';
 
 function AccountMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
-  const { user, logout } = useAuth();
+  const user = useAuth((s) => s.user);
+  const logout = useAuth((s) => s.logout);
   const items: MenuItem[] = [
     { label: 'Profile', icon: <User size={18} />, to: '/profile' },
     { label: 'Settings', icon: <Settings size={18} />, to: '/settings' },
@@ -591,7 +570,7 @@ function AccountMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
       align={align}
       items={items}
       trigger={() => (
-        <span className="inline-flex h-11 w-11 items-center justify-center rounded-full">
+        <span className="pressable inline-flex h-11 w-11 items-center justify-center rounded-full">
           <Avatar src={user?.avatar} name={user?.fullName || user?.username} size="sm" />
         </span>
       )}
@@ -611,14 +590,15 @@ function SideLink({ item, active, badge }: { item: SidebarItem; active: boolean;
       data-active={active ? 'true' : undefined}
       {...navProps}
       className={cx(
-        // The current hub is marked the way a tab bar marks it: bold label and a
-        // filled icon, no tinted background. scroll-margin keeps it clear of the fades.
-        'relative flex h-10 items-center justify-center gap-3 rounded-sm px-3 text-sm transition-colors dur-1 scroll-my-12 pointer-coarse:min-h-11 xl:justify-start',
-        active ? 'font-bold text-text-1' : 'font-medium text-text-2 hover:bg-surface-2 hover:text-text-1',
+        // Instagram's row: 48 px, a 24 px icon and the label in the body size;
+        // the current hub is a filled icon and a bold label, no tinted
+        // background. scroll-margin keeps it clear of the edge fades.
+        'pressable relative flex h-12 items-center justify-center gap-4 rounded-sm px-3 text-base text-text-1 scroll-my-12 xl:justify-start',
+        active ? 'font-bold' : 'font-normal',
       )}
     >
       <span className="relative shrink-0">
-        <Icon size={24} filled={active} />
+        <Icon size={24} filled={active} strokeWidth={active ? 2.2 : 1.8} />
         {badge ? <CountBadge value={badge} className="absolute -right-2.5 -top-1.5 xl:hidden" /> : null}
       </span>
       <span className="min-w-0 flex-1 truncate max-xl:hidden">{label}</span>
@@ -628,102 +608,35 @@ function SideLink({ item, active, badge }: { item: SidebarItem; active: boolean;
 }
 
 /**
- * The gym identity card at the top of the sidebar: cover thumbnail, name and
- * "Your gym · Switch". With no home gym it keeps the same shape and says
- * "Find your gym"; the first of the member's communities shows as a
- * provisional gym with a one-tap "Make this my home gym". Collapses to the
- * thumbnail on the icon rail (lg–xl).
+ * Desktop navigation: the wordmark (the one on desktop — the header carries
+ * the page title, not a second logo), the Log button, then the six hubs and
+ * Inbox, flat. Sub-pages live in each hub's SectionTabs, so the list fits a
+ * 900 px laptop without scrolling; when it does scroll (large text), the
+ * active row is kept clear of the edge fades by scroll-padding on the list
+ * and scroll-margin on the row. Settings/Support stay in the account menu.
+ * An icon rail from lg, the full 244 px column from xl. Memoised: its props
+ * are the route table row and a badge string, so a page re-render never
+ * reaches it.
  */
-function SidebarGym({ home }: { home: HomeGymState }) {
-  const setHome = useSetHomeGym();
-  const toast = useToast();
-  const gym = home.gym;
-  const communityId = home.community?._id ? String(home.community._id) : null;
-  const gymHref = communityId ? `/gyms/${communityId}` : NO_GYM_COPY.href;
-  const makeHome = () => {
-    if (!communityId) return;
-    setHome.mutate({ community: communityId }, { onError: () => toast.error('Couldn’t set your home gym. Try again.') });
-  };
-  if (home.loading) {
-    return (
-      <div className="mx-3 mb-1 flex items-center gap-3 rounded-md p-2 xl:mx-4" aria-busy="true" aria-label="Loading your gym">
-        <Skeleton className="h-10 w-10 shrink-0 rounded-md" />
-        <div className="min-w-0 flex-1 space-y-2 max-xl:hidden">
-          <Skeleton className="h-3 w-2/3" />
-          <Skeleton className="h-2.5 w-1/2" />
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="mx-3 mb-1 rounded-md bg-surface-2 p-2 xl:mx-4">
-      <div className="flex items-center gap-3">
-        <Link to={gymHref} viewTransition aria-label={gym ? `${gym.name}, your gym` : NO_GYM_COPY.kicker} className="block shrink-0 rounded-md">
-          {gym ? (
-            <PlaceImage src={gym.photoUrl} name={gym.name} className="h-10 w-10 rounded-md" textClassName="text-xs" />
-          ) : (
-            <span className="flex h-10 w-10 items-center justify-center rounded-md bg-surface-1 text-text-1">
-              <MapPin size={20} />
-            </span>
-          )}
-        </Link>
-        <div className="min-w-0 flex-1 max-xl:hidden">
-          <Link to={gymHref} viewTransition className="block truncate text-sm font-semibold text-text-1 hover:underline">
-            {gym ? gym.name : NO_GYM_COPY.kicker}
-          </Link>
-          <p className="truncate text-xs text-text-2">
-            {gym ? (
-              home.provisional ? (
-                <button type="button" onClick={makeHome} disabled={setHome.isPending} className="font-semibold text-text-1 hover:underline disabled:opacity-60">
-                  {setHome.isPending ? 'Setting…' : 'Make this my home gym'}
-                </button>
-              ) : (
-                <>
-                  Your gym ·{' '}
-                  <Link to="/gyms" viewTransition className="font-semibold text-text-1 hover:underline">
-                    Switch
-                  </Link>
-                </>
-              )
-            ) : (
-              'Pick where you train'
-            )}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Desktop navigation: the gym identity card, then the six hubs and Inbox,
- * flat. Sub-pages live in each hub's SectionTabs, so the list fits a 900 px
- * laptop without scrolling; when it does scroll (large text), the active row is
- * kept clear of the edge fades by scroll-padding on the list and scroll-margin
- * on the row. Settings/Support stay in the account menu. On hub roots the
- * band's Log button is the only compose affordance, so the sidebar's hides.
- */
-function Sidebar({ meta, inbox, home, showLog }: { meta: RouteMeta; inbox: string | number | null; home: HomeGymState; showLog: boolean }) {
-  const { user } = useAuth();
+const Sidebar = memo(function Sidebar({ meta, inbox }: { meta: RouteMeta; inbox: string | number | null }) {
+  const user = useAuth((s) => s.user);
+  const homeNav = useNavLinkProps('/');
   const navRef = useRef<HTMLElement>(null);
   const edges = useScrollEdges(navRef, 'y');
   useEffect(() => {
     navRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [meta.nav, meta.hub]);
   return (
-    <aside className="vt-sidebar sticky top-0 hidden h-dvh w-[4.5rem] shrink-0 flex-col border-r border-line bg-surface-1 lg:flex xl:w-60">
-      <div className="flex h-16 shrink-0 items-center justify-center px-3 xl:justify-start xl:px-5">
-        <Link to="/" viewTransition aria-label="Vybe home" className="inline-flex h-11 items-center rounded-sm px-1">
+    <aside className="vt-sidebar sticky top-0 hidden h-dvh w-18 shrink-0 flex-col border-r border-line bg-surface-1 lg:flex xl:w-sidebar">
+      <div className="flex h-14 shrink-0 items-center justify-center px-3 xl:justify-start xl:px-5">
+        <Link to="/" viewTransition aria-label="Vybe home" {...homeNav} className="pressable inline-flex h-11 items-center rounded-sm px-1">
           <BrandMark size={28} className="text-mark xl:hidden" />
           <Brand size="md" className="max-xl:hidden" />
         </Link>
       </div>
-      <SidebarGym home={home} />
-      {showLog ? (
-        <div className="px-3 xl:px-4">
-          <LogButton className="xl:justify-start" />
-        </div>
-      ) : null}
+      <div className="px-3 pt-2 xl:px-4">
+        <LogButton className="xl:justify-start" />
+      </div>
       <nav
         ref={navRef}
         aria-label="Primary"
@@ -750,22 +663,7 @@ function Sidebar({ meta, inbox, home, showLog }: { meta: RouteMeta; inbox: strin
       </div>
     </aside>
   );
-}
-
-function DesktopTopBar({ notifications }: { notifications: string | number | null }) {
-  const notificationsNav = useNavLinkProps('/notifications');
-  return (
-    <header className="vt-header sticky top-0 z-40 hidden h-14 items-center gap-4 border-b border-line bg-surface-1 px-gutter lg:flex">
-      <SearchBox className="w-full max-w-md" />
-      <div className="ml-auto flex items-center gap-1">
-        <IconButton to="/notifications" label="Notifications" badge={notifications} className="text-text-1" linkProps={notificationsNav}>
-          <Bell size={24} />
-        </IconButton>
-        <AccountMenu />
-      </div>
-    </header>
-  );
-}
+});
 
 /** Whether a screen shows a back chevron: an explicit `back`, or any page that is not a tab root, hub page or Home. */
 const wantsBack = (meta: RouteMeta, back: boolean | string | undefined) =>
@@ -782,28 +680,57 @@ function useGoBack(meta: RouteMeta, back: boolean | string | undefined) {
   };
 }
 
-function MobileTopBar({
+/**
+ * The shell's header: Instagram's slim title bar on every page, one element
+ * for both breakpoints so the document has exactly one level-one heading.
+ *
+ *  - 48 px + the status bar on phones, 56 px from lg; a hairline below; the
+ *    height never changes, so a title that arrives from the page is a text
+ *    swap, not a reflow.
+ *  - The title is `title` (route → page → "Vybe", resolved by the shell) or
+ *    the page's `titleNode`. Centred on phones between two equal columns, so
+ *    a back chevron on one side and actions on the other never push it off
+ *    centre; leading on desktop.
+ *  - Phone Home: the wordmark is the visual title (the h1 is read, not seen)
+ *    with search, messages, notifications and the Log disc trailing. Every
+ *    other phone page: back chevron when the route is not a root, the page's
+ *    actions, the Log disc on roots and hub pages.
+ *  - Desktop: the page's actions, then the search field and the bell. The
+ *    account lives at the foot of the sidebar, once.
+ *
+ * Only this component subscribes to the element-valued chrome fields, so a
+ * page re-render re-renders the header and nothing else in the shell.
+ */
+function AppHeader({
   meta,
   title,
-  titleNode,
-  back,
-  actions,
+  chromePath,
   chats,
   notifications,
+  wide,
 }: {
   meta: RouteMeta;
   title: string;
-  titleNode?: ReactNode;
-  back: boolean | string | undefined;
-  actions: ReactNode;
+  /** The path whose published chrome counts; null while the shell shows a destination that has not rendered yet. */
+  chromePath: string | null;
   chats: string | number | null;
   notifications: string | number | null;
+  /** lg and up (the JS twin of the `lg:` classes), used to pick the action set. */
+  wide: boolean;
 }) {
-  const { logout } = useAuth();
+  const titleNode = usePageChromeField(chromePath, (c) => c.titleNode);
+  const subtitle = usePageChromeField(chromePath, (c) => c.subtitle);
+  const back = usePageChromeField(chromePath, (c) => c.back);
+  const desktopActions = usePageChromeField(chromePath, (c) => c.actions);
+  const mobileActions = usePageChromeField(chromePath, (c) => c.mobileActions);
+  // `mobileActions={null}` means "nothing in the phone bar"; only undefined falls back to the desktop set.
+  const actions = wide ? desktopActions : mobileActions === undefined ? desktopActions : mobileActions;
+  const logout = useAuth((s) => s.logout);
   const isHome = meta.pattern === '/';
   const showBack = wantsBack(meta, back);
-  // The Home top bar's icons are primary entry points too: same preload-on-intent
-  // and pending-destination feedback as the tabs.
+  // Every header link records intent: the chunk warms on pointer-down and the
+  // pending highlight lands before the location commits, like the tabs.
+  const homeNav = useNavLinkProps('/');
   const searchNav = useNavLinkProps('/search');
   const messagesNav = useNavLinkProps('/messages');
   const notificationsNav = useNavLinkProps('/notifications');
@@ -822,64 +749,76 @@ function MobileTopBar({
   ];
 
   return (
-    <header className="vt-header safe-top sticky top-0 z-40 border-b border-line bg-surface-1 lg:hidden">
-      <div className="flex h-12 items-center gap-1 px-2 text-text-1">
-        {isHome ? (
-          <>
-            {/* The wordmark is the visual title; the page still needs a level-one heading. */}
-            <h1 className="sr-only">Home</h1>
-            <Link to="/" viewTransition className="inline-flex h-11 items-center rounded-sm px-2" aria-label="Vybe home">
+    <header className="vt-header safe-top sticky top-0 z-40 border-b border-line bg-surface-1">
+      <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center px-2 text-text-1 lg:flex lg:h-14 lg:px-gutter">
+        <div className="flex min-w-0 items-center justify-start">
+          {showBack ? (
+            <IconButton label="Back" onClick={goBack} className="text-text-1">
+              <ArrowLeft size={24} />
+            </IconButton>
+          ) : null}
+          {isHome ? (
+            <Link to="/" viewTransition aria-label="Vybe home" {...homeNav} className="pressable inline-flex h-11 items-center rounded-sm px-2 lg:hidden">
               <Brand size="sm" />
             </Link>
-          </>
-        ) : (
-          <>
-            {showBack ? (
-              <IconButton label="Back" onClick={goBack} className="text-text-1">
-                <ArrowLeft size={24} />
-              </IconButton>
-            ) : null}
-            <h1 className={cx('type-heading flex min-w-0 flex-1 items-center text-text-1', showBack ? 'text-md' : 'pl-2 text-xl', !titleNode && 'truncate')}>{titleNode ?? title}</h1>
-          </>
-        )}
-        <div className="ml-auto flex shrink-0 items-center">
-          {actions}
-          {isHome ? (
-            <>
-              <IconButton to="/search" label="Search" className="text-text-1" linkProps={searchNav}>
-                <SearchIcon size={24} />
-              </IconButton>
-              <IconButton to="/messages" label="Messages" badge={chats} className="text-text-1" linkProps={messagesNav}>
-                <Inbox size={24} />
-              </IconButton>
-              <IconButton to="/notifications" label="Notifications" badge={notifications} className="text-text-1" linkProps={notificationsNav}>
-                <Bell size={24} />
-              </IconButton>
-            </>
           ) : null}
-          {meta.pattern === '/profile' ? <Menu label="More" items={profileMenu} /> : null}
-          {isHome || meta.root || meta.hub ? <LogButton compact /> : null}
+        </div>
+        {/* On phone Home the wordmark is the visual title; the page still needs its level-one heading, read but not seen. */}
+        <div className={cx('min-w-0 px-2 text-center lg:flex-1 lg:text-left', isHome && 'max-lg:sr-only')}>
+          <h1 className={cx('truncate text-text-1', subtitle ? 't-section' : 't-title', titleNode ? 'flex items-center justify-center lg:justify-start' : undefined)}>
+            {titleNode ?? title}
+          </h1>
+          {subtitle ? <p className="t-meta truncate">{subtitle}</p> : null}
+        </div>
+        <div className="flex min-w-0 items-center justify-end gap-1">
+          {actions}
+          <div className="flex items-center lg:hidden">
+            {isHome ? (
+              <>
+                <IconButton to="/search" label="Search" className="text-text-1" linkProps={searchNav}>
+                  <SearchIcon size={24} />
+                </IconButton>
+                <IconButton to="/messages" label="Messages" badge={chats} className="text-text-1" linkProps={messagesNav}>
+                  <Inbox size={24} />
+                </IconButton>
+                <IconButton to="/notifications" label="Notifications" badge={notifications} className="text-text-1" linkProps={notificationsNav}>
+                  <Bell size={24} />
+                </IconButton>
+              </>
+            ) : null}
+            {meta.pattern === '/profile' ? <Menu label="More" items={profileMenu} /> : null}
+            {isHome || meta.root || meta.hub ? <LogButton compact /> : null}
+          </div>
+          <div className="hidden items-center gap-2 lg:flex">
+            <SearchBox className="w-56 xl:w-72" />
+            <IconButton to="/notifications" label="Notifications" badge={notifications} className="text-text-1" linkProps={notificationsNav}>
+              <Bell size={24} />
+            </IconButton>
+          </div>
         </div>
       </div>
     </header>
   );
 }
 
-function SectionTabs({
+/**
+ * The hub's section tabs: the only underline tabs in the app, stuck directly
+ * under the header at its exact height (48 px plus the status bar on phones,
+ * 56 px from lg — `html { scroll-padding-top }` uses the same numbers, so
+ * anchors land clear of both). Memoised: its props are all primitives.
+ */
+const SectionTabs = memo(function SectionTabs({
   hub,
   pathname,
   chats,
   notifications,
   liveEnabled,
-  underBand = false,
 }: {
   hub: HubKey;
   pathname: string;
   chats: string | number | null;
   notifications: string | number | null;
   liveEnabled: boolean;
-  /** The band's 56 px bar is above this row instead of the top bar. */
-  underBand?: boolean;
 }) {
   const start = usePendingNavigation((s) => s.start);
   const tabs = HUBS[hub]
@@ -899,7 +838,7 @@ function SectionTabs({
       aria-label="Sections"
       className={cx(
         'sticky z-30 border-b border-line bg-surface-1',
-        underBand ? 'top-[var(--band-bar-h)]' : 'top-[calc(3rem+env(safe-area-inset-top))] lg:top-14',
+        'top-[calc(48px+env(safe-area-inset-top))] lg:top-14',
       )}
     >
       <div className="mx-auto max-w-content">
@@ -915,53 +854,56 @@ function SectionTabs({
       </div>
     </nav>
   );
-}
+});
 
-function BottomTab({ tab, active, badge }: { tab: (typeof TABS)[number]; active: boolean; badge: string | number | null }) {
-  const { key, to, label, Icon } = tab;
+function BottomTab({ tab, active, dot }: { tab: (typeof TABS)[number]; active: boolean; dot: boolean }) {
+  const { to, label, Icon } = tab;
   const navProps = useNavLinkProps(to);
   return (
     <li className="flex flex-1">
       <Link
         to={to}
         viewTransition
-        aria-label={label}
+        aria-label={dot ? `${label}, new activity` : label}
         aria-current={active ? 'page' : undefined}
         {...navProps}
         className={cx(
-          'relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-sm pt-1.5 pb-1 transition-colors dur-1',
-          active ? 'text-text-1' : 'text-text-3 hover:text-text-1',
+          'pressable relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-sm',
+          active ? 'text-text-1' : 'text-text-2',
         )}
       >
         <span className="relative">
           <Icon size={24} filled={active} strokeWidth={active ? 2.2 : 1.8} />
-          {key === 'home' && badge ? <CountBadge value={badge} className="absolute -right-2.5 -top-1.5" /> : null}
+          {/* Instagram's badge on a tab: a red dot, never a number. */}
+          {dot ? <span aria-hidden="true" className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-surface-1" /> : null}
         </span>
-        <span className={cx('text-[0.6875rem] leading-none', active ? 'font-semibold' : 'font-medium')}>{label}</span>
+        {/* 11 px labels stay: the Vybe icon set is not self-evident (Meals, Gyms and Workouts read alike without them). */}
+        <span className={cx('text-2xs leading-none', active ? 'font-semibold' : 'font-medium')}>{label}</span>
       </Link>
     </li>
   );
 }
 
-function BottomNav({ meta, homeBadge }: { meta: RouteMeta; homeBadge: string | number | null }) {
+/** Phone tabs: 48 px plus the home indicator, opaque, a hairline above. Memoised: a route row and a boolean. */
+const BottomNav = memo(function BottomNav({ meta, unread }: { meta: RouteMeta; unread: boolean }) {
   return (
-    <nav aria-label="Primary" className="vt-nav safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface-1/95 backdrop-blur-xl lg:hidden">
-      <ul className="mx-auto flex h-14 max-w-lg items-stretch justify-around px-1">
+    <nav aria-label="Primary" className="vt-nav safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface-1 lg:hidden">
+      <ul className="mx-auto flex h-12 max-w-lg items-stretch justify-around">
         {TABS.map((tab) => (
-          <BottomTab key={tab.key} tab={tab} active={meta.tab === tab.key} badge={homeBadge} />
+          <BottomTab key={tab.key} tab={tab} active={meta.tab === tab.key} dot={tab.key === 'home' && unread} />
         ))}
       </ul>
     </nav>
   );
-}
+});
 
 /* ------------------------------------------------------------------ right rail */
 
 function RailCard({ title, to, linkLabel, children }: { title: string; to?: string; linkLabel?: string; children: ReactNode }) {
   return (
-    <section className="card p-4">
+    <Card>
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="type-heading text-md text-text-1">{title}</h2>
+        <h2 className="t-section text-text-1">{title}</h2>
         {to ? (
           <Link to={to} viewTransition className="text-xs font-semibold text-brand-text hover:underline">
             {linkLabel ?? 'See all'}
@@ -969,7 +911,7 @@ function RailCard({ title, to, linkLabel, children }: { title: string; to?: stri
         ) : null}
       </div>
       {children}
-    </section>
+    </Card>
   );
 }
 
@@ -1056,7 +998,7 @@ export function DefaultRail() {
           <ul className="space-y-1">
             {coaches.data.slice(0, 4).map((u) => (
               <li key={u._id}>
-                <Link to={`/u/${u._id}`} viewTransition className="-mx-2 flex min-h-12 items-center gap-3 rounded-sm px-2 py-1.5 transition-colors dur-1 hover:bg-surface-2">
+                <Link to={`/u/${u._id}`} viewTransition className="pressable -mx-2 flex min-h-12 items-center gap-3 rounded-sm px-2 py-1.5">
                   <Avatar src={u.avatar} name={u.fullName || u.username} size="md" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-text-1">{u.fullName || u.username}</span>
@@ -1080,7 +1022,7 @@ export function DefaultRail() {
                 viewTransition
                 onPointerDown={() => preload(to)}
                 onMouseEnter={() => preload(to)}
-                className="flex min-h-11 items-center gap-2 rounded-sm px-2 text-sm font-medium text-text-2 transition-colors dur-1 hover:bg-surface-2 hover:text-text-1"
+                className="pressable flex min-h-11 items-center gap-2 rounded-sm px-2 text-sm font-medium text-text-2 hover:text-text-1"
               >
                 <Icon size={18} className="text-text-3" />
                 {label}
@@ -1101,147 +1043,31 @@ export function DefaultRail() {
   );
 }
 
-/* ================================================================== the band */
+/** One element for the route default, so the rail never re-renders because the shell did. */
+const DEFAULT_RAIL = <DefaultRail />;
 
 /**
- * The chrome row that rides on the band: brand (fades out as the collapsed
- * title takes its place), the desktop search box, inbox, notifications and Log.
- * Deeper phone pages (a gym page) get the back chevron here instead of the
- * top bar, and drop the phone search icon to fit 320 px. The cluster's width
- * is measured into `--band-actions-w` so the collapsed title never runs
- * under it.
+ * The rail's content: the page's own when it published one, else the route's
+ * default. Its own component because `rail` is an element (fresh on every
+ * page render): only this subscribes to it, so the rest of the shell is not
+ * re-rendered by a page that redraws.
  */
-function BandChrome({ meta, back, chats, notifications, mint }: { meta: RouteMeta; back: boolean | string | undefined; chats: string | number | null; notifications: string | number | null; mint: boolean }) {
-  const showBack = wantsBack(meta, back);
-  const goBack = useGoBack(meta, back);
-  const searchNav = useNavLinkProps('/search');
-  const messagesNav = useNavLinkProps('/messages');
-  const notificationsNav = useNavLinkProps('/notifications');
-  const actionsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = actionsRef.current;
-    if (!el) return;
-    const band = el.closest<HTMLElement>('.gym-band');
-    if (!band) return;
-    const measure = () => band.style.setProperty('--band-actions-w', `${Math.ceil(el.getBoundingClientRect().width) + 8}px`);
-    measure();
-    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
-    ro?.observe(el);
-    return () => ro?.disconnect();
-  }, []);
-  return (
-    <>
-      {showBack ? (
-        <IconButton label="Back" onClick={goBack} className="-ml-2 text-band-ink lg:hidden">
-          <ArrowLeft size={24} />
-        </IconButton>
-      ) : null}
-      <Link to="/" viewTransition aria-label="Vybe home" className="gym-band-brand inline-flex h-11 shrink-0 items-center rounded-sm px-1">
-        <Brand size="sm" tone="inverse" />
-      </Link>
-      <div ref={actionsRef} className="ml-auto flex items-center gap-1">
-        <SearchBox className="mr-2 hidden w-64 lg:block xl:w-80" />
-        {!showBack ? (
-          <IconButton to="/search" label="Search" className="text-band-ink lg:hidden" linkProps={searchNav}>
-            <SearchIcon size={24} />
-          </IconButton>
-        ) : null}
-        <IconButton to="/messages" label="Messages" badge={chats} className="text-band-ink" linkProps={messagesNav}>
-          <Inbox size={24} />
-        </IconButton>
-        <IconButton to="/notifications" label="Notifications" badge={notifications} className="text-band-ink" linkProps={notificationsNav}>
-          <Bell size={24} />
-        </IconButton>
-        <LogButton band mint={mint} />
-      </div>
-    </>
-  );
-}
-
-/** "Your week at {gym}" → the real name; a placeholder with no gym to fill it drops the line (the band then offers "Find your gym"). */
-export function bandContext(context: string | undefined, gymName: string | undefined): string | undefined {
-  if (context === undefined) return undefined;
-  if (!/\{gym\}/.test(context)) return context;
-  return gymName ? context.replace(/\{gym\}/g, gymName) : undefined;
-}
-
-/**
- * The shell's rendering of a page's `band`. The page declares what it knows
- * (title, context, one figure or the next action, the primary action, gym
- * tabs); the shell brings the viewer's home gym and the chrome row.
- *
- *  - Phones show the page's variant: hub bands carry the hub title and its
- *    one figure or next action; Home and gym pages are `full`.
- *  - From `lg` the band is the gym identity (`full`) on every hub, as in the
- *    desktop render, and the page's own header below it carries the title and
- *    actions — so the collapsed bar reads the gym, never a duplicate title.
- *  - No home gym (production today): the find-your-gym state renders at once,
- *    never a skeleton. A skeleton appears only while a gym the account already
- *    points at is loading.
- *  - One brand-coloured control per screen: the band's Log button is a chip
- *    unless nothing else on the band is primary.
- */
-function ShellBand({
-  band,
-  home,
-  title,
-  meta,
-  back,
-  wide,
-  chats,
-  notifications,
-}: {
-  band: PageBand;
-  home: HomeGymState;
-  title: string;
-  meta: RouteMeta;
-  back: boolean | string | undefined;
-  wide: boolean;
-  chats: string | number | null;
-  notifications: string | number | null;
-}) {
-  const pageGym: GymBandGym | null | undefined = band.gym;
-  const gym = pageGym !== undefined ? pageGym : home.gym;
-  const loading = pageGym === undefined && home.loading;
-  const variant: 'full' | 'hub' = band.variant === 'full' || wide ? 'full' : 'hub';
-  const context = bandContext(band.context, gym?.name);
-  const hub = variant === 'hub';
-  // Desktop, no gym: the page header below owns the page's primary action, so
-  // the band's find-your-gym call is tonal there; on phones the band is the
-  // page's header and its one CTA is the page's action, else find-your-gym.
-  // On the Gyms page itself the search field below is the way to find a gym,
-  // so a button that reloads the same page is dropped.
-  const onGymsPage = meta.pattern === NO_GYM_COPY.href;
-  const noGymAction = !hub && !gym && !loading ? (wide ? (onGymsPage ? null : <ButtonLink to={NO_GYM_COPY.href} variant="secondary">{NO_GYM_COPY.action}</ButtonLink>) : band.action) : undefined;
-  const bandHasPrimary = hub ? !!band.action : !gym && !loading && !wide;
-  const mintLog = !bandHasPrimary && !wide && !!gym;
-  return (
-    <GymBand
-      variant={variant}
-      gym={gym}
-      loading={loading}
-      title={band.bandTitle ?? title}
-      context={hub ? context : undefined}
-      figure={hub ? band.figure : undefined}
-      figureLabel={band.figureLabel}
-      figureUnit={band.figureUnit}
-      action={hub ? band.action : noGymAction}
-      secondaryAction={hub ? band.secondaryAction : undefined}
-      tabs={band.tabs}
-      titleAs={hub ? 'h1' : 'p'}
-      chrome={<BandChrome meta={meta} back={back} chats={chats} notifications={notifications} mint={mintLog} />}
-    >
-      {hub ? band.children : null}
-    </GymBand>
-  );
+function RailSlot({ chromePath, routeDefault }: { chromePath: string | null; routeDefault: boolean }) {
+  const rail = usePageChromeField(chromePath, (c) => c.rail);
+  if (rail) return <>{rail}</>;
+  if (rail === null) return null;
+  return routeDefault ? DEFAULT_RAIL : null;
 }
 
 /**
  * Route-change announcer for screen readers, and focus to the page region so
- * the next Tab lands in the new content rather than back in the nav. Skipped
- * for a sheet opening or closing over its parent (the dialog manages focus).
+ * the next Tab lands in the new content rather than back in the nav. Focus
+ * moves only on a forward navigation: coming back (POP) restores the scroll
+ * position, and moving focus then would pull the reading position away from
+ * it. Skipped for a sheet opening or closing over its parent (the dialog
+ * manages focus).
  */
-function RouteAnnouncer({ pathname, title, sheet }: { pathname: string; title: string; sheet: boolean }) {
+function RouteAnnouncer({ pathname, title, sheet, navigationType }: { pathname: string; title: string; sheet: boolean; navigationType: NavigationType }) {
   const [message, setMessage] = useState('');
   // Keyed on the path, not a first-run flag, so StrictMode's double effect on mount does not count as a navigation.
   const lastPath = useRef(pathname);
@@ -1254,12 +1080,14 @@ function RouteAnnouncer({ pathname, title, sheet }: { pathname: string; title: s
     if (lastPath.current === pathname) return;
     lastPath.current = pathname;
     if (skip) return;
-    // The page sets its title in an effect of its own; read it a beat later.
+    // The page publishes its own title in a layout effect; read it a beat later so the live name is announced.
     const t = window.setTimeout(() => setMessage(titleRef.current), 80);
-    const main = document.getElementById('main');
-    if (main && !main.contains(document.activeElement)) main.focus({ preventScroll: true });
+    if (navigationType !== 'POP') {
+      const main = document.getElementById('main');
+      if (main && !main.contains(document.activeElement)) main.focus({ preventScroll: true });
+    }
     return () => window.clearTimeout(t);
-  }, [pathname, sheet]);
+  }, [pathname, sheet, navigationType]);
   return (
     <div role="status" aria-live="polite" className="sr-only">
       {message}
@@ -1275,12 +1103,12 @@ const TAB_ROOT_PATHS = TABS.map((t) => t.to);
 export default function Layout({ children }: { children?: ReactNode }) {
   const location = useLocation();
   const { pathname } = location;
+  const navigationType = useNavigationType();
   const meta = useMemo(() => routeMeta(pathname), [pathname]);
-  const sheet = !!backgroundLocationOf(location);
   const wide = useMediaQuery(SHEET_MEDIA);
-  const storedChrome = usePageChromeStore((s) => s.chrome);
-  const chrome = storedChrome && storedChrome.path === pathname ? storedChrome : null;
-  const { user } = useAuth();
+  // A sheet sits over its parent only from lg; on phones the same route is an ordinary page.
+  const sheet = wide && !!backgroundLocationOf(location);
+  const user = useAuth((s) => s.user);
   const sessionStale = useAuth((s) => s.sessionStale);
   const qc = useQueryClient();
 
@@ -1309,8 +1137,17 @@ export default function Layout({ children }: { children?: ReactNode }) {
   // 300 ms throttle and every quick chunk would flash a skeleton.
   const waiting = pending && slow;
   const shellMeta = waiting ? navMeta : meta;
-  const shellChrome = waiting ? null : chrome;
   const shellPath = waiting && pendingPath ? pendingPath : pathname;
+  // Whose published chrome counts: the current page's, and nobody's while the
+  // shell already shows a destination that has not rendered (its title comes
+  // from the route table). The shell reads only primitives from the store;
+  // the header and the rail slot read the element-valued fields themselves.
+  const chromePath = waiting ? null : pathname;
+  const pageTitle = usePageChromeField(chromePath, (c) => c.title);
+  const hideSectionTabs = usePageChromeField(chromePath, (c) => c.hideSectionTabs) ?? false;
+  const hideBottomNav = usePageChromeField(chromePath, (c) => c.hideBottomNav) ?? false;
+  const wideContent = usePageChromeField(chromePath, (c) => c.wide) ?? false;
+  const railState = usePageChromeField(chromePath, (c) => (c.rail === undefined ? undefined : c.rail === null ? 'none' : 'page'));
 
   useEffect(() => preloadWhenIdle(TAB_ROOT_PATHS), []);
 
@@ -1334,61 +1171,48 @@ export default function Layout({ children }: { children?: ReactNode }) {
   const homeTotal = (unreadChats.data ?? 0) + (unreadNotifs.data?.count ?? 0);
   const homeBadge = badgeText(homeTotal, unreadNotifs.data?.more);
 
-  const title = shellChrome?.title || shellMeta.title;
+  // Route → page-published → "Vybe" (FALLBACK_META), on the same frame as the route.
+  const title = pageTitle || shellMeta.title;
   useEffect(() => {
     document.title = shellPath === '/' ? 'Vybe' : `${title} · Vybe`;
   }, [title, shellPath]);
 
-  const hub = shellMeta.hub && !shellMeta.hideTabs && !shellChrome?.hideSectionTabs ? shellMeta.hub : null;
-  const rail: ReactNode = shellChrome && 'rail' in shellChrome && shellChrome.rail !== undefined ? shellChrome.rail : shellMeta.rail ? <DefaultRail /> : null;
-  const feedWidth = !!rail && !shellChrome?.wide;
-
-  // The band: fetched once here for the sidebar card and every page's band.
-  // A page that declares `band` wears it in place of both top bars; the band
-  // is a direct child of the scrolling column so its sticky collapse works.
-  const home = useHomeGym();
-  const band = !waiting && !shellChrome?.hideTopBar ? shellChrome?.band ?? null : null;
-  const fullBandOnPhone = !!band && (band.variant === 'full' || wide);
+  const hub = shellMeta.hub && !shellMeta.hideTabs && !hideSectionTabs ? shellMeta.hub : null;
+  const hasRail = railState === 'page' || (railState === undefined && !!shellMeta.rail);
+  const feedWidth = hasRail && !wideContent;
 
   return (
     <div className="min-h-dvh bg-bg text-text-1 lg:flex">
       <SkipLink />
       <NavProgress />
-      <RouteAnnouncer pathname={pathname} title={title} sheet={sheet} />
-      <Sidebar meta={navMeta} inbox={homeBadge} home={home} showLog={!band} />
+      <RouteAnnouncer pathname={pathname} title={title} sheet={sheet} navigationType={navigationType} />
+      <Sidebar meta={navMeta} inbox={homeBadge} />
 
       <div className="min-w-0 flex-1 overflow-x-clip">
-        {band ? (
-          <ShellBand band={band} home={home} title={title} meta={shellMeta} back={shellChrome?.back} wide={wide} chats={chats} notifications={notifications} />
-        ) : !shellChrome?.hideTopBar ? (
-          <>
-            <MobileTopBar meta={shellMeta} title={title} titleNode={shellChrome?.titleNode} back={shellChrome?.back} actions={shellChrome?.actions} chats={chats} notifications={notifications} />
-            <DesktopTopBar notifications={notifications} />
-          </>
-        ) : null}
-        {/* A full band names the gym, not the page; the page still needs its level-one heading on phones (the desktop header has one). */}
-        {fullBandOnPhone ? <h1 className="sr-only lg:hidden">{title}</h1> : null}
+        <AppHeader meta={shellMeta} title={title} chromePath={chromePath} chats={chats} notifications={notifications} wide={wide} />
         <OfflineBanner />
-        {hub ? <SectionTabs hub={hub} pathname={shellPath} chats={chats} notifications={notifications} liveEnabled={liveEnabled} underBand={!!band} /> : null}
+        {hub ? <SectionTabs hub={hub} pathname={shellPath} chats={chats} notifications={notifications} liveEnabled={liveEnabled} /> : null}
 
         {/* The shell owns width: content is min(90rem, 100% − 2 gutters), centred,
             so 320 px keeps a gutter and 1920 px fills honestly. Feed-width pages
-            centre a 600 px column from tablets up; the rail joins at lg. */}
+            centre a 540 px column from tablets up; the rail joins at lg. */}
         <div className={cx('mx-auto flex w-full gap-8', feedWidth ? 'max-w-[min(62rem,100%_-_2*var(--gutter))] justify-center' : 'max-w-content')}>
-          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none focus-visible:outline-none lg:pt-6', shellChrome?.hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'md:max-w-feed')}>
+          <main id="main" tabIndex={-1} className={cx('min-w-0 flex-1 pt-4 outline-none focus-visible:outline-none lg:pt-6', hideBottomNav ? 'pb-6' : 'pb-nav lg:pb-10', feedWidth && 'md:max-w-feed')}>
             <Suspense fallback={<RouteFallback />}>
               <RouteErrorBoundary>{waiting ? <PageSkeleton /> : (children ?? <Outlet />)}</RouteErrorBoundary>
             </Suspense>
           </main>
-          {rail ? (
+          {hasRail ? (
             <aside aria-label="Highlights" className="hidden w-72 shrink-0 pt-6 lg:block xl:w-80 2xl:w-96">
-              <div className={cx('sticky space-y-4', band ? 'top-[calc(var(--band-bar-h)+1.5rem)]' : 'top-20')}>{rail}</div>
+              <div className="sticky top-20 space-y-4">
+                <RailSlot chromePath={chromePath} routeDefault={!!shellMeta.rail} />
+              </div>
             </aside>
           ) : null}
         </div>
       </div>
 
-      {!shellChrome?.hideBottomNav ? <BottomNav meta={navMeta} homeBadge={homeBadge} /> : null}
+      {!hideBottomNav ? <BottomNav meta={navMeta} unread={homeTotal > 0} /> : null}
       <LogSheet />
     </div>
   );

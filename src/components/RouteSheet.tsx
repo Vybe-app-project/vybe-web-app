@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { Location } from 'react-router-dom';
@@ -19,8 +19,9 @@ import type { ModalSize } from './ui';
  * trapped inside the dialog and restored to the opener by <Modal>.
  *
  * Without a background location (phone, deep link, reload) the same children
- * render as the page body under the shell's back-chevron bar, so the URL is
- * always a complete, shareable screen.
+ * render as the page body under the shell's header — the title in the bar, a
+ * back chevron leading — so the URL is always a complete, shareable screen.
+ * The body slides up as it arrives, the way a sheet would.
  *
  * Page modules wrap their body in this and do NOT call <PageHeader> themselves;
  * the sheet owns the title in both presentations.
@@ -55,7 +56,7 @@ export type RouteSheetProps = {
   /** Where the page presentation's back chevron goes when there is no history (defaults to the route's parent). */
   backTo?: string;
   size?: ModalSize;
-  /** Header actions in the page presentation (desktop header / phone top bar). */
+  /** Header actions in the page presentation (the shell header's trailing slot). */
   actions?: ReactNode;
   /** Sticky footer in the sheet presentation. */
   footer?: ReactNode;
@@ -79,12 +80,39 @@ function SheetPresentation({ title, description, size = 'lg', footer, className,
   );
 }
 
+/** How long the page body's slide-up runs (the route tier: 200–260 ms). */
+const ENTER_MS = 240;
+
+/**
+ * The page presentation's body slides up from the bottom edge on arrival
+ * (`.anim-sheet-in` from its `@starting-style`), on `transform` only, then the
+ * class comes off: a resting `translateY(0)` would still be a transform and
+ * would trap any fixed-position descendant (a lightbox, a picker) inside the
+ * body. Reduced motion turns the transition off in CSS; the timer removes the
+ * class regardless, so nothing depends on `transitionend` firing.
+ */
+function SlideUp({ children }: { children: ReactNode }) {
+  const [entering, setEntering] = useState(true);
+  useEffect(() => {
+    const t = window.setTimeout(() => setEntering(false), ENTER_MS + 60);
+    return () => window.clearTimeout(t);
+  }, []);
+  return (
+    <div className={entering ? 'anim-sheet-in' : undefined} style={entering ? { transitionDuration: `${ENTER_MS}ms` } : undefined}>
+      {children}
+    </div>
+  );
+}
+
 function PagePresentation({ title, description, backTo, actions, footer, children }: RouteSheetProps) {
   return (
     <>
-      <PageHeader title={title} subtitle={description} back={backTo ?? true} actions={actions} hideSectionTabs />
-      {children}
-      {footer ? <div className="mt-6 flex flex-wrap justify-end gap-2">{footer}</div> : null}
+      <PageHeader title={title} back={backTo ?? true} actions={actions} hideSectionTabs />
+      <SlideUp>
+        {description ? <p className="t-body mb-4 text-text-2">{description}</p> : null}
+        {children}
+        {footer ? <div className="mt-6 flex flex-wrap justify-end gap-2">{footer}</div> : null}
+      </SlideUp>
     </>
   );
 }
