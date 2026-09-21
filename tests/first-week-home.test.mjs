@@ -401,7 +401,8 @@ test('the copy is the spec copy, verbatim', () => {
   assert.equal(s.today, 'Today');
   assert.deepEqual(s.steps['first-move'], { title: 'Log a workout', body: 'Any length counts.' });
   assert.deepEqual(s.steps['social-spark'], { title: 'Follow someone', body: 'Kudos on a post counts too.' });
-  assert.deepEqual(s.steps['join-gym'], { title: 'Join a gym', body: 'Find your gym’s community.' });
+  // Gym-agnostic on purpose: Home says "Find your gym" once, in the gym header's no-gym row, and nowhere else.
+  assert.deepEqual(s.steps['join-gym'], { title: 'Join a gym', body: 'See who trains where you do.' });
   assert.deepEqual(s.steps['first-meal'], { title: 'Log a meal', body: 'A snack counts.' });
   assert.equal(s.dismiss.label, 'Not now, hide this card');
   assert.equal(s.dismiss.toast, 'Card hidden.');
@@ -434,8 +435,8 @@ test('Feed mounts the card once, right after the stories-and-composer region and
   const feed = read('src/pages/Feed.tsx');
   assert.match(feed, /^import FirstWeekCard from '\.\/FirstWeekCard';$/m);
   // Gym First: the stories row and the composer share one hairline region; the first-week module follows it.
-  assert.match(feed, /<StoryTray variant="home"[^>]*\/>\s*<Composer[\s\S]*?\/>\s*<\/div>\s*<FirstWeekCard \/>/);
-  assert.equal((feed.match(/<FirstWeekCard \/>/g) || []).length, 1);
+  assert.match(feed, /<StoryTray variant="home"[^>]*\/>\s*<Composer[\s\S]*?\/>\s*<\/div>\s*<FirstWeekCard className="my-4" \/>/);
+  assert.equal((feed.match(/<FirstWeekCard[^>]*\/>/g) || []).length, 1);
   assert.match(read('src/App.tsx'), /<WelcomeSheet \/>/, 'the WelcomeSheet stays mounted from App.tsx');
   assert.ok(!feed.includes('WelcomeSheet'), 'Feed does not mount a second WelcomeSheet');
 });
@@ -443,7 +444,11 @@ test('Feed mounts the card once, right after the stories-and-composer region and
 test('the card reads only the getStartedCard kill switch and never a Wave F flag or route', () => {
   const card = read('src/pages/FirstWeekCard.tsx');
   assert.match(card, /features\?\.getStartedCard === false/);
-  assert.match(card, /capabilities\.isPending \|\| capabilities\.data\?\.features\?\.getStartedCard === false/, 'an unanswered switch renders nothing, never a skeleton that then vanishes');
+  // An unanswered switch starts no read, but the card's frame is drawn in its loading state (the day
+  // line is known), so it never pops into Home a beat after the page (Instagram rebuild, Q2).
+  assert.match(card, /const featurePending = capabilities\.isPending;/);
+  assert.match(card, /steps: null, featureOff: featurePending \|\| featureOff \}/, 'no read starts until the switch has answered');
+  assert.match(card, /decideCard\(\{ userId, createdAt, now, dismissedAt, steps, featureOff \}\)/, 'the frame shows while the switch is undecided');
   assert.doesNotMatch(card, /useFeature\(['"]getStartedCard/);
   assert.doesNotMatch(card, /useFeature\(/);
   assert.doesNotMatch(card, /liveVideoEnabled|useLiveEnabled|livestreamRelay|features\.live\b/, 'the card never reads the Live gates');

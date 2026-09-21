@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { communityPath } from '../lib/gyms';
+import { membershipOf } from '../lib/gyms';
+import { useHomeGym, type HomeGymState } from '../lib/homeGym';
 import { FEED_PAGE_SIZE, dedupeById, feedPageParams, nextFeedPageParam, type FeedPageParam } from '../lib/feedLogic';
 import {
   ACCEPTED_IMAGE_TYPES,
@@ -27,24 +28,22 @@ import {
   AvatarStack,
   Button,
   ButtonLink,
-  Chip,
   ConfirmDialog,
   EmptyState,
   ErrorState,
   IconButton,
   PageHeader,
-  Skeleton,
   Spinner,
   Textarea,
   cx,
-  formatStat,
   prefersReducedMotion,
   useIsTouch,
   useOnline,
   useToast,
 } from './ui';
 import { ArrowUp, Image as ImageIcon, Refresh, UserPlus, Video as VideoIcon, X } from './icons';
-import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors, useViewerGym } from './PostCard';
+import { GymHeader } from '../components/GymHeader';
+import PostCard, { PostCardSkeleton, isAuthorHidden, useHiddenAuthors } from './PostCard';
 import { StoryTray } from './StoryTray';
 import FirstWeekCard from './FirstWeekCard';
 
@@ -197,25 +196,23 @@ function Composer({
     </>
   );
 
+  /* Closed: one quiet row like a comment field — avatar, the prompt in the
+     placeholder colour, the media icons — not a bordered box on the white page. */
   if (!open) {
     return (
-      <div className="flex items-center gap-3 pt-3">
+      <div className="flex min-h-12 items-center gap-3 pt-1">
         {fileInputs}
-        <Avatar src={me?.avatar} name={displayName(me)} size="md" />
-        <button
-          type="button"
-          onClick={onOpen}
-          className="input-base flex min-w-0 flex-1 items-center text-left text-text-3 hover:border-text-3"
-        >
+        <Avatar src={me?.avatar} name={displayName(me)} size={32} />
+        <button type="button" onClick={onOpen} className="pressable t-body flex min-h-11 min-w-0 flex-1 items-center rounded-sm text-left text-text-2">
           <span className="truncate">Share a session, a win or a meal…</span>
         </button>
-        <IconButton label="Add a photo" variant="secondary" onClick={() => photoRef.current?.click()}>
-          <ImageIcon size={22} />
+        <IconButton label="Add a photo" size={40} onClick={() => photoRef.current?.click()}>
+          <ImageIcon size={24} />
         </IconButton>
         {/* IconButton sets its own display, so `hidden` on it cannot win; the wrapper hides it on phones. */}
         <span className="hidden sm:contents">
-          <IconButton label="Add a video" variant="secondary" onClick={() => videoRef.current?.click()}>
-            <VideoIcon size={22} />
+          <IconButton label="Add a video" size={40} onClick={() => videoRef.current?.click()}>
+            <VideoIcon size={24} />
           </IconButton>
         </span>
       </div>
@@ -335,48 +332,6 @@ function Composer({
 }
 
 /* ------------------------------------------------------------------ */
-/* Trending hashtags strip (phones/tablets; the desktop rail has them) */
-/* ------------------------------------------------------------------ */
-
-function TrendingHashtags() {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['trending-hashtags'],
-    queryFn: async () => {
-      const { data } = await api.get('/posts/trending-hashtags');
-      return (data.hashtags || []) as { _id: string; count: number }[];
-    },
-    staleTime: 5 * 60_000,
-  });
-
-  if (isError) return null;
-
-  if (isLoading) {
-    return (
-      <div className="flex gap-2 overflow-hidden lg:hidden" aria-hidden="true">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-9 w-24 shrink-0 rounded-xs" />
-        ))}
-      </div>
-    );
-  }
-
-  if (!data?.length) return null;
-
-  return (
-    <nav aria-label="Trending hashtags" className="-mx-gutter lg:hidden">
-      <div className="snap-row no-scrollbar mask-fade-r flex gap-2 overflow-x-auto px-gutter scroll-pl-gutter">
-        {data.slice(0, 12).map((tag) => (
-          <Chip key={tag._id} to={`/search?q=${encodeURIComponent(`#${tag._id}`)}`} className="snap-item shrink-0">
-            #{tag._id}
-            <span className="tabular ml-1 font-medium text-text-3">{formatStat(tag.count, { compact: true })}</span>
-          </Chip>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /* Pull to refresh (touch)                                             */
 /* ------------------------------------------------------------------ */
 
@@ -457,30 +412,29 @@ function usePullToRefresh(onRefresh: () => Promise<unknown>, enabled: boolean) {
   return { pull, dragging, refreshing };
 }
 
+/**
+ * The refresh disc: a 36 px circle that rides down on `translateY` with the
+ * pull and fades in with it. The wrapper is 0 px tall, so the page under it
+ * never changes height — the one thing that used to animate on this screen.
+ */
 function PullIndicator({ pull, dragging, refreshing }: { pull: number; dragging: boolean; refreshing: boolean }) {
-  if (pull <= 0 && !refreshing) return null;
+  const active = pull > 0 || refreshing;
   const progress = Math.min(1, pull / PULL_THRESHOLD);
   const ready = progress >= 1 || refreshing;
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className={cx('flex items-end justify-center overflow-hidden', !dragging && 'transition-[height] dur-2 ease-out')}
-      style={{ height: pull }}
-    >
+    <div role="status" aria-live="polite" className="pointer-events-none relative z-30 h-0">
       <div
+        aria-hidden="true"
         className={cx(
-          'mb-2 grid h-9 w-9 place-items-center rounded-full bg-surface-1 shadow-2 transition-colors dur-1',
+          'absolute left-1/2 top-0 grid h-9 w-9 place-items-center rounded-full bg-surface-1 shadow-2',
+          dragging ? 'transition-none' : 'transition-[transform,opacity,color] dur-2 ease-out',
           ready ? 'text-brand' : 'text-text-2',
         )}
+        style={{ transform: `translate(-50%, ${active ? pull - 44 : -56}px)`, opacity: active ? 0.35 + progress * 0.65 : 0 }}
       >
-        {refreshing ? (
-          <Spinner size={18} />
-        ) : (
-          <Refresh size={18} style={{ transform: `rotate(${progress * 270}deg)`, opacity: 0.35 + progress * 0.65 }} />
-        )}
+        {refreshing ? <Spinner size={18} /> : <Refresh size={18} style={{ transform: `rotate(${progress * 270}deg)` }} />}
       </div>
-      <span className="sr-only">{refreshing ? 'Refreshing your feed' : ready ? 'Release to refresh' : 'Pull to refresh'}</span>
+      <span className="sr-only">{active ? (refreshing ? 'Refreshing your feed' : ready ? 'Release to refresh' : 'Pull to refresh') : ''}</span>
     </div>
   );
 }
@@ -516,38 +470,8 @@ function NewPostsPill({ fresh, onShow, busy }: { fresh: Post[]; onShow: () => vo
 /* Feed                                                                */
 /* ------------------------------------------------------------------ */
 
-/* ------------------------------------------------------------------ */
-/* Gym-scoped tabs on the band                                         */
-/* ------------------------------------------------------------------ */
-
-const GYM_TABS = [
-  { key: 'feed', label: 'Feed' },
-  { key: 'today', label: 'Today' },
-  { key: 'members', label: 'Members' },
-  { key: 'about', label: 'About' },
-] as const;
-
-/** Feed · Today · Members · About, each opening the gym page on that tab. Home is the gym's feed, so Feed reads as current. */
-function GymTabs({ communityId, gymName }: { communityId: string; gymName: string }) {
-  const base = communityPath(communityId);
-  return (
-    <nav aria-label={gymName ? `${gymName} sections` : 'Your gym'} className="contents">
-      {GYM_TABS.map((t) => (
-        <Link key={t.key} to={`${base}&tab=${t.key}`} viewTransition className="gym-band-tab" data-active={t.key === 'feed' ? 'true' : undefined}>
-          {t.label}
-        </Link>
-      ))}
-    </nav>
-  );
-}
-
-function todayLabel(): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
-  } catch {
-    return '';
-  }
-}
+/** Whether the viewer belongs to the home gym: the shell's answer when it carries one, else the community's own membership flags. */
+const homeGymMember = (home: HomeGymState): boolean => (home as HomeGymState & { member?: boolean }).member ?? membershipOf(home.community).isMember;
 
 export default function Feed() {
   const qc = useQueryClient();
@@ -558,10 +482,10 @@ export default function Feed() {
   const [showingNew, setShowingNew] = useState(false);
   const hidden = useHiddenAuthors((s) => s.ids);
   const unhide = useHiddenAuthors((s) => s.unhide);
-  // The viewer's gym: the shell paints the band from its own read; this
-  // decides the stories label, the band's gym tabs and the empty-state copy.
-  const gym = useViewerGym();
-  const gymName = gym?.name ?? '';
+  // The viewer's gym: the shell's one read, drawn here as the compact header
+  // at the top of the feed; it also names the stories row and the empty state.
+  const home = useHomeGym();
+  const gymName = home.gym?.name ?? '';
 
   // Deep link contract: /?compose=1 (Log sheet, manifest shortcut, /create) opens the composer once.
   const compose = searchParams.get('compose') === '1';
@@ -637,105 +561,98 @@ export default function Feed() {
     window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
 
-  const today = todayLabel();
-
   return (
     <div>
-      <PageHeader
-        title="Home"
-        subtitle={today}
-        band={{
-          variant: 'full',
-          context: today,
-          // Tabs only for a real community: a bare place has no gym page to open.
-          tabs: gym?.kind === 'community' ? <GymTabs communityId={gym.id} gymName={gymName} /> : undefined,
-        }}
-      />
+      <PageHeader title="Home" />
+
+      {/* The gym as Instagram draws an account: one 72 px row flush under the
+          top bar and bled to the viewport (the shell insets <main> by a gutter
+          and pads its top 16/24 px). No gym: the 48 px "Find your gym" row —
+          the one place Home says it. Both states are the header's own. */}
+      <GymHeader variant="compact" gym={home.gym} member={homeGymMember(home)} loading={home.loading} className="-mx-gutter -mt-4 lg:-mt-6" />
       <PullIndicator {...pullState} />
+      <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
 
-      <div className="space-y-section">
-        <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
-        {/* One region under a hairline: the stories row under its label, the composer docked beneath. Nothing boxed on the white page. */}
-        <div className="border-b border-line pb-4">
-          <StoryTray variant="home" label={gymName ? `At ${gymName}` : undefined} />
-          <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
-        </div>
-        <FirstWeekCard />
-        <TrendingHashtags />
-
-        {isLoading ? (
-          <div className="space-y-section" aria-busy="true" aria-label="Loading your feed">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <PostCardSkeleton key={i} media={i !== 1} />
-            ))}
-          </div>
-        ) : null}
-
-        {isError && !isLoading ? (
-          <ErrorState error={error} title="We couldn’t load your feed" onRetry={() => refetch()} />
-        ) : null}
-
-        {!isLoading && !isError && allPosts.length === 0 ? (
-          <EmptyState
-            family="social"
-            title="Your feed is quiet"
-            message={
-              gymName
-                ? `Follow the people who train at ${gymName} and their sessions show up here.`
-                : 'Follow a few athletes and their sessions will show up here.'
-            }
-            action={{ label: 'Find people to follow', to: '/discover', icon: <UserPlus size={18} /> }}
-            secondaryAction={{ label: 'Share your first post', onClick: openComposer }}
-          />
-        ) : null}
-
-        {!isLoading && !isError && allPosts.length > 0 && posts.length === 0 ? (
-          <EmptyState
-            variant="no-results"
-            title="Everything here is from people you muted"
-            message="Unmute them to see their posts again, or find more people to follow."
-            action={{ label: 'Unmute everyone', onClick: () => Object.keys(hidden).forEach(unhide), variant: 'secondary' }}
-            secondaryAction={{ label: 'Find people', to: '/discover' }}
-          />
-        ) : null}
-
-        {posts.length ? (
-          <div className="-mt-1">
-            {posts.map((post) => (
-              <PostCard key={post._id} post={post} invalidate={[['feed']]} surface="item" />
-            ))}
-          </div>
-        ) : null}
-
-        {hasNextPage ? (
-          <div ref={sentinelRef} className="flex justify-center py-4">
-            {isFetchingNextPage ? (
-              <Spinner className="text-text-2" />
-            ) : (
-              <Button variant="ghost" onClick={() => fetchNextPage()}>
-                Load more
-              </Button>
-            )}
-          </div>
-        ) : null}
-
-        {!hasNextPage && posts.length > 0 ? (
-          <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <p className="text-sm font-semibold text-text-1">You’re all caught up.</p>
-            {hiddenCount > 0 ? (
-              <p className="text-xs text-text-3">
-                {hiddenCount} {hiddenCount === 1 ? 'post' : 'posts'} hidden from people you muted.{' '}
-                <button type="button" onClick={() => Object.keys(hidden).forEach(unhide)} className="font-semibold text-brand-text hover:underline">
-                  Unmute everyone
-                </button>
-              </p>
-            ) : null}
-            <ButtonLink to="/discover" variant="ghost">
-              Explore more athletes
-            </ButtonLink>
-          </div>
-        ) : null}
+      {/* One region under a hairline: the stories row, the composer docked beneath. Nothing boxed on the white page. */}
+      <div className="feed-rule pb-3">
+        <StoryTray variant="home" label={gymName ? `At ${gymName}` : undefined} />
+        <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
       </div>
+      <FirstWeekCard className="my-4" />
+
+      {isLoading ? (
+        <div aria-busy="true" aria-label="Loading your feed">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <PostCardSkeleton key={i} media={i !== 1} />
+          ))}
+        </div>
+      ) : null}
+
+      {isError && !isLoading ? (
+        <ErrorState error={error} title="We couldn’t load your feed" onRetry={() => refetch()} />
+      ) : null}
+
+      {!isLoading && !isError && allPosts.length === 0 ? (
+        <EmptyState
+          family="social"
+          title="Your feed is quiet"
+          message={
+            gymName
+              ? `Follow the people who train at ${gymName} and their sessions show up here.`
+              : 'Follow a few athletes and their sessions will show up here.'
+          }
+          action={{ label: 'Find people to follow', to: '/discover', icon: <UserPlus size={18} /> }}
+          secondaryAction={{ label: 'Share your first post', onClick: openComposer }}
+        />
+      ) : null}
+
+      {!isLoading && !isError && allPosts.length > 0 && posts.length === 0 ? (
+        <EmptyState
+          variant="no-results"
+          title="Everything here is from people you muted"
+          message="Unmute them to see their posts again, or find more people to follow."
+          action={{ label: 'Unmute everyone', onClick: () => Object.keys(hidden).forEach(unhide), variant: 'secondary' }}
+          secondaryAction={{ label: 'Find people', to: '/discover' }}
+        />
+      ) : null}
+
+      {posts.length ? (
+        <div>
+          {/* Items past the first screen skip layout and paint until they near the viewport. */}
+          {posts.map((post, i) => (
+            <PostCard key={post._id} post={post} invalidate={[['feed']]} className={i >= 3 ? 'cv-auto' : undefined} />
+          ))}
+        </div>
+      ) : null}
+
+      {hasNextPage ? (
+        <div ref={sentinelRef} className="flex justify-center py-4">
+          {isFetchingNextPage ? (
+            <Spinner className="text-text-2" />
+          ) : (
+            <Button variant="ghost" onClick={() => fetchNextPage()}>
+              Load more
+            </Button>
+          )}
+        </div>
+      ) : null}
+
+      {!hasNextPage && posts.length > 0 ? (
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <p className="t-body font-semibold text-text-1">You’re all caught up.</p>
+          {hiddenCount > 0 ? (
+            <p className="t-meta">
+              {hiddenCount} {hiddenCount === 1 ? 'post' : 'posts'} hidden from people you muted.{' '}
+              <button type="button" onClick={() => Object.keys(hidden).forEach(unhide)} className="font-semibold text-brand-text hover:underline">
+                Unmute everyone
+              </button>
+            </p>
+          ) : null}
+          <ButtonLink to="/discover" variant="ghost">
+            Explore more athletes
+          </ButtonLink>
+        </div>
+      ) : null}
     </div>
   );
 }

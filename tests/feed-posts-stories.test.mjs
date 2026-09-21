@@ -177,7 +177,6 @@ test('the labels the live suites key on are still present', () => {
     'React to this story',
     'Open story from',
     'New stories',
-    'Trending hashtags',
     'Remove from saved',
   ]) {
     assert.ok(sources.includes(label), `label "${label}" must survive`);
@@ -219,4 +218,48 @@ test('card counts prefer the server totals over the capped preview arrays', asyn
   assert.equal(likeTotal({ likes: ['a', 'b'] }), 2);
   assert.match(read('src/pages/PostCard.tsx'), /import \{ commentTotal, likeTotal, tokenizeContent \} from '\.\.\/lib\/feedLogic';/);
   assert.doesNotMatch(read('src/pages/PostCard.tsx'), /post\.comments\?\.length \?\? post\.commentCount/);
+});
+
+test('Home is Instagram-shaped: the compact gym header, a rail that is never empty, hairline posts (Q2)', () => {
+  const feed = read('src/pages/Feed.tsx');
+  // The gym is one row at the top of <main>, from the shell's one read; no band, no gym tabs, no hashtag strip on the phone feed.
+  assert.match(feed, /<GymHeader variant="compact" gym=\{home\.gym\} member=\{homeGymMember\(home\)\} loading=\{home\.loading\}/);
+  assert.match(feed, /const home = useHomeGym\(\);/);
+  assert.doesNotMatch(feed, /band=\{\{|GymTabs|TrendingHashtags|gym-band-tab|useViewerGym/);
+  // Pull to refresh never animates height: a 0 px wrapper and a disc on translateY.
+  assert.match(feed, /className="pointer-events-none relative z-30 h-0"/);
+  assert.match(feed, /transform: `translate\(-50%, \$\{active \? pull - 44 : -56\}px\)`/);
+  assert.doesNotMatch(feed, /transition-\[height\]|style=\{\{ height: pull \}\}/);
+  // Items below the first screen skip layout until they near the viewport.
+  assert.match(feed, /className=\{i >= 3 \? 'cv-auto' : undefined\}/);
+  assert.match(feed, /<PostCardSkeleton key=\{i\} media=\{i !== 1\} \/>/);
+
+  const card = read('src/pages/PostCard.tsx');
+  // Hairline rows by default; the detail page alone asks for the card.
+  assert.match(card, /surface = 'item',/);
+  assert.match(card, /className=\{cx\('feed-rule relative pb-3', className\)\}/);
+  // header → media → icon row → caption; text only: header → text → icon row.
+  assert.match(card, /const textOnly = !hasMedia && !hasSummary;/);
+  assert.match(card, /\{textOnly \? \(\s*<>\s*\{caption\}\s*\{actions\}\s*<\/>\s*\) : \(\s*<>\s*\{media\}\s*\{summaries\}\s*\{actions\}\s*\{caption\}\s*<\/>\s*\)\}/);
+  assert.match(card, /lead=\{textOnly \? undefined : usernameLead\}/, 'a text post never repeats the name its header just gave');
+  assert.match(card, /<Avatar src=\{author\?\.avatar\} name=\{name\} size=\{36\} seed=\{authorId\} \/>/);
+  assert.match(card, /<span className="t-name truncate text-text-1">\{username\}<\/span>/);
+  // A single photo always reserves its box; media bleeds to the viewport below md.
+  assert.match(card, /count === 1 && !ratio && 'aspect-square'/);
+  assert.match(card, /bleed \? '-mx-gutter rounded-none md:mx-0' : 'rounded-md'/);
+  // The skeleton is the item geometry and takes `surface` for the detail page.
+  assert.match(card, /export function PostCardSkeleton\(\{ media = true, surface = 'item', className \}/);
+  assert.match(card, /<Skeleton className="-mx-gutter aspect-square rounded-none md:mx-0" \/>/);
+  // Captions re-measure when their box changes (content-visibility: auto items have no layout until they near the viewport).
+  assert.match(card, /const observer = new ResizeObserver\(measure\);/);
+  // The viewer's gym comes from the shell's one query; no card fetches it again.
+  assert.match(card, /export function useViewerGym\(\): ViewerGym \| null \{\s*return viewerGymOf\(useHomeGym\(\)\);/);
+  assert.doesNotMatch(card, /queryKey: \['community', communityId\]/);
+
+  const tray = read('src/pages/StoryTray.tsx');
+  // On Home the rail never returns null: skeleton bubbles while loading, the own "+" bubble when there is nothing else.
+  assert.doesNotMatch(tray, /if \(variant === 'home'\) \{\s*if \(tray\.isLoading/);
+  assert.match(tray, /tray\.isLoading\s*\? Array\.from\(\{ length: home \? 5 : 6 \}\)\.map\(\(_, i\) => <BubbleSkeleton key=\{i\} \/>\)/);
+  assert.match(tray, /<Skeleton className="h-17 w-17 rounded-full" \/>/, 'the skeleton bubble is the 68 px disc');
+  assert.doesNotMatch(tray, /type-heading text-lg/, 'no heading over the rail');
 });

@@ -506,7 +506,7 @@ export type StepCopy = {
 const steps: Readonly<Record<StepKey, StepCopy>> = {
   'first-move': { title: 'Log a workout', body: 'Any length counts.' },
   'social-spark': { title: 'Follow someone', body: 'Kudos on a post counts too.' },
-  'join-gym': { title: 'Join a gym', body: 'Find your gym’s community.' },
+  'join-gym': { title: 'Join a gym', body: 'See who trains where you do.' },
   'first-meal': { title: 'Log a meal', body: 'A snack counts.' },
 };
 

@@ -81,7 +81,7 @@ test('day 3, 1 of 4 done, today join-gym: the day line, the badge placement, the
   assert.match(rowFor(html, 'first-meal'), /href="\/meals\?log=1"/);
   assert.match(html, /data-testid="first-week-done-line"[\s\S]*?Log a workout — done/);
   assert.doesNotMatch(html, /first-week-row-first-move/, 'a done step has no row');
-  assert.match(html, /Find your gym’s community\./);
+  assert.match(html, /See who trains where you do\./);
   assert.match(html, /Kudos on a post counts too\./);
   assert.match(html, /A snack counts\./);
   assertClean(html);
