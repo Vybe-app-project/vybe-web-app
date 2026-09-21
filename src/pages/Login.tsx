@@ -85,7 +85,7 @@ export function AuthShell({
 
       <main className="flex flex-1 flex-col lg:min-h-dvh lg:justify-center lg:bg-surface-1">
         <div className="mx-auto w-full max-w-[26rem] px-4 pb-12 pt-8 sm:px-6 lg:px-8 lg:py-16">
-          <h1 className="type-heading text-xl text-text-1 lg:text-2xl">{title}</h1>
+          <h1 className="t-title text-text-1">{title}</h1>
           {subtitle ? <p className="mt-1.5 text-sm text-text-2">{subtitle}</p> : null}
           <div className="mt-6">{children}</div>
           {footer ? <div className="mt-6">{footer}</div> : null}

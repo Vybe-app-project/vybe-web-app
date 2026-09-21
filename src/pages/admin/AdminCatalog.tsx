@@ -12,9 +12,9 @@ import {
   IconButton,
   Input,
   ScrollX,
+  SegmentedControl,
   Select,
   Skeleton,
-  Tabs,
   cx,
   useToast,
   plural,
@@ -356,7 +356,8 @@ export default function AdminCatalog() {
         }
       />
 
-      <Tabs
+      <SegmentedControl
+        className="max-w-xs"
         aria-label="Catalog section"
         tabs={TABS}
         active={tab}

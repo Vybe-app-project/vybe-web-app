@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
@@ -81,17 +81,18 @@ const GLYPH_ICON: Record<NotificationGlyph, IconComponent> = {
   settings: Settings,
 };
 
-/** Badge fill per family, on the existing soft tokens so dark mode follows. */
+/**
+ * Glyph badge per family. One register: the heart is red because a like is
+ * red everywhere in the app; every other glyph sits on the neutral wash, so
+ * the only colour on the page besides the one blue is the unread dot.
+ */
 const FAMILY_CLASS: Record<NotificationFamily, string> = {
   like: 'bg-danger-soft text-danger',
-  conversation: 'bg-info-soft text-info-text',
-  people: 'bg-brand-soft text-brand-text',
-  content: 'bg-accent-soft text-accent-text',
+  conversation: 'bg-surface-3 text-text-2',
+  people: 'bg-surface-3 text-text-2',
+  content: 'bg-surface-3 text-text-2',
   system: 'bg-surface-3 text-text-2',
 };
-
-/** The band's context line: "Saturday, 20 September" in the viewer's locale. */
-const todayLine = () => new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 
 type Bucket = 'Today' | 'Yesterday' | 'This week' | 'Earlier';
 const BUCKET_ORDER: Bucket[] = ['Today', 'Yesterday', 'This week', 'Earlier'];
@@ -158,7 +159,7 @@ function NotificationRow({
         )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cx('block text-sm leading-snug', unread ? 'text-text-1' : 'text-text-2')}>
+        <span className="block text-sm leading-snug text-text-1">
           {!system && n.sender ? <span className="font-semibold text-text-1">{displayName(n.sender)} </span> : null}
           {text}
         </span>
@@ -170,13 +171,10 @@ function NotificationRow({
     </>
   );
 
-  const rowCls = cx(
-    'flex min-h-11 flex-1 items-start gap-3 rounded-sm p-3 text-left transition-colors dur-1',
-    href && 'hover:bg-surface-2',
-  );
+  const rowCls = cx('flex min-h-11 flex-1 items-start gap-3 rounded-sm p-3 text-left', href && 'pressable');
 
-  // One unread signal per row: the dot beside the menu. The text reads in
-  // text-1 while unread and settles to text-2 once seen; nothing else is tinted.
+  // One unread signal per row: the red dot beside the menu (Instagram's badge
+  // colour). Nothing else is tinted, washed or re-weighted for unread.
   return (
     <li className="flex items-start pr-1">
       {href ? (
@@ -194,7 +192,7 @@ function NotificationRow({
         <div className={rowCls}>{body}</div>
       )}
       <span className="flex items-center gap-1 self-center">
-        {unread ? <span role="img" aria-label="Unread" className="h-2 w-2 rounded-full bg-brand" /> : null}
+        {unread ? <span role="img" aria-label="Unread" className="h-2 w-2 rounded-full bg-danger" /> : null}
         <Menu items={items} label="Notification options" size={44} />
       </span>
     </li>
@@ -330,20 +328,12 @@ export default function Notifications() {
   return (
     <>
       {/* The action lives in the page header on every viewport (top bar on phones); the phone
-          row below only repeats the unread count, so there is one "Mark all read" on screen.
-          The Inbox hub band carries the unread count as its one figure; at zero it says so
-          instead of drawing a 0. */}
+          row below only repeats the unread count, so there is one "Mark all read" on screen. */}
       <PageHeader
         title="Notifications"
         subtitle={subtitle}
         actions={unreadCount > 0 ? markAllButton('md') : undefined}
         mobileActions={unreadCount > 0 ? markAllButton('sm') : null}
-        band={{
-          context: todayLine(),
-          figure: unreadCount,
-          figureLabel: 'unread',
-          children: query.isSuccess ? <p className="text-sm text-band-ink-2">You are all caught up.</p> : undefined,
-        }}
       />
       <div className="w-full max-w-form space-y-section">
         {query.isSuccess && notifications.length > 0 && subtitle ? (
@@ -367,7 +357,7 @@ export default function Notifications() {
 
         {groups.map((g) => (
           <section key={g.label} aria-labelledby={`notif-${g.label.replace(/\s/g, '-')}`} className="space-y-2">
-            <h2 id={`notif-${g.label.replace(/\s/g, '-')}`} className="type-heading px-1 text-md text-text-1">
+            <h2 id={`notif-${g.label.replace(/\s/g, '-')}`} className="t-section px-1 text-text-1">
               {g.label}
             </h2>
             <Card padded={false} className="overflow-hidden">

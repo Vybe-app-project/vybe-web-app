@@ -38,6 +38,7 @@ import {
   AvatarStack,
   Button,
   Callout,
+  Card,
   Chip,
   ConfirmDialog,
   CountBadge,
@@ -57,7 +58,6 @@ import {
   cx,
   useIsCompact,
   useIsTouch,
-  useMediaQuery,
   useOnline,
   usePageChrome,
   useToast,
@@ -340,39 +340,23 @@ function emitTyping(roomId: string, isGroup: boolean, active: boolean) {
 /* ================================================================== pane height */
 
 /**
- * The split view fills the viewport under the shell chrome. The chrome above
- * differs per breakpoint (mobile top bar + safe area, hub tabs, desktop bar)
- * so the top edge is measured; the bottom is the shell's main padding.
+ * The split view and the phone thread fill the viewport under the shell
+ * chrome, in CSS alone: the first frame is already the final height, where
+ * the measured version (ResizeObserver on <body> + getBoundingClientRect)
+ * painted once, measured and laid out again. Everything above and below the
+ * pane is fixed chrome:
+ *
+ *  phone thread   48 px header + the status bar; the pane pulls up into <main>'s
+ *                 16 px top padding (-mt-4); 24 px bottom padding with the nav
+ *                 hidden                                     → 72 px + safe-top
+ *  split, md–lg   48 px header + safe-top, the 45 px Inbox section tabs, 16 px
+ *                 top padding, then the bottom nav (--nav-h + safe-bottom + 16)
+ *                                                            → 125 px + insets + nav
+ *  split, lg+     56 px header, 45 px tabs, 24 px top and 40 px bottom padding
+ *                                                            → 165 px
  */
-function usePaneHeight(enabled: boolean, bottom: string) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [top, setTop] = useState<number | null>(null);
-
-  useLayoutEffect(() => {
-    if (!enabled) {
-      setTop(null);
-      return;
-    }
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => {
-      const next = Math.max(0, Math.round(el.getBoundingClientRect().top + window.scrollY));
-      setTop((prev) => (prev === next ? prev : next));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(document.body);
-    window.addEventListener('resize', measure);
-    document.fonts?.ready.then(measure).catch(() => {});
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [enabled]);
-
-  const style = enabled && top !== null ? { height: `calc(100dvh - ${top}px - ${bottom})` } : undefined;
-  return { ref, style };
-}
+const THREAD_PANE_H = 'h-[calc(100dvh-72px-env(safe-area-inset-top))]';
+const SPLIT_PANE_H = 'h-[calc(100dvh-125px-env(safe-area-inset-top)-var(--nav-h)-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-165px)]';
 
 /* ================================================================== long press */
 
@@ -553,7 +537,7 @@ function RoomList({
         />
       </div>
 
-      <nav aria-label="Conversations" className={cx('min-h-0 flex-1', compact ? '' : 'overflow-y-auto p-2')}>
+      <nav aria-label="Conversations" className={cx('min-h-0 flex-1', compact ? '' : 'overflow-y-auto overscroll-contain p-2')}>
         {rooms.isLoading ? (
           <ul className="space-y-1" aria-busy="true" aria-label="Loading conversations">
             {Array.from({ length: 7 }).map((_, i) => (
@@ -2476,7 +2460,6 @@ export default function Messages() {
   const me = useAuth((s) => s.user);
   const meId = me?._id;
   const compact = useIsCompact();
-  const desktop = useMediaQuery('(min-width: 1024px)');
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [live, setLive] = useState<ChatMessage[]>([]);
@@ -2641,9 +2624,6 @@ export default function Messages() {
   const showThread = Boolean(roomId) || isDraft;
   const showThreadOnly = compact && showThread;
   const showListOnly = compact && !showThread;
-  const fixedHeight = !compact || showThreadOnly;
-  const bottomPad = compact ? '24px' : desktop ? '40px' : 'calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px)';
-  const pane = usePaneHeight(fixedHeight, bottomPad);
 
   const newMessageButton = (
     <Button variant="primary" icon={<Edit size={18} />} onClick={() => setPickerOpen(true)}>
@@ -2732,17 +2712,17 @@ export default function Messages() {
       {showListOnly ? (
         <RoomList rooms={rooms} meId={meId} activeId={null} compact typing={typing} onNewMessage={() => setPickerOpen(true)} onOpenWith={openWith} />
       ) : showThreadOnly ? (
-        <div ref={pane.ref} style={pane.style} className="-mt-4 flex min-h-[20rem] flex-col">
+        <div className={cx('-mt-4 flex min-h-[20rem] flex-col', THREAD_PANE_H)}>
           {threadPane}
         </div>
       ) : (
-        <div ref={pane.ref} style={pane.style} className="flex min-h-[24rem] gap-gutter">
-          <aside aria-label="Conversation list" className="card flex w-72 shrink-0 flex-col overflow-hidden lg:w-[22.5rem]">
+        <div className={cx('flex min-h-[24rem] gap-gutter', SPLIT_PANE_H)}>
+          <Card padded={false} role="complementary" aria-label="Conversation list" className="flex w-72 shrink-0 flex-col overflow-hidden lg:w-[22.5rem]">
             <RoomList rooms={rooms} meId={meId} activeId={roomId && !isDraft ? roomId : null} compact={false} typing={typing} onNewMessage={() => setPickerOpen(true)} onOpenWith={openWith} />
-          </aside>
-          <section aria-label="Conversation" className="card flex min-w-0 flex-1 flex-col overflow-hidden">
+          </Card>
+          <Card padded={false} role="region" aria-label="Conversation" className="flex min-w-0 flex-1 flex-col overflow-hidden">
             {threadPane}
-          </section>
+          </Card>
         </div>
       )}
 

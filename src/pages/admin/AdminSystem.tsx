@@ -11,11 +11,11 @@ import {
   EmptyState,
   ErrorState,
   IconButton,
+  SegmentedControl,
   Skeleton,
   SkeletonTile,
   StatGrid,
   StatTile,
-  Tabs,
   cx,
   humanize,
   plural,
@@ -554,8 +554,7 @@ export default function AdminSystem() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Tabs
-              variant="segmented"
+            <SegmentedControl
               size="sm"
               aria-label="Sort routes"
               tabs={SORT_TABS}
