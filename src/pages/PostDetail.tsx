@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { commentTotal } from '../lib/feedLogic';
 import {
   approveComment,
   commentKeys,
@@ -45,7 +44,6 @@ import {
   Menu,
   PageHeader,
   SegmentedControl,
-  SkeletonRow,
   Spinner,
   cx,
   formatStat,
@@ -570,13 +568,7 @@ export default function PostDetail() {
   const isPostAuthor = isPostAuthorOf(post, me?._id);
   /** True until the queue has answered for its owner; nobody else ever waits. */
   const heldPending = isPostAuthor && held.isPending;
-  /**
-   * The thread's own geometry while it loads. `totalComments` counts replies
-   * too and arrives with the post, a beat before the list — so the region is
-   * reserved at roughly the height it will take rather than at three short
-   * rows that then grow into a full thread (CLS 0.14 on a 390 px screen).
-   */
-  const skeletonRows = Math.min(6, Math.max(1, commentTotal(post ?? {})));
+  /** The thread and the author's queue are drawn together or not at all. */
   const loadingComments = commentsQuery.isLoading || heldPending;
 
   // "View all N comments" links carry #comments. ScrollToTop resets on every
@@ -724,28 +716,22 @@ export default function PostDetail() {
               </form>
             </div>
 
-            {/* The author's queue, above the thread it belongs to — and in the
-                same frame as it, never inserted over a list already drawn. */}
+            {/* The queue and the thread arrive together, in one box at the end
+                of the card. A thread's height cannot be known before it lands
+                — replies, a held queue, a long comment — so nothing is
+                reserved and nothing is drawn in its place: a box that grows
+                from nothing at the end of a page moves nothing above it,
+                while a skeleton that resolves into something taller moves
+                every row it drew (CLS 0.14 on a 390 px screen). The composer
+                above it is the thing that holds the geometry. */}
+            <div aria-busy={loadingComments || undefined}>
             {!heldPending && (held.data?.length ?? 0) > 0 ? (
               <div className="mt-4">
                 <HeldComments postId={postId} rows={held.data ?? []} />
               </div>
             ) : null}
 
-            <ul
-              className="mt-2 divide-y divide-line"
-              aria-label="Comments"
-              aria-busy={loadingComments || undefined}
-              style={loadingComments ? { minHeight: skeletonRows * 76 } : undefined}
-            >
-              {/* As many rows as the post says it has, capped at three: the
-                  post payload resolves first and already knows the count, so
-                  a one-comment thread no longer paints three rows and then
-                  collapses to one. */}
-              {loadingComments
-                ? Array.from({ length: skeletonRows }).map((_, i) => <SkeletonRow key={i} className="py-3" />)
-                : null}
-
+            <ul className="mt-2 divide-y divide-line" aria-label="Comments" aria-busy={loadingComments || undefined}>
               {loadingComments ? null : comments.map((comment) => (
                 <CommentRow
                   key={comment._id}
@@ -760,6 +746,7 @@ export default function PostDetail() {
                 />
               ))}
             </ul>
+            </div>
 
             {commentsQuery.isError && !commentsQuery.isLoading ? (
               <ErrorState

@@ -1828,18 +1828,22 @@ export default function Challenges() {
           icon={<Zap size={20} />}
           tone="brand"
           loading={mineAll.isLoading}
-          hint={summary.urgent > 0 ? `${summary.urgent} ending soon` : summary.active ? 'In progress' : 'Join one to start'}
+          hint={summary.urgent > 0 ? `${summary.urgent} ending soon` : summary.active ? 'In progress' : undefined}
+          fallback="Join one to start"
           onClick={() => {
             setTab('mine');
             setMyStatus('active');
           }}
         />
+        {/* P8a, the zero rule: a tile with nothing in it says what to do next
+            rather than printing a 0 above rows that carefully avoid one. */}
         <StatTile
           label="Completed"
           value={summary.completed}
           icon={<Trophy size={20} />}
           loading={mineAll.isLoading}
           hint={summary.total ? `of ${summary.total} joined` : undefined}
+          fallback="Finish one"
           onClick={() => {
             setTab('mine');
             setMyStatus('completed');
@@ -1852,7 +1856,8 @@ export default function Challenges() {
           icon={<TrendingUp size={20} />}
           tone={summary.avgPct >= 50 ? 'accent' : 'neutral'}
           loading={mineAll.isLoading}
-          hint={summary.active ? 'Across active challenges' : 'No active challenges'}
+          hint={summary.active ? 'Across active challenges' : undefined}
+          fallback={summary.active ? 'Log a session' : 'Join one'}
         />
         <StatTile
           label="Ending soon"
@@ -1860,7 +1865,8 @@ export default function Challenges() {
           icon={<Flame size={20} />}
           tone={summary.urgent > 0 ? 'accent' : 'neutral'}
           loading={mineAll.isLoading}
-          hint={summary.urgent > 0 ? 'Within 2 days, push now' : 'Nothing closing this week'}
+          hint={summary.urgent > 0 ? 'Within 2 days, push now' : undefined}
+          fallback="Nothing closing"
         />
       </StatGrid>
 

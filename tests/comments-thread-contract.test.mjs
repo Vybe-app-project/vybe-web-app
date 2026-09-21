@@ -171,11 +171,14 @@ test('the detail page threads replies one level and offers Reply on a root only'
   // The queue and the thread land in the same frame: drawn on its own it
   // inserted a block over a list already painted (CLS 0.14 at 390 px).
   assert.match(detail, /const heldPending = isPostAuthor && held\.isPending;/);
-  assert.match(detail, /\? Array\.from\(\{ length: skeletonRows \}\)/);
-  // The skeleton is the post's own count, capped at three: a one-comment
-  // thread no longer paints three rows and then collapses to one.
-  assert.match(detail, /const skeletonRows = Math\.min\(6, Math\.max\(1, commentTotal\(post \?\? \{\}\)\)\);/);
-  assert.match(detail, /style=\{loadingComments \? \{ minHeight: skeletonRows \* 76 \} : undefined\}/, 'the thread is reserved at its own height, not at three short rows');
+  // A thread's height cannot be known before it lands — replies, a held
+  // queue, a long comment — so nothing is drawn in its place. A box that
+  // grows from nothing at the end of the card moves nothing above it; a
+  // skeleton that resolves into something taller moves every row it drew
+  // (CLS 0.14 on a 390 px screen, 0 now).
+  assert.doesNotMatch(detail, /SkeletonRow/, 'no faked thread geometry');
+  assert.doesNotMatch(detail, /minHeight/);
+  assert.match(detail, /<div aria-busy=\{loadingComments \|\| undefined\}>/);
   assert.match(detail, /\{loadingComments \? null : comments\.map\(/);
   assert.match(detail, /const loadingComments = commentsQuery\.isLoading \|\| heldPending;/);
   // The report and delete menu the page already had is still there.
