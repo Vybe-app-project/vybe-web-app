@@ -1225,7 +1225,7 @@ function withCheckIn<T extends { count: number; members: PublicActor[] }>(figure
  * with a check-in, discoverable or not); `members` is the subset it may show,
  * so the tail is never invented and never a masked "a few".
  */
-function FacesLine({ count, members, suffix }: { count: number; members: PublicActor[]; suffix: string }) {
+export function FacesLine({ count, members, suffix }: { count: number; members: PublicActor[]; suffix: string }) {
   const named = members.slice(0, 2);
   const rest = count - named.length;
   if (!named.length) {
@@ -1263,7 +1263,7 @@ function FacesLine({ count, members, suffix }: { count: number; members: PublicA
  * will name — so the row ends in "and N others" rather than pretending
  * twelve is everyone.
  */
-function Faces({ members, label, more = 0 }: { members: PublicActor[]; label: string; more?: number }) {
+export function Faces({ members, label, more = 0 }: { members: PublicActor[]; label: string; more?: number }) {
   if (!members.length) return null;
   const rest = Number.isFinite(more) && more > 0 ? Math.round(more) : 0;
   return (
@@ -1307,7 +1307,7 @@ const isFetchingFigure = (q: UseQueryResult<unknown>) => q.isPending && q.fetchS
  * member still reads the leaderboard's string as before. Nobody yet is the
  * next action, never a zero.
  */
-function TodayCard({
+export function TodayCard({
   name,
   today,
   fallbackLine,
