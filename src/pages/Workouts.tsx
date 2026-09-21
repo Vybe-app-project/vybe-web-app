@@ -114,7 +114,7 @@ function weekItems(logs: readonly WorkoutLog[], system: 'metric' | 'imperial', n
  * is a last session, offers to repeat it. Same height as the strip, so the
  * block never shifts whichever way the data goes.
  */
-function WeekLine({ last, state }: { last: WorkoutLog | null; state: unknown }) {
+function WeekLine({ last }: { last: WorkoutLog | null }) {
   const lastDate = last ? parseLogDate(last.date) : null;
   return (
     <div className="flex min-h-[66px] flex-wrap items-center justify-between gap-x-4 gap-y-1">
@@ -122,7 +122,7 @@ function WeekLine({ last, state }: { last: WorkoutLog | null; state: unknown }) 
         {last && lastDate ? `No session in the last two weeks. The last one was ${last.name || 'a workout'}, ${relativeDay(lastDate).toLowerCase()}.` : 'Your week fills in from the first session.'}
       </p>
       {last ? (
-        <Link to={TRAIN.liveSession({ repeat: last._id })} state={state} viewTransition className={ROW_ACTION}>
+        <Link to={TRAIN.liveSession({ repeat: last._id })} viewTransition className={ROW_ACTION}>
           Repeat last <ArrowRight size={14} aria-hidden="true" />
         </Link>
       ) : null}
@@ -335,13 +335,14 @@ export default function Workouts() {
             <ButtonLink to={TRAIN.newWorkout} state={sheetState} variant="quiet">
               New workout
             </ButtonLink>
-            <ButtonLink to={cta.to} state={sheetState} variant="primary" icon={<Play size={18} />}>
+            {/* The runner is a page, so this link carries no sheet background. */}
+            <ButtonLink to={cta.to} variant="primary" icon={<Play size={18} />}>
               {cta.label}
             </ButtonLink>
           </>
         }
         mobileActions={
-          <IconButton label={cta.label} to={cta.to} state={sheetState}>
+          <IconButton label={cta.label} to={cta.to}>
             <Play size={22} />
           </IconButton>
         }
@@ -358,9 +359,9 @@ export default function Workouts() {
         ) : strip.length ? (
           <StatStrip aria-label="Your week" items={strip} />
         ) : (
-          <WeekLine last={logs[0] ?? null} state={sheetState} />
+          <WeekLine last={logs[0] ?? null} />
         )}
-        <ButtonLink to={cta.to} state={sheetState} variant="primary" block icon={<Play size={18} />} className="lg:hidden">
+        <ButtonLink to={cta.to} variant="primary" block icon={<Play size={18} />} className="lg:hidden">
           {cta.label}
         </ButtonLink>
       </div>

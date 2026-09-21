@@ -126,7 +126,11 @@ export function WorkoutRow({
       </div>
       <div className="relative z-[2] flex shrink-0 items-center">
         {menu?.length ? <Menu items={menu} label={`More options for ${title}`} /> : null}
-        <Link to={startTo} state={state} viewTransition aria-label={`Start ${title}`} className={ROW_ACTION}>
+        {/* No sheet background: Start opens the live runner, which is a page
+            on every width. A background would make the shell keep the hub on
+            screen while the URL said /workouts/session (RouteSheet renders
+            only SHEET_ROUTES over a background). */}
+        <Link to={startTo} viewTransition aria-label={`Start ${title}`} className={ROW_ACTION}>
           Start
         </Link>
       </div>
