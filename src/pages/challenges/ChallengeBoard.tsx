@@ -61,7 +61,9 @@ function BoardRow({ entry, unit, pinned = false }: { entry: ChallengeBoardEntry;
       </p>
       <span className="t-name tabular shrink-0 text-text-1">
         {formatStat(entry.score)}
-        {unit ? <span className="t-meta ml-1 font-semibold">{unit}</span> : null}
+        {/* A real space, not only the margin: a screen reader reads the text
+            nodes, and "6sessions" is not a thing anyone says. */}
+        {unit ? <span className="t-meta ml-1 font-semibold"> {unit}</span> : null}
       </span>
     </li>
   );
