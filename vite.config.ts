@@ -80,7 +80,19 @@ export default defineConfig({
           'offline.html',
           'offline.js',
           'screenshots/**',
+          // Pulled into sw.js by importScripts below, so the browser already
+          // caches it as part of the worker script; precaching it as well
+          // would only add a second copy that nothing ever reads.
+          'firebase-messaging-sw.js',
         ],
+        // The FCM half of the worker (public/firebase-messaging-sw.js): a
+        // background-push handler and a notification-click handler, pulled
+        // into the generated worker rather than registered as a second one.
+        // Two workers cannot both control the page, and Firebase's default
+        // /firebase-messaging-sw.js registration would fight the app shell's
+        // for scope; one worker with both jobs is the only arrangement that
+        // works. `getToken` is passed this same registration.
+        importScripts: ['firebase-messaging-sw.js'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//, /\.[a-z0-9]+$/i],
         cleanupOutdatedCaches: true,

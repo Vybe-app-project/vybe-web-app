@@ -56,8 +56,24 @@ for (const relative of ['privacy-policy.html', 'terms-and-conditions.html', 'acc
 const files = filesBelow(dist);
 assert.equal(files.filter((file) => file.endsWith('.map')).length, 0, 'source maps must not ship');
 
+/**
+ * The Firebase *web* API key for project vybe-6ac92 (src/lib/firebase.ts and
+ * public/firebase-messaging-sw.js). It is `AIza…`-shaped, so the credential
+ * scan below would flag it, and it is not a credential: Google documents the
+ * web API key as public, it identifies the project to Firebase Installations
+ * and FCM registration, and it grants nothing on its own. Removed by value
+ * rather than by relaxing the pattern, so any other `AIza…` string — a
+ * rotated key, a server key pasted in by mistake, someone else's — still
+ * fails this check.
+ */
+const FIREBASE_WEB_API_KEY = 'AIzaSyDcrk_Q8hjzUuM9PzBHLH4FC8bezZQCA-Q';
+
 const inspectable = files.filter((file) => /\.(?:html|js|css|json|svg|webmanifest)$/.test(file));
-const bundleText = inspectable.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+const bundleText = inspectable
+  .map((file) => fs.readFileSync(file, 'utf8'))
+  .join('\n')
+  .split(FIREBASE_WEB_API_KEY)
+  .join('<firebase-web-api-key>');
 assert.doesNotMatch(bundleText, /__VYBE_[A-Z0-9_]+__/, 'release contains a configuration placeholder');
 for (const pattern of [
   /AKIA[0-9A-Z]{16}/,

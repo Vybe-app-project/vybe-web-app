@@ -74,11 +74,25 @@ test('the production client defaults to same-origin API routing', () => {
   assert.match(api, /timeout:\s*30000/);
 });
 
+/**
+ * The one `AIza…` string this repository is allowed to carry: the Firebase
+ * *web* API key for project vybe-6ac92 (src/lib/firebase.ts). Google
+ * documents it as public — it identifies the project to Firebase
+ * Installations and FCM registration, it is readable in every Firebase web
+ * app's bundle, and it grants nothing on its own; the service account that
+ * signs sends lives on the server and the VAPID private key inside Firebase.
+ * The credential scan below removes exactly this value and then still runs,
+ * so a second key, a rotated one, or anyone else's fails the test.
+ */
+const FIREBASE_WEB_API_KEY = 'AIzaSyDcrk_Q8hjzUuM9PzBHLH4FC8bezZQCA-Q';
+
 test('tracked browser source contains no credential-shaped values or fixed API hosts', () => {
   const text = filesBelow('src')
     .filter((file) => /\.(?:ts|tsx|css)$/.test(file))
     .map((file) => read(file))
-    .join('\n');
+    .join('\n')
+    .split(FIREBASE_WEB_API_KEY)
+    .join('<firebase-web-api-key>');
   const forbidden = [
     /AKIA[0-9A-Z]{16}/,
     /AIza[0-9A-Za-z_-]{35}/,
