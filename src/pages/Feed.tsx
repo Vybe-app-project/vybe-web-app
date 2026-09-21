@@ -4,7 +4,20 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useHomeGym } from '../lib/homeGym';
-import { FEED_PAGE_SIZE, dedupeById, feedPageParams, nextFeedPageParam, type FeedPageParam } from '../lib/feedLogic';
+import { FEED_PAGE_SIZE, dedupeById, nextFeedPageParam, type FeedPageParam } from '../lib/feedLogic';
+// P8a: the feed modes. Following (`mode=latest`) is the default and stays
+// the default; For you is the ranker behind `feedForYou`.
+import {
+  FEED_MODE_LABELS,
+  HOME_FEED_MODES,
+  feedModeParams,
+  isFeatureDisabled,
+  readFeedMode,
+  useFeedForYou,
+  writeFeedMode,
+  type FeedMode,
+  type FeedResponse,
+} from '../lib/feedControls';
 import {
   ACCEPTED_IMAGE_TYPES,
   ACCEPTED_VIDEO_TYPES,
@@ -32,6 +45,7 @@ import {
   ErrorState,
   IconButton,
   PageHeader,
+  SegmentedControl,
   Spinner,
   Textarea,
   cx,
@@ -477,6 +491,11 @@ export default function Feed() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [composerOpen, setComposerOpen] = useState(false);
   const [showingNew, setShowingNew] = useState(false);
+  // P8a: Following | For you. Remembered, but Following is what a new
+  // account and a browser that refuses storage both get.
+  const forYouOffered = useFeedForYou();
+  const [mode, setMode] = useState<FeedMode>(readFeedMode);
+  const toast = useToast();
   const hidden = useHiddenAuthors((s) => s.ids);
   const unhide = useHiddenAuthors((s) => s.unhide);
   // The viewer's gym: the shell's one read, drawn here as the compact header
@@ -499,16 +518,21 @@ export default function Feed() {
     setSearchParams(next, { replace: true });
   }, [compose, searchParams, setSearchParams]);
 
-  // Page 1 by number, later pages by the API's keyset cursor so a post
-  // published mid-scroll never shifts the window and repeats a card.
-  const feed = useInfiniteQuery<PagedPosts, Error, { pages: PagedPosts[]; pageParams: FeedPageParam[] }, string[], FeedPageParam>({
-    queryKey: ['feed'],
+  // Page 1 by number, later pages by the token the previous answer gave —
+  // `?before=` for Following, `?cursor=` for For you — so a post published
+  // mid-scroll never shifts the window and repeats a card. The key carries
+  // the mode, and `['feed']` is still its prefix, so every existing
+  // invalidation (a like, a comment, a delete) reaches both.
+  const feed = useInfiniteQuery<FeedResponse, Error, { pages: FeedResponse[]; pageParams: FeedPageParam[] }, string[], FeedPageParam>({
+    queryKey: ['feed', mode],
     initialPageParam: 1,
     queryFn: async ({ pageParam }) => {
-      const { data } = await api.get('/posts/feed', { params: feedPageParams(pageParam, FEED_PAGE_SIZE) });
-      return data as PagedPosts;
+      const { data } = await api.get('/posts/feed', { params: feedModeParams(mode, pageParam, FEED_PAGE_SIZE) });
+      return data as FeedResponse;
     },
     getNextPageParam: (last, all) => nextFeedPageParam(last, all.length),
+    // A flag that went off for this caller cannot succeed on retry.
+    retry: (count, err) => !isFeatureDisabled(err) && count < 2,
   });
 
   const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = feed;
@@ -518,9 +542,11 @@ export default function Feed() {
   const hiddenCount = allPosts.length - posts.length;
 
   // Quiet poll of the first page: surfaces a "New posts" pill instead of a Refresh button.
+  // Only Following polls. A ranked list has no "newest" to be behind, and a
+  // pill that appears because the ranking moved is engagement bait.
   const peek = useQuery({
     queryKey: ['feed', 'peek'],
-    enabled: allPosts.length > 0 && online,
+    enabled: mode === 'latest' && allPosts.length > 0 && online,
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
     staleTime: 30_000,
@@ -541,6 +567,35 @@ export default function Feed() {
   }, [peek.data, allPosts, hidden]);
 
   const refreshFeed = useCallback(() => qc.invalidateQueries({ queryKey: ['feed'] }), [qc]);
+
+  /**
+   * The server has the last word on the mode, twice over. It answers `404
+   * FEATURE_DISABLED` when the flag went off for this caller mid-session,
+   * and it answers **Latest with `modeUnavailable: 'age'`** for a known
+   * minor who asked for For you (D-91). Both drop the preference rather
+   * than leaving someone on a segment that is not what they are reading.
+   */
+  const served = data?.pages[0]?.mode;
+  const ageLimited = data?.pages[0]?.modeUnavailable === 'age';
+  const refused = mode !== 'latest' && (isError && isFeatureDisabled(error));
+  useEffect(() => {
+    if (mode === 'latest') return;
+    if (refused || ageLimited) {
+      setMode('latest');
+      writeFeedMode('latest');
+      if (ageLimited) toast.info('For you is not available on your account. This is Following.');
+    }
+  }, [mode, refused, ageLimited, toast]);
+
+  const pickMode = (next: FeedMode) => {
+    if (next === mode) return;
+    setMode(next);
+    writeFeedMode(next);
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  };
+
+  /** What the pill shows as active: the mode the answer came back in. */
+  const activeMode: FeedMode = served === 'foryou' || served === 'latest' ? served : mode;
 
   const showNew = async () => {
     setShowingNew(true);
@@ -575,9 +630,21 @@ export default function Feed() {
       <PullIndicator {...pullState} />
       <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
 
-      {/* One region under a hairline: the stories row, the composer docked beneath. Nothing boxed on the white page. */}
+      {/* One region under a hairline: the stories row, the mode pill, the
+          composer docked beneath. Nothing boxed on the white page. The pill
+          is absent entirely while `feedForYou` is off, so a deployment
+          without the ranker shows exactly what it always showed. */}
       <div className="feed-rule pb-3">
         <StoryTray variant="home" label={gymName ? `At ${gymName}` : undefined} />
+        {forYouOffered ? (
+          <SegmentedControl
+            aria-label="Feed"
+            className="mt-3 max-w-64"
+            active={activeMode}
+            onChange={(k) => pickMode(k as FeedMode)}
+            tabs={HOME_FEED_MODES.map((key) => ({ key, label: FEED_MODE_LABELS[key] }))}
+          />
+        ) : null}
         <Composer open={composerOpen} onOpen={() => setComposerOpen(true)} onClose={() => setComposerOpen(false)} />
       </div>
       <FirstWeekCard className="my-4" />
@@ -598,17 +665,30 @@ export default function Feed() {
       ) : null}
 
       {!isLoading && !isError && allPosts.length === 0 ? (
-        <EmptyState
-          family="social"
-          title="Your feed is quiet"
-          message={
-            gymName
-              ? `Follow the people who train at ${gymName} and their sessions show up here.`
-              : 'Follow a few athletes and their sessions will show up here.'
-          }
-          action={{ label: 'Find people to follow', to: '/discover', icon: <UserPlus size={18} /> }}
-          secondaryAction={{ label: 'Share your first post', onClick: openComposer }}
-        />
+        activeMode === 'foryou' ? (
+          /* For you ranks the graph; with no graph there is nothing to rank,
+             and the honest next step is Following, not an infinite list of
+             strangers. */
+          <EmptyState
+            family="social"
+            title="Nothing for you yet"
+            message="For you ranks the people you train near and follow. Follow a few and it fills in — Following is the whole feed meanwhile."
+            action={{ label: 'Back to Following', onClick: () => pickMode('latest'), variant: 'secondary' }}
+            secondaryAction={{ label: 'Find people', to: '/discover', icon: <UserPlus size={18} /> }}
+          />
+        ) : (
+          <EmptyState
+            family="social"
+            title="Your feed is quiet"
+            message={
+              gymName
+                ? `Follow the people who train at ${gymName} and their sessions show up here.`
+                : 'Follow a few athletes and their sessions will show up here.'
+            }
+            action={{ label: 'Find people to follow', to: '/discover', icon: <UserPlus size={18} /> }}
+            secondaryAction={{ label: 'Share your first post', onClick: openComposer }}
+          />
+        )
       ) : null}
 
       {!isLoading && !isError && allPosts.length > 0 && posts.length === 0 ? (
@@ -644,7 +724,9 @@ export default function Feed() {
 
       {!hasNextPage && posts.length > 0 ? (
         <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <p className="t-body font-semibold text-text-1">You’re all caught up.</p>
+          <p className="t-body font-semibold text-text-1">
+            {activeMode === 'foryou' ? 'That’s everything ranked for you.' : 'You’re all caught up.'}
+          </p>
           {hiddenCount > 0 ? (
             <p className="t-meta">
               {hiddenCount} {hiddenCount === 1 ? 'post' : 'posts'} hidden from people you muted.{' '}

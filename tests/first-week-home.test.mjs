@@ -435,7 +435,13 @@ test('Feed mounts the card once, right after the stories-and-composer region and
   const feed = read('src/pages/Feed.tsx');
   assert.match(feed, /^import FirstWeekCard from '\.\/FirstWeekCard';$/m);
   // Gym First: the stories row and the composer share one hairline region; the first-week module follows it.
-  assert.match(feed, /<StoryTray variant="home"[^>]*\/>\s*<Composer[\s\S]*?\/>\s*<\/div>\s*<FirstWeekCard className="my-4" \/>/);
+  // P8a: the Following | For you pill may sit between the rail and the
+  // composer (it is absent entirely while `feedForYou` is off); nothing else
+  // may, and the card still follows the region.
+  assert.match(
+    feed,
+    /<StoryTray variant="home"[^>]*\/>\s*(?:\{forYouOffered \? \([\s\S]*?\) : null\}\s*)?<Composer[\s\S]*?\/>\s*<\/div>\s*<FirstWeekCard className="my-4" \/>/,
+  );
   assert.equal((feed.match(/<FirstWeekCard[^>]*\/>/g) || []).length, 1);
   assert.match(read('src/App.tsx'), /<WelcomeSheet \/>/, 'the WelcomeSheet stays mounted from App.tsx');
   assert.ok(!feed.includes('WelcomeSheet'), 'Feed does not mount a second WelcomeSheet');

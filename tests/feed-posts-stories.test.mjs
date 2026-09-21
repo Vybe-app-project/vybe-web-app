@@ -12,7 +12,12 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 test('the feed pages by cursor, never renders a post twice, and shows the stories tray', () => {
   const feed = read('src/pages/Feed.tsx');
-  assert.match(feed, /feedPageParams\(pageParam, FEED_PAGE_SIZE\)/, 'later pages must use the API cursor (?before=)');
+  // P8a: the paging token's parameter name depends on the mode — `?before=`
+  // for Following (keyset), `?cursor=` for For you (a ranked window token) —
+  // so one wrapper decides, over feedLogic's keyset helper.
+  assert.match(feed, /feedModeParams\(mode, pageParam, FEED_PAGE_SIZE\)/, 'later pages must use the mode’s own paging token');
+  assert.match(feed, /queryKey: \['feed', mode\]/, "['feed'] stays the key prefix so every existing invalidation reaches both modes");
+  assert.match(read('src/lib/feedControls.ts'), /return mode === 'latest' \? base : \{ \.\.\.base, mode \};/, 'Following sends no mode param at all');
   assert.match(feed, /getNextPageParam: \(last, all\) => nextFeedPageParam\(last, all\.length\)/);
   assert.match(feed, /dedupeById\(data\?\.pages\.flatMap/, 'a shifted page must not duplicate a card or its React key');
   assert.match(feed, /<StoryTray variant="home" label=\{gymName \? `At \$\{gymName\}` : undefined\} \/>/, 'Home shows the stories tray, labelled by the viewer’s gym, above the composer');

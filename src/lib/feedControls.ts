@@ -30,6 +30,7 @@
  */
 import { api } from './api';
 import { apiErrorDetails } from './apiError';
+import { useFeature } from './capabilities';
 import { FEED_PAGE_SIZE, feedPageParams, type FeedPageParam } from './feedLogic';
 import type { PagedPosts } from './hooks';
 
@@ -79,6 +80,20 @@ export function writeFeedMode(mode: FeedMode): void {
   } catch {
     // Nothing to remember on a browser that refuses storage; the session keeps its state in React.
   }
+}
+
+export const FEED_FOR_YOU_FLAG = 'feedForYou';
+/** Explore is Discover's surface, and its flag is read there, not here. */
+export const EXPLORE_FLAG = 'explore';
+
+/**
+ * Whether to offer the second segment at all. Read through the shared
+ * capabilities hook (one query for the session), so the pill appears at most
+ * one frame after the server has answered and never flashes on a deployment
+ * that does not run For you.
+ */
+export function useFeedForYou(): boolean {
+  return useFeature(FEED_FOR_YOU_FLAG);
 }
 
 /** A gated feed mode answers `404 { code: 'FEATURE_DISABLED' }` while `feedForYou` is off. */
