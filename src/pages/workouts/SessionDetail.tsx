@@ -7,7 +7,7 @@ import { formatSeconds } from '../../lib/duration';
 import { STARTER_SEED_KEY, firstWeekStrings, pickStarterTemplate, starterLogSeed } from '../../lib/firstWeek';
 import { displayWeight, useUnits, weightUnit } from '../../lib/units';
 import { Badge, Button, ConfirmDialog, ErrorState, Menu, Skeleton, SkeletonText, cx, formatStat, humanize, useToast, type MenuItem } from '../../components/ui';
-import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Trash } from '../../components/icons';
+import { Activity, Clock, Copy, Dumbbell, Edit, Flame, ShareUp, Trash } from '../../components/icons';
 import { RouteSheet } from '../../components/RouteSheet';
 import { MetaList } from './cards';
 import { fetchPremade, fetchWorkout, type SocialWorkout } from './model';
@@ -140,6 +140,11 @@ function SessionBody({ log, onEdit, onRepeat, onDelete }: { log: WorkoutLog; onE
   const menu: MenuItem[] = [
     { label: 'Edit', icon: <Edit size={18} />, onSelect: onEdit },
     { label: 'Log again', description: 'Same session, dated now', icon: <Copy size={18} />, onSelect: onRepeat },
+    // Where the runner sends a member after it saves. The web composer cannot
+    // attach a workout yet (POST /posts/create takes content and media only),
+    // so this opens it with the log named in `?share=` — the seam a composer
+    // that can read a workout picks up without this link changing.
+    { label: 'Share to feed', description: 'Opens the composer', icon: <ShareUp size={18} />, to: `/?compose=1&share=${log._id}` },
     { label: 'Delete', icon: <Trash size={18} />, danger: true, divider: true, onSelect: onDelete },
   ];
   return (

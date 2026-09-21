@@ -39,6 +39,8 @@ import {
 import { AddToPlanModal, AddWorkoutPicker } from './workouts/planPickers';
 import { PlanRow, ROW_ACTION, RowList, RowSkeleton, WorkoutRow } from './workouts/rows';
 import { LOGS_KEY, fetchLogs, lastDoneByTitle, parseLogDate, relativeDay, sortLogs, weekTotals, weeksKept, type WorkoutLog } from './workouts/sessions';
+import { SessionResumeBar } from './workouts/session/ResumeBar';
+import { useHasSession } from './workouts/session/store';
 import { TRAIN, useSheetNav } from './workouts/sheet';
 
 /**
@@ -46,6 +48,11 @@ import { TRAIN, useSheetNav } from './workouts/sheet';
  * StatStrip (one line before the first session); the page's ONE prominent
  * button — "Start a session", or "Continue {plan} · Week n · Day d" while a
  * programme is running; a two-segment pill, Mine | Browse; then hairline rows.
+ *
+ * Every "Start" on this page opens the live runner (`TRAIN.liveSession`,
+ * src/pages/workouts/session/Runner.tsx); logging a session after the fact is
+ * the header's quiet "Log a past session". While a session is open the CTA
+ * reads "Resume session" and a hairline bar at the top says how far in it is.
  *
  * Mine opens first and is designed for its zero state, which is where most
  * members are: one line, an outlined "New workout", three premade rows to
@@ -115,7 +122,7 @@ function WeekLine({ last, state }: { last: WorkoutLog | null; state: unknown }) 
         {last && lastDate ? `No session in the last two weeks. The last one was ${last.name || 'a workout'}, ${relativeDay(lastDate).toLowerCase()}.` : 'Your week fills in from the first session.'}
       </p>
       {last ? (
-        <Link to={TRAIN.newSession({ repeat: last._id })} state={state} viewTransition className={ROW_ACTION}>
+        <Link to={TRAIN.liveSession({ repeat: last._id })} state={state} viewTransition className={ROW_ACTION}>
           Repeat last <ArrowRight size={14} aria-hidden="true" />
         </Link>
       ) : null}
@@ -177,6 +184,7 @@ export default function Workouts() {
   const { state: sheetState, open } = useSheetNav();
   const system = useUnits((s) => s.system);
   const continueProgram = useContinueProgram();
+  const hasSession = useHasSession();
 
   const qc = useQueryClient();
   const toast = useToast();
@@ -292,17 +300,21 @@ export default function Workouts() {
   void report;
   void Flag;
 
-  // The page's one prominent action: continue the running programme, else start a session.
-  const cta = continueProgram
-    ? { label: continueProgram.label, to: TRAIN.newSession({ from: continueProgram.workoutId }) }
-    : { label: 'Start a session', to: TRAIN.newSession() };
+  // The page's one prominent action. A session already open comes first —
+  // nothing else on this page matters while one is running — then the
+  // programme's next day, then a fresh session.
+  const cta = hasSession
+    ? { label: 'Resume session', to: TRAIN.liveSession() }
+    : continueProgram
+      ? { label: continueProgram.label, to: TRAIN.liveSession({ from: continueProgram.workoutId }) }
+      : { label: 'Start a session', to: TRAIN.liveSession() };
 
   const workoutRow = (workout: SocialWorkout, own: boolean) => (
     <WorkoutRow
       key={workout._id}
       workout={workout}
       to={TRAIN.workout(workout._id)}
-      startTo={TRAIN.newSession({ from: workout._id })}
+      startTo={TRAIN.liveSession({ from: workout._id })}
       state={sheetState}
       extra={[doneLabel(workout), own && workout.isPublic === false && 'Private']}
       menu={own ? ownMenu(workout) : undefined}
@@ -317,6 +329,9 @@ export default function Workouts() {
         title="Workouts"
         actions={
           <>
+            <ButtonLink to={TRAIN.newSession()} state={sheetState} variant="quiet">
+              Log a past session
+            </ButtonLink>
             <ButtonLink to={TRAIN.newWorkout} state={sheetState} variant="quiet">
               New workout
             </ButtonLink>
@@ -335,6 +350,8 @@ export default function Workouts() {
       {/* The week, then the one prominent button on phones (the desktop header carries it). The
           skeleton, the strip and the one-line state are all 66 px, so nothing below moves whichever
           way the log answers (a 44 px line here measured CLS 0.33 for members with a week to show). */}
+      <SessionResumeBar />
+
       <div className="space-y-3">
         {logsQuery.isError ? null : logsQuery.isPending ? (
           <Skeleton className="h-[66px] w-full rounded-lg" />

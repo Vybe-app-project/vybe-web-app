@@ -483,13 +483,18 @@ export default function Feed() {
   const home = useHomeGym();
   const gymName = home.gym?.name ?? '';
 
-  // Deep link contract: /?compose=1 (Log sheet, manifest shortcut, /create) opens the composer once.
+  // Deep link contract: /?compose=1 (Log sheet, manifest shortcut, /create)
+  // opens the composer once. `?share=<logId>` rides along from a logged
+  // session's "Share to feed"; the composer cannot attach a workout yet
+  // (POST /posts/create takes content and media only), so the id is dropped
+  // with `compose` rather than left in the URL saying nothing.
   const compose = searchParams.get('compose') === '1';
   useEffect(() => {
     if (!compose) return;
     setComposerOpen(true);
     const next = new URLSearchParams(searchParams);
     next.delete('compose');
+    next.delete('share');
     setSearchParams(next, { replace: true });
   }, [compose, searchParams, setSearchParams]);
 

@@ -31,6 +31,7 @@ import {
 import { Activity, Clock, Copy, Dumbbell, Edit, Flame, Plus, Trash, TrendingUp, Zap } from './icons';
 import { MetaList } from './workouts/cards';
 import { LOGS_KEY, dayKey, dayLabel, dayStreak, fetchLogs, parseLogDate, relativeDay, sessionVolume, sortLogs, weekTotals, weeksKept, type LogsResponse, type WorkoutLog } from './workouts/sessions';
+import { SessionResumeBar } from './workouts/session/ResumeBar';
 import { TRAIN, useSheetNav } from './workouts/sheet';
 
 // Recharts lives in the chart's own chunk; the 13 rem box keeps its height while it loads.
@@ -300,6 +301,8 @@ export default function WorkoutHistory() {
           </IconButton>
         }
       />
+
+      <SessionResumeBar />
 
       {isLoading ? (
         <>
