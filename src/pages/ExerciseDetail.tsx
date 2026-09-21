@@ -145,6 +145,26 @@ export function ExerciseFactList({ exercise }: { exercise: Exercise }) {
   );
 }
 
+/**
+ * The credit the source's licence asks for, at the foot of the page. The API
+ * generates the sentence from the row's own provenance, so this prints what it
+ * was given and links it to `source.url` — never a paragraph written here.
+ */
+export function ExerciseAttributionLine({ attribution, url }: { attribution?: string | null; url?: string | null }) {
+  if (!attribution) return null;
+  return (
+    <p className="t-meta">
+      {url ? (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-text-1">
+          {attribution}
+        </a>
+      ) : (
+        attribution
+      )}
+    </p>
+  );
+}
+
 /* -------------------------------------------------------------- my note */
 
 function MyNote({ slug, note }: { slug: string; note: string | null }) {
@@ -395,17 +415,7 @@ export default function ExerciseDetail() {
           {/* The note route takes any logged id, but only the library read tells us the current one. */}
           {data ? <MyNote slug={slug} note={data.myNote?.note ?? null} /> : null}
 
-          {attribution ? (
-            <p className="t-meta">
-              {sourceUrl ? (
-                <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-text-1">
-                  {attribution}
-                </a>
-              ) : (
-                attribution
-              )}
-            </p>
-          ) : null}
+          <ExerciseAttributionLine attribution={attribution} url={sourceUrl} />
         </div>
       )}
     </RouteSheet>
