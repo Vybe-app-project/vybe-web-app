@@ -405,7 +405,7 @@ export default function Stories() {
       </div>
 
       {viewer && viewer.groups.length > 0 ? (
-        <StoryViewer groups={viewer.groups} startGroup={viewer.start} startStory={viewer.startStory} onClose={() => setViewer(null)} />
+        <StoryViewer groups={viewer.groups} startGroup={viewer.start} startStory={viewer.startStory} highlightId={viewer.highlightId} onClose={() => setViewer(null)} />
       ) : null}
 
       <CreateStoryModal open={composerOpen} onClose={() => setComposerOpen(false)} />

@@ -32,6 +32,7 @@ import {
 import {
   answerSticker,
   highlightsKey,
+  removeStoryFromHighlight,
   setStickerReminder,
   slideSticker,
   stickerDraftBody,
@@ -43,6 +44,7 @@ import {
 } from '../lib/stories';
 import { DEFAULT_STICKER_PLACEMENT, StickerLayer, type StickerAction } from './stories/StickerLayer';
 import { StickerComposer } from './stories/StickerComposer';
+import { HighlightPicker } from './stories/HighlightPicker';
 import { StickerResultsSheet } from './stories/StickerResultsSheet';
 import {
   Avatar,
@@ -53,6 +55,7 @@ import {
   ErrorState,
   IconButton,
   Input,
+  Menu,
   Modal,
   SegmentedControl,
   Select,
@@ -65,8 +68,10 @@ import {
   useFocusTrap,
   useLockBody,
   useToast,
+  type MenuItem,
 } from './ui';
 import {
+  Bookmark,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -142,7 +147,13 @@ export type Highlight = {
   stories?: Story[];
 };
 
-export type ViewerTarget = { groups: StoryGroup[]; start: number; startStory?: number };
+export type ViewerTarget = {
+  groups: StoryGroup[];
+  start: number;
+  startStory?: number;
+  /** Set when the viewer is playing a highlight, so the author can take a story back out of it. */
+  highlightId?: string;
+};
 
 export const authorName = (a?: StoryAuthor | PublicUser | null) => a?.fullName?.trim() || a?.username || 'Vybe user';
 
@@ -411,12 +422,15 @@ export function StoryViewer({
   groups,
   startGroup,
   startStory,
+  highlightId,
   onClose,
 }: {
   groups: StoryGroup[];
   startGroup: number;
   /** Explicit first story; defaults to the first unseen one in the group. */
   startStory?: number;
+  /** The highlight being played, when the viewer was opened from one. */
+  highlightId?: string;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -442,11 +456,15 @@ export function StoryViewer({
   const [stickerActive, setStickerActive] = useState(false);
   const [answeredStickers, setAnsweredStickers] = useState<Set<string>>(() => new Set());
   const [resultsSticker, setResultsSticker] = useState<StorySticker | null>(null);
+  const [highlightPicker, setHighlightPicker] = useState(false);
+  // Stories taken out of the highlight this session: the payload on screen
+  // still lists it, and a refetch does not reach a viewer opened from a row.
+  const [pulledFromHighlight, setPulledFromHighlight] = useState<Set<string>>(() => new Set());
 
   const group = groups[gi];
   const story = group?.stories?.[si];
   const paused =
-    holdPaused || userPaused || stickerActive || Boolean(deleteTarget) || Boolean(responsesFor) || Boolean(resultsSticker);
+    holdPaused || userPaused || stickerActive || Boolean(deleteTarget) || Boolean(responsesFor) || Boolean(resultsSticker) || highlightPicker;
   const durationMs = clampStoryDuration(story?.duration, DEFAULT_STORY_SECONDS) * 1000;
 
   /** The story's stickers with this session's answers folded in. */
@@ -577,6 +595,29 @@ export function StoryViewer({
     onError: (e) => toast.error(null, stickerErrorCopy(e)),
   });
 
+  /**
+   * "Remove from highlight" is only offered where it means something: the
+   * viewer is playing a highlight, or the story itself names one. Taking an
+   * expired story out of its last highlight returns it to the author-only
+   * archive — it does not go live again — so the copy says archive, not
+   * delete.
+   */
+  const takeOut = useMutation({
+    mutationFn: async () => {
+      const target = highlightId || story?.highlights?.[0];
+      if (!target || !story) throw new Error('This story is not in a highlight.');
+      await removeStoryFromHighlight(target, story._id);
+      return story._id;
+    },
+    onSuccess: (storyId) => {
+      setPulledFromHighlight((prev) => new Set(prev).add(storyId));
+      toast.success('Removed from the highlight');
+      qc.invalidateQueries({ queryKey: highlightsKey(me?._id) });
+      qc.invalidateQueries({ queryKey: ['stories'] });
+    },
+    onError: (e) => toast.error(e, 'Could not remove it from the highlight.'),
+  });
+
   const sendReply = useMutation({
     mutationFn: async ({ storyId, text }: { storyId: string; text: string }) => {
       await api.post(`/story/${storyId}/reply`, { text });
@@ -606,7 +647,7 @@ export function StoryViewer({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (deleteTarget || responsesFor || resultsSticker) return; // the dialog on top owns the keyboard
+      if (deleteTarget || responsesFor || resultsSticker || highlightPicker) return; // the dialog on top owns the keyboard
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
       if (e.key === 'Escape') onClose();
@@ -622,11 +663,12 @@ export function StoryViewer({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [next, prev, onClose, deleteTarget, responsesFor, resultsSticker, story?.type]);
+  }, [next, prev, onClose, deleteTarget, responsesFor, resultsSticker, highlightPicker, story?.type]);
 
   if (!group || !story) return null;
   const mine = story.author?._id === me?._id;
   const currentReaction = (localReaction[story._id] || story.viewerReaction || null) as ReactionKey | null;
+  const inHighlight = !pulledFromHighlight.has(story._id) && Boolean(highlightId || story.highlights?.length);
 
   return (
     <div
@@ -679,9 +721,23 @@ export function StoryViewer({
                   </Badge>
                 ) : null}
               </button>
-              <IconButton label="Delete story" variant="ghost" onClick={() => setDeleteTarget(story._id)}>
-                <Trash size={20} />
-              </IconButton>
+              <Menu
+                label="Story options"
+                items={[
+                  { label: 'Add to highlight', description: 'Keeps it on your profile', icon: <Sparkles size={18} />, onSelect: () => setHighlightPicker(true) },
+                  ...(inHighlight
+                    ? [
+                        {
+                          label: 'Remove from highlight',
+                          description: 'It goes back to your archive',
+                          icon: <Bookmark size={18} />,
+                          onSelect: () => takeOut.mutate(),
+                        } as MenuItem,
+                      ]
+                    : []),
+                  { label: 'Delete story', description: 'It disappears for everyone', icon: <Trash size={18} />, danger: true, divider: true, onSelect: () => setDeleteTarget(story._id) },
+                ]}
+              />
             </>
           ) : null}
           {!mine && me ? (
@@ -796,6 +852,8 @@ export function StoryViewer({
         open={Boolean(resultsSticker)}
         onClose={() => setResultsSticker(null)}
       />
+
+      <HighlightPicker open={highlightPicker} onClose={() => setHighlightPicker(false)} storyId={story._id} ownerId={me?._id} />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
@@ -1246,7 +1304,7 @@ export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'pag
       {variant === 'page' && tray.isError ? <ErrorState error={tray.error} title="Couldn’t load stories" onRetry={() => tray.refetch()} /> : row}
 
       {viewer && viewer.groups.length > 0 ? (
-        <StoryViewer groups={viewer.groups} startGroup={viewer.start} startStory={viewer.startStory} onClose={() => setViewer(null)} />
+        <StoryViewer groups={viewer.groups} startGroup={viewer.start} startStory={viewer.startStory} highlightId={viewer.highlightId} onClose={() => setViewer(null)} />
       ) : null}
       <CreateStoryModal open={composerOpen} onClose={() => setComposerOpen(false)} />
     </section>
@@ -1319,7 +1377,7 @@ export function useOpenHighlight(author: StoryAuthor | null, setViewer: (v: View
     }
     const groupAuthor = stories[0]?.author || author;
     if (!groupAuthor) return;
-    setViewer({ groups: [{ author: groupAuthor, stories }], start: 0, startStory: 0 });
+    setViewer({ groups: [{ author: groupAuthor, stories }], start: 0, startStory: 0, highlightId: h._id });
   };
   return { open, loadingId };
 }
@@ -1387,7 +1445,7 @@ export function HighlightsRow({ userId, isOwn = false, author }: { userId: strin
               );
             })}
       </div>
-      {viewer ? <StoryViewer groups={viewer.groups} startGroup={viewer.start} startStory={viewer.startStory} onClose={() => setViewer(null)} /> : null}
+      {viewer ? <StoryViewer groups={viewer.groups} startGroup={viewer.start} startStory={viewer.startStory} highlightId={viewer.highlightId} onClose={() => setViewer(null)} /> : null}
     </section>
   );
 }
