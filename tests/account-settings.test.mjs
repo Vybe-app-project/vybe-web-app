@@ -209,7 +209,7 @@ test('every PUT /users/settings body the web sends is inside the backend allow-l
   }
   assert.ok(callSites.length >= 3, `expected the privacy, preference-sync and settings-card writers, found ${callSites.length}`);
   // `homeGym` is accepted by the deployed API (gym-first API.md §1: `{ community }`, `{ place }` or null);
-  // the Settings Home gym card writes it as a literal until the typed SettingsPatch carries the key.
+  // the Settings Home gym row writes it through useSetHomeGym (lib/homeGym.ts), whose body is the typed `patch`.
   const literalKeys = BACKEND_SETTINGS_KEYS; // homeGym is already in the list
   for (const { file, arg } of callSites) {
     if (arg.startsWith('{')) {

@@ -5,8 +5,9 @@ import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
 import { UnitsControl } from '../components/UnitsControl';
 import { VersionRow } from '../components/VersionRow';
 import { PlaceImage } from '../components/PlaceImage';
-import { memberCountLabel } from '../components/GymBand';
-import { communityPath, coverSourceOf, type CommunityLike } from '../lib/gyms';
+import { compactMetaLine } from '../components/GymHeader';
+import { communityPath } from '../lib/gyms';
+import { HOME_GYM_KEY, useHomeGym, useSetHomeGym } from '../lib/homeGym';
 import AccountPreferenceSections from './SettingsPreferences';
 import { SettingsCard, ToggleRow } from './SettingsPieces';
 import {
@@ -39,11 +40,9 @@ import {
   Avatar,
   Badge,
   Button,
-  ButtonLink,
   Callout,
   Chip,
   ConfirmDialog,
-  EmptyState,
   ErrorState,
   IconButton,
   Input,
@@ -165,7 +164,7 @@ function AccountSection() {
 
   if (meQuery.isLoading && !meQuery.data) {
     return (
-      <SettingsCard id="account" title="Account">
+      <SettingsCard id="account" title="Account" titleHidden>
         <RowsSkeleton rows={3} />
       </SettingsCard>
     );
@@ -173,14 +172,14 @@ function AccountSection() {
 
   if (meQuery.isError && !meQuery.data) {
     return (
-      <SettingsCard id="account" title="Account">
+      <SettingsCard id="account" title="Account" titleHidden>
         <ErrorState title="Could not load your account" error={meQuery.error} retry={() => void meQuery.refetch()} />
       </SettingsCard>
     );
   }
 
   return (
-    <SettingsCard id="account" title="Account" description="Your public identity across Vybe.">
+    <SettingsCard id="account" title="Account" titleHidden description="Your public identity across Vybe.">
       <form onSubmit={submit} className="space-y-4" noValidate>
         <Input
           id="set-name"
@@ -239,172 +238,95 @@ function AccountSection() {
 
 /* ------------------------------------------------------------------ home gym */
 
-/** `homeGym` on GET /users/me: a bare community id, or a provider place, or absent (API.md §1). */
-type HomeGymRef = { community?: string | null; place?: { osmId: string; name: string } | null; setAt?: string } | null;
-type HomeGymCommunity = CommunityLike & { _id: string; name: string; vicinity?: string; totalMembers?: number };
+/** The one blue control on a settings row: a text button in the brand colour, 44 px tall. */
+const ROW_ACTION = 'pressable -mr-2 inline-flex min-h-11 shrink-0 items-center rounded-sm px-2 text-sm font-semibold text-brand disabled:opacity-60';
 
 /**
- * A resolvable cover for the thumbnail. Provider photo tokens need the
- * authenticated proxy the gym page runs; here the generated identity tile
- * stands in for them, so the card never shows a broken image.
- */
-function communityCoverSrc(c?: CommunityLike | null): string | undefined {
-  const source = coverSourceOf(c);
-  if (!source) return undefined;
-  if (source.kind === 'url') return source.url;
-  if (source.kind === 'media-key') return source.key;
-  return undefined;
-}
-
-function HomeGymThumb({ community, name }: { community?: CommunityLike | null; name: string }) {
-  return <PlaceImage src={communityCoverSrc(community)} name={name} className="h-16 w-16 rounded-md" textClassName="text-md" />;
-}
-
-/**
- * The gym the whole app anchors to. Reads `homeGym` off the session user
- * (the shell fetches the gym itself under ['home-gym']; this card only needs
- * the name, place and cover, so it asks the details route once) and writes
- * through PUT /users/settings, always in the `{ community }` form: a
- * community's own place id may be a `vybe-…` one the place form rejects.
- * With no gym set, the common case today, the card offers one of the
- * member's communities or sends them to find one.
+ * The gym the whole app anchors to, as one settings row: thumb · name ·
+ * Change. It reads the shell's `useHomeGym()` (one fetch for the whole app
+ * under ['home-gym']) and writes through `useSetHomeGym()`, so Home, the gym
+ * pages and this row never disagree. No gym set — the common case today — is
+ * a single "Find your gym" row, not an illustration. A community the viewer
+ * belongs to but has not chosen is offered with "Set as home".
  */
 function HomeGymSection() {
-  const toast = useToast();
+  const { gym, community, provisional, source, loading, error } = useHomeGym();
+  const setHomeGym = useSetHomeGym();
   const qc = useQueryClient();
-  const setUser = useAuth((s) => s.setUser);
-  const homeGym = useAuth((s) => (s.user?.homeGym ?? null) as HomeGymRef);
-  const communityId = homeGym?.community ? String(homeGym.community) : null;
-  const placeName = homeGym?.place?.name?.trim() || '';
+  const toast = useToast();
 
-  const gym = useQuery({
-    queryKey: ['settings', 'home-gym', communityId],
-    enabled: !!communityId,
-    staleTime: 60_000,
-    queryFn: async () => {
-      const { data } = await api.get(`/gyms/community/${communityId}`);
-      return (data.data || data) as HomeGymCommunity;
-    },
-  });
+  const adopt = () => {
+    if (!community) return;
+    setHomeGym.mutate(
+      { community: String(community._id) },
+      {
+        onSuccess: () => toast.success('Home gym set'),
+        onError: (e) => toast.error(fieldErrorsOf(e).homeGym || errMsg(e, 'Could not update your home gym.')),
+      },
+    );
+  };
 
-  const mine = useQuery({
-    queryKey: ['settings', 'my-communities'],
-    enabled: !communityId,
-    staleTime: 60_000,
-    queryFn: async () => {
-      const { data } = await api.get('/gyms/community/my-communities', { params: { page: 1, limit: 5 } });
-      return (data.data?.gymCommunities ?? data.gymCommunities ?? []) as HomeGymCommunity[];
-    },
-  });
-
-  const save = useMutation({
-    mutationFn: async (next: { community: string } | null) => {
-      const { data } = await api.put('/users/settings', { homeGym: next });
-      return (data.user || data) as PublicUser;
-    },
-    onSuccess: (user, next) => {
-      setUser(user as any);
-      qc.setQueryData(['me'], user);
-      void qc.invalidateQueries({ queryKey: ['home-gym'] });
-      void qc.invalidateQueries({ queryKey: ['settings', 'my-communities'] });
-      toast.success(next ? 'Home gym set' : 'Home gym cleared');
-    },
-    onError: (e) => {
-      const field = fieldErrorsOf(e);
-      toast.error(field.homeGym || errMsg(e, 'Could not update your home gym.'));
-    },
-  });
-
-  const busy = save.isPending;
-  const actions = (
-    <div className="flex flex-wrap items-center gap-2">
-      <ButtonLink to="/gyms" variant="secondary" size="sm">
-        Change
-      </ButtonLink>
-      <Button variant="ghost" size="sm" disabled={busy} loading={busy} onClick={() => save.mutate(null)}>
-        Clear
-      </Button>
-    </div>
-  );
-
-  let body: ReactNode;
-  if (communityId) {
-    const name = gym.data?.name?.trim() || placeName || 'Your home gym';
-    const vicinity = gym.data?.vicinity?.trim() || '';
-    const members = typeof gym.data?.totalMembers === 'number' && gym.data.totalMembers > 0 ? memberCountLabel(gym.data.totalMembers, { long: true }) : '';
-    body = (
-      <div className="flex flex-wrap items-center gap-4">
-        <HomeGymThumb community={gym.data} name={name} />
-        <div className="min-w-0 flex-1 basis-40">
-          <Link to={communityPath(communityId)} viewTransition className="type-heading block truncate text-md text-text-1 hover:underline">
-            {name}
-          </Link>
-          {gym.isLoading ? (
-            <Skeleton className="mt-1.5 h-3.5 w-40 rounded-xs" />
-          ) : gym.isError ? (
-            <button type="button" onClick={() => void gym.refetch()} className="mt-0.5 text-left text-xs text-text-2 hover:underline">
-              Couldn’t load the details. Try again
-            </button>
+  let row: ReactNode;
+  if (loading) {
+    // The account points at a gym whose details are still loading: the same 56 px row, as a skeleton.
+    row = (
+      <div className="flex min-h-14 items-center gap-3" aria-busy="true" aria-label="Loading your home gym">
+        <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-3.5 w-36 max-w-full" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+        <Skeleton className="h-4 w-12" />
+      </div>
+    );
+  } else if (gym) {
+    const href = community ? communityPath(String(community._id)) : null;
+    const meta = compactMetaLine(gym) ?? (source === 'place' ? 'Not a Vybe community yet' : null);
+    const name = <span className="t-name block truncate text-text-1">{gym.name}</span>;
+    row = (
+      <div className="flex min-h-14 items-center gap-3">
+        <PlaceImage src={gym.photoUrl ?? null} name={gym.name} className="h-10 w-10 rounded-full" textClassName="text-xs" />
+        <div className="min-w-0 flex-1">
+          {href ? (
+            <Link to={href} viewTransition className="block rounded-xs hover:underline">
+              {name}
+            </Link>
           ) : (
-            <p className="mt-0.5 truncate text-sm text-text-2">{[vicinity, members].filter(Boolean).join(' · ') || 'Your home gym'}</p>
+            name
           )}
+          {meta ? <p className="t-meta truncate">{meta}</p> : null}
         </div>
-        {actions}
+        {provisional && community ? (
+          <button type="button" onClick={adopt} disabled={setHomeGym.isPending} aria-label={`Make ${gym.name} your home gym`} className={ROW_ACTION}>
+            Set as home
+          </button>
+        ) : (
+          <Link to={NO_GYM_COPY.href} viewTransition className={ROW_ACTION}>
+            Change
+          </Link>
+        )}
       </div>
     );
-  } else if (placeName) {
-    body = (
-      <div className="flex flex-wrap items-center gap-4">
-        <HomeGymThumb name={placeName} />
-        <div className="min-w-0 flex-1 basis-40">
-          <p className="type-heading truncate text-md text-text-1">{placeName}</p>
-          <p className="mt-0.5 text-sm text-text-2">Not a Vybe community yet. Start one from Gyms and its members appear here.</p>
-        </div>
-        {actions}
-      </div>
-    );
-  } else if (mine.isLoading) {
-    body = <RowsSkeleton rows={2} height="h-14" />;
-  } else if (mine.data?.length) {
-    body = (
-      <div className="space-y-3">
-        <p className="text-sm text-text-2">You train with these communities. Pick the one that is home.</p>
-        <ul className="divide-y divide-line" aria-label="Your communities">
-          {mine.data.map((c) => (
-            <li key={c._id} className="flex min-h-14 items-center gap-3 py-2">
-              <PlaceImage src={communityCoverSrc(c)} name={c.name} className="h-11 w-11 rounded-sm" textClassName="text-xs" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-text-1">{c.name}</span>
-                {c.vicinity?.trim() ? <span className="block truncate text-xs text-text-2">{c.vicinity.trim()}</span> : null}
-              </span>
-              <Button variant="secondary" size="sm" disabled={busy} onClick={() => save.mutate({ community: c._id })} aria-label={`Make ${c.name} your home gym`}>
-                Set as home gym
-              </Button>
-            </li>
-          ))}
-        </ul>
-        <ButtonLink to="/gyms" variant="ghost" size="sm" icon={<MapPin size={16} />}>
-          Find another gym
-        </ButtonLink>
-      </div>
+  } else if (error) {
+    row = (
+      <button type="button" onClick={() => void qc.invalidateQueries({ queryKey: HOME_GYM_KEY })} className="pressable -mx-2 flex h-12 items-center gap-3 rounded-sm px-2 text-left">
+        <span className="t-body min-w-0 flex-1 truncate text-text-2">Couldn’t load your gym.</span>
+        <span className="shrink-0 text-sm font-semibold text-brand">Try again</span>
+      </button>
     );
   } else {
-    body = (
-      <EmptyState
-        family="community"
-        size="sm"
-        level={3}
-        title={NO_GYM_COPY.kicker}
-        message={NO_GYM_COPY.body}
-        action={{ label: NO_GYM_COPY.action, to: NO_GYM_COPY.href, icon: <MapPin size={18} /> }}
-        className="rounded-md bg-surface-2 py-6"
-      />
+    row = (
+      <Link to={NO_GYM_COPY.href} viewTransition className="pressable -mx-2 flex h-12 items-center gap-3 rounded-sm px-2 text-text-1">
+        <MapPin size={22} className="shrink-0 text-text-2" />
+        <span className="t-body flex-1 truncate font-semibold">{NO_GYM_COPY.action}</span>
+        <ChevronRight size={18} className="shrink-0 text-text-3" />
+      </Link>
     );
   }
 
   return (
     <SettingsCard id="home-gym" title="Home gym" description="Home, Train and Community open on this gym and the people who train there.">
-      {body}
+      {row}
     </SettingsCard>
   );
 }
@@ -828,7 +750,7 @@ function NotificationsSection() {
 
   if (settingsQuery.isLoading) {
     return (
-      <SettingsCard id="notifications" title="Notifications">
+      <SettingsCard id="notifications" title="Notifications" titleHidden>
         <RowsSkeleton rows={8} height="h-12" />
       </SettingsCard>
     );
@@ -836,7 +758,7 @@ function NotificationsSection() {
 
   if (settingsQuery.isError) {
     return (
-      <SettingsCard id="notifications" title="Notifications">
+      <SettingsCard id="notifications" title="Notifications" titleHidden>
         <ErrorState title="Preferences unavailable" error={settingsQuery.error} retry={() => void settingsQuery.refetch()} />
       </SettingsCard>
     );
@@ -848,7 +770,7 @@ function NotificationsSection() {
   const hydrationTimes = response.hydrationReminders?.times ?? [];
 
   return (
-    <SettingsCard id="notifications" title="Notifications" description="Choose what Vybe is allowed to notify you about. Changes save automatically.">
+    <SettingsCard id="notifications" title="Notifications" titleHidden description="Choose what Vybe is allowed to notify you about. Changes save automatically.">
       <ToggleRow
         title={NOTIFICATION_LABELS.pauseAll.title}
         hint={NOTIFICATION_LABELS.pauseAll.hint}
@@ -1293,10 +1215,10 @@ export default function Settings() {
               return (
                 <section key={g.id} id={groupDomId(g.id)} data-group={g.id} aria-labelledby={headingId} className="scroll-mt-28 space-y-4 lg:scroll-mt-20">
                   <div className="px-1">
-                    <h2 id={headingId} className="type-heading text-xl text-text-1">
+                    <h2 id={headingId} className="t-section text-text-1">
                       {g.label}
                     </h2>
-                    <p className="mt-0.5 text-sm text-text-2">{g.hint}</p>
+                    <p className="t-meta mt-0.5">{g.hint}</p>
                   </div>
                   <GroupCards id={g.id} />
                 </section>

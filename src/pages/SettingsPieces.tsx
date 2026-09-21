@@ -16,6 +16,7 @@ export function SettingsCard({
   children,
   className,
   titleClassName,
+  titleHidden = false,
   padded = true,
 }: {
   id: string;
@@ -24,17 +25,19 @@ export function SettingsCard({
   children: ReactNode;
   className?: string;
   titleClassName?: string;
+  /** Keep the title for the region's name only: the card sits directly under a category heading that already says it. */
+  titleHidden?: boolean;
   padded?: boolean;
 }) {
   return (
     <Card id={id} role="region" aria-labelledby={`${id}-title`} className={cx('scroll-mt-28 lg:scroll-mt-20', className)} padded={padded}>
       <div className={cx(!padded && 'px-4 pt-4 sm:px-5 sm:pt-5')}>
-        <h2 id={`${id}-title`} className={cx('type-heading text-lg text-text-1', titleClassName)}>
+        <h2 id={`${id}-title`} className={cx('t-section text-text-1', titleHidden && 'sr-only', titleClassName)}>
           {title}
         </h2>
-        {description ? <p className="mt-1 text-sm text-text-2">{description}</p> : null}
+        {description ? <p className={cx('text-sm text-text-2', !titleHidden && 'mt-1')}>{description}</p> : null}
       </div>
-      <div className={cx('mt-4', !padded && 'px-1 pb-1')}>{children}</div>
+      <div className={cx(titleHidden && !description ? 'mt-0' : 'mt-4', !padded && 'px-1 pb-1')}>{children}</div>
     </Card>
   );
 }
