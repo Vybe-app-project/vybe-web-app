@@ -69,6 +69,8 @@ const WorkoutHistory = lazyPage('/workouts/history', () => import('./pages/Worko
 const WorkoutEditor = lazyPage(null, () => import('./pages/workouts/WorkoutEditor'));
 const PlanEditor = lazyPage(null, () => import('./pages/workouts/PlanEditor'));
 const SessionDetail = lazyPage(null, () => import('./pages/workouts/SessionDetail'));
+// The shared exercise library's page (/exercises/:slug); also a sheet route, so it opens over the hub on desktop.
+const ExerciseDetail = lazyPage(null, () => import('./pages/ExerciseDetail'));
 const MealLog = lazyPage(null, () => import('./pages/MealLog'));
 const WorkoutProgress = lazyPage('/workouts/progress', () => import('./pages/WorkoutProgress'));
 const Meals = lazyPage('/meals', () => import('./pages/Meals'));
@@ -308,6 +310,7 @@ const SHEET_ROUTES: Array<{ path: string; element: ReactNode }> = [
   { path: 'workouts/plans/new', element: <PlanEditor /> },
   { path: 'workouts/plans/:planId/edit', element: <PlanEditor /> },
   { path: 'workouts/history/:logId', element: <SessionDetail /> },
+  { path: 'exercises/:slug', element: <ExerciseDetail /> },
   { path: 'meals/log', element: <MealLog /> },
 ];
 

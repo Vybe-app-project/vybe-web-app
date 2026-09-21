@@ -138,6 +138,8 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/workouts/plans/:planId', title: 'Plan', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
   { pattern: '/workouts/:workoutId/edit', title: 'Edit workout', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
   { pattern: '/workouts/:workoutId', title: 'Workout', tab: 'workouts', nav: '/workouts', parent: '/workouts' },
+  // One movement from the shared exercise library. A sheet over the hub on lg+, a page on phones; the page publishes its own name.
+  { pattern: '/exercises/:slug', title: 'Exercise', tab: 'workouts', nav: '/workouts', parent: '/workouts', hub: 'train' },
   { pattern: '/recaps', title: 'Recaps', tab: 'workouts', nav: '/recaps', hub: 'train' },
   { pattern: '/recaps/:id', title: 'Recap', tab: 'workouts', nav: '/recaps', parent: '/recaps' },
   { pattern: '/meals', title: 'Meals', tab: 'meals', nav: '/meals', root: true, hub: 'fuel' },
