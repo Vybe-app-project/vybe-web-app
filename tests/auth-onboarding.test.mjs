@@ -350,7 +350,7 @@ test('sign-up names the field in a 409, checks availability while typing, persis
   // Step handlers validate into field errors, not just the top callout.
   assert.match(register, /setErrors\(\{ email: 'Enter a valid email address\.' \}, \['email'\]\)/);
   assert.match(register, /setErrors\(\{ otp: /);
-  assert.match(register, /setErrors\(next, \['fullName', 'username', 'password', 'confirm'\]\)/);
+  assert.match(register, /setErrors\(next, \['fullName', 'username', 'birthDate', 'password', 'confirm'\]\)/);
 });
 
 test('the first-run sheet is mounted for every signed-in route and offers a photo and people to follow', () => {

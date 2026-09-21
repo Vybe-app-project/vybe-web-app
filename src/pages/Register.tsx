@@ -17,6 +17,19 @@ import {
   type RegisterStep,
 } from '../lib/authDrafts';
 import {
+  BIRTH_DATE_HINT,
+  BIRTH_DATE_LABEL,
+  UNDER_MIN_BODY,
+  UNDER_MIN_SUPPORT,
+  UNDER_MIN_SUPPORT_HREF,
+  UNDER_MIN_TITLE,
+  birthDateApiError,
+  birthDateError,
+  isUnderMinimum,
+  oldestIso,
+  todayIso,
+} from '../lib/birthDate';
+import {
   isEmail,
   passwordRules,
   isPasswordValid,
@@ -25,7 +38,7 @@ import {
   useDebounced,
   type PasswordRule,
 } from '../lib/hooks';
-import { Button, Callout, Checkbox, Input, Spinner, cx, useToast } from './ui';
+import { Button, Callout, Checkbox, DateField, Input, Spinner, cx, useToast } from './ui';
 import { Check, X } from './icons';
 import { AuthShell, LegalLine, PasswordField, ProviderSignIn, focusField } from './Login';
 
@@ -50,6 +63,7 @@ const FIELD_IDS = {
   otp: 'reg-otp',
   fullName: 'reg-name',
   username: 'reg-username',
+  birthDate: 'reg-birth-date',
   password: 'reg-password',
   confirm: 'reg-confirm',
   agree: 'reg-agree',
@@ -185,6 +199,12 @@ export default function Register() {
 
   const [username, setUsername] = useState(draft?.username ?? '');
   const [fullName, setFullName] = useState(draft?.fullName ?? '');
+  // Never restored from the draft and never sent anywhere until the account
+  // is created: a date of birth is not form progress worth persisting.
+  const [birthDate, setBirthDate] = useState('');
+  // Set only when the entered date is under the minimum age. The form is
+  // replaced by the block, so nothing is sent and nothing is created.
+  const [underAge, setUnderAge] = useState(false);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -320,10 +340,20 @@ export default function Register() {
     const nameErr = usernameError(username.trim());
     if (nameErr) next.username = nameErr;
     else if (availability.state === 'taken' && availability.username === trimmedUsername) next.username = USERNAME_TAKEN;
+    // The field is optional on this API (AGE_GATE_REQUIRE_BIRTHDATE is off),
+    // so an empty box is not an error -- a malformed or impossible date is.
+    const dobErr = birthDateError(birthDate);
+    if (dobErr) next.birthDate = dobErr;
     if (!isPasswordValid(password)) next.password = 'Your password does not meet all requirements yet.';
     if (password !== confirm) next.confirm = 'Passwords do not match.';
     if (!agreed) next.agree = AGREE_REQUIRED;
-    if (setErrors(next, ['fullName', 'username', 'password', 'confirm'])) return;
+    if (setErrors(next, ['fullName', 'username', 'birthDate', 'password', 'confirm'])) return;
+    // The age rule is applied here, before the request: an under-age date is
+    // never sent, so no row is written and no log line carries it.
+    if (isUnderMinimum(birthDate)) {
+      setUnderAge(true);
+      return;
+    }
     // Every field error shows at once; the box is focused only when it is the one thing left.
     if (next.agree) {
       focusField(FIELD_IDS.agree);
@@ -343,6 +373,10 @@ export default function Register() {
           fullName: fullName.trim(),
           password,
           fcmTokens: [],
+          // `YYYY-MM-DD` and nothing else (services/ageGate.js); omitted when
+          // it was left blank, because unset and "prefer not to say" are the
+          // same thing to this API and an empty string is a 400.
+          ...(birthDate ? { birthDate } : {}),
           // The API resolves settings.units from this once, at account creation
           // (US, LR and MM give imperial; every other region gives metric; a
           // region-less or malformed tag leaves units unset so the device
@@ -370,6 +404,15 @@ export default function Register() {
     } catch (e2) {
       const response = (e2 as AxiosError<ConflictBody>)?.response;
       const body = response?.data;
+      // The server applies the same age rule (400 AGE_REQUIREMENT) and its
+      // own date validation (400 VALIDATION); both name field 'birthDate',
+      // so either belongs under the input, not in a page banner.
+      const dobFailure = birthDateApiError(e2);
+      if (dobFailure) {
+        if (dobFailure.underMinimum) setUnderAge(true);
+        else setErrors({ birthDate: dobFailure.message }, ['birthDate']);
+        return;
+      }
       if (response?.status === 409 && body?.field === 'username') {
         // Put the error where the person can act on it, with free alternatives.
         setServerSuggestions(body.suggestions ?? []);
@@ -519,7 +562,26 @@ export default function Register() {
           </form>
         )}
 
-        {step === 3 && (
+        {/* The age block. It states the rule and offers the one door left;
+            it does not scold, and it says plainly that nothing was created. */}
+        {step === 3 && underAge ? (
+          <Callout
+            tone="warning"
+            title={UNDER_MIN_TITLE}
+            action={
+              <Link
+                to={UNDER_MIN_SUPPORT_HREF}
+                className="inline-flex min-h-11 items-center rounded-sm px-2 text-sm font-semibold text-text-1 underline-offset-2 hover:underline"
+              >
+                {UNDER_MIN_SUPPORT}
+              </Link>
+            }
+          >
+            {UNDER_MIN_BODY}
+          </Callout>
+        ) : null}
+
+        {step === 3 && !underAge && (
           <form onSubmit={register} className="space-y-4" noValidate>
             <Input
               id={FIELD_IDS.fullName}
@@ -582,6 +644,22 @@ export default function Register() {
                 </div>
               ) : null}
             </div>
+
+            <DateField
+              id={FIELD_IDS.birthDate}
+              label={BIRTH_DATE_LABEL}
+              autoComplete="bday"
+              max={todayIso()}
+              min={oldestIso()}
+              hint={fieldError.birthDate ? undefined : BIRTH_DATE_HINT}
+              error={fieldError.birthDate}
+              value={birthDate}
+              onChange={(e) => {
+                setBirthDate(e.target.value);
+                clearFieldError('birthDate');
+              }}
+              disabled={busy}
+            />
 
             <div>
               <PasswordField

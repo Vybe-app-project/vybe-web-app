@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format, parseISO } from 'date-fns';
 import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
+import { BIRTH_DATE_LABEL, storedBirthDate } from '../lib/birthDate';
 import { UnitsControl } from '../components/UnitsControl';
 import { VersionRow } from '../components/VersionRow';
 import { PlaceImage } from '../components/PlaceImage';
@@ -221,6 +223,7 @@ function AccountSection() {
           value={form.bio}
           onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))}
         />
+        <BirthDateRow user={meQuery.data} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           {meQuery.data?.email ? (
             <p className="text-xs text-text-3">
@@ -235,6 +238,32 @@ function AccountSection() {
         </div>
       </form>
     </SettingsCard>
+  );
+}
+
+/**
+ * Date of birth, read only.
+ *
+ * `birthDate` is written at registration and nowhere else: `PUT /users/me`
+ * takes fullName, username, bio, website and location; `PUT /users/settings`
+ * rejects any key outside its allow-list; `/api/me/*` has no profile write.
+ * So this row states what is on file and does not offer an edit it cannot
+ * carry out. An account made before the field shipped -- or through a
+ * provider, which never collects one -- simply has none, and the row says
+ * that rather than pretending the gap can be closed here.
+ */
+function BirthDateRow({ user }: { user?: PublicUser | null }) {
+  const stored = storedBirthDate(user);
+  const shown = stored ? format(parseISO(stored), 'd MMMM yyyy') : null;
+  return (
+    <div className="flex min-h-11 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-line pt-4">
+      <span className="type-label text-text-2">{BIRTH_DATE_LABEL}</span>
+      {shown ? (
+        <span className="tabular text-sm text-text-1">{shown}</span>
+      ) : (
+        <span className="text-sm text-text-2">Not on file. It can only be given when an account is created.</span>
+      )}
+    </div>
   );
 }
 

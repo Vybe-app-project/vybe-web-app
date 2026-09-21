@@ -534,7 +534,7 @@ test('the gate re-checks on the sign-in edge without a second request on a page 
 
 test('sign-up needs an explicit, unticked agreement on the one account-creation form and sends nothing extra', () => {
   const register = read('src/pages/Register.tsx');
-  assert.match(register, /import \{ Button, Callout, Checkbox, Input, Spinner, cx, useToast \} from '\.\/ui';/);
+  assert.match(register, /import \{ Button, Callout, Checkbox, DateField, Input, Spinner, cx, useToast \} from '\.\/ui';/);
   assert.match(register, /agree: 'reg-agree',/);
   assert.match(register, /const \[agreed, setAgreed\] = useState\(false\);/, 'never pre-ticked');
   assert.match(register, /if \(!agreed\) next\.agree = AGREE_REQUIRED;/);
@@ -550,7 +550,7 @@ test('sign-up needs an explicit, unticked agreement on the one account-creation 
   assert.match(box, /<a href="\/privacy-policy\.html" target="_blank" rel="noopener noreferrer"[^>]*>\s*Privacy Policy<span className="sr-only"> \(opens in a new tab\)<\/span>/);
   assert.match(box, /description=\{AGREE_HINT\}/);
   assert.match(register, /const AGREE_HINT = 'We record your agreement when your account is created\.';/);
-  assert.ok(register.indexOf('<Checkbox') > register.indexOf('{step === 3 && ('), 'inside the account form');
+  assert.ok(register.indexOf('<Checkbox') > register.indexOf('{step === 3 && !underAge && ('), 'inside the account form');
   assert.ok(register.indexOf('<Checkbox') < register.indexOf('Create account'), 'before the submit');
   // The agreement is not restored from the sign-up draft.
   const draft = register.slice(register.indexOf('writeRegisterDraft(sessionStorage, {'), register.indexOf('});', register.indexOf('writeRegisterDraft(sessionStorage, {')));
