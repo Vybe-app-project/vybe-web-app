@@ -120,7 +120,9 @@ test('each records route is called once, with the API\'s raw timezone offset; th
   assert.match(sheet, /enabled: open && preferences\.progressionHints,/, '/previous is read only while Suggestions is on');
   assert.match(sheet, /previous\.data\?\.suggested \?\? null/, 'a missing key draws no line');
   assert.match(sheet, /role="img" aria-label=\{trendDescription\(shownSeries\)\}/);
-  assert.match(sheet, /stroke=\{VIZ\.brand\}/);
+  // The line itself lives in the lazy chart module (Recharts off the hub's critical path); the sheet keeps the 13 rem box.
+  assert.match(sheet, /const TrendChart = lazy\(\(\) => import\('\.\/TrendChart'\)\);/);
+  assert.match(read('src/pages/progress/TrendChart.tsx'), /stroke=\{VIZ\.brand\}/);
   assert.doesNotMatch(sheet, /variant="primary"/, 'nothing in the sheet is a primary action');
   // Units: only the formatters convert; the page reads the store once and hands `system` down.
   assert.match(page, /const system = useUnits\(\(s\) => s\.system\);/);

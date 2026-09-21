@@ -1,15 +1,13 @@
-import { useId, useMemo, useState } from 'react';
+import { Suspense, lazy, useId, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../../lib/api';
-import { ChartEmpty, ErrorState, Modal, Skeleton, Tabs, VIZ, chartTheme, humanize } from '../ui';
+import { ChartEmpty, ErrorState, Modal, SegmentedControl, Skeleton, humanize } from '../ui';
 import {
   PROGRESS_STRINGS,
   RECORD_TYPES,
   RECORD_TYPE_TITLES,
   basisLine,
-  formatClock,
   formatRecordValue,
   formatTrendValue,
   sessionLine,
@@ -25,6 +23,9 @@ import {
   type WorkoutPreferences,
 } from '../../lib/progress';
 import type { UnitSystem } from '../../lib/unitConversions';
+
+// Recharts lives in the chart's own chunk; the box below keeps its 13 rem while it loads.
+const TrendChart = lazy(() => import('./TrendChart'));
 
 /**
  * The exercise detail for one movement (design-progression-hub.md §3.9):
@@ -47,7 +48,6 @@ const WINDOWS: ReadonlyArray<{ key: TrendWindow; label: string; days: number | n
   { key: 'all', label: 'All', days: null },
 ];
 
-const CHART_MARGIN = { top: 8, right: 8, bottom: 0, left: -8 };
 const DAY_MS = 86_400_000;
 
 /** The exercise's measure from what the history shows, when the summary did not say. */
@@ -120,7 +120,6 @@ export function ExerciseTrendSheet({
   const title = name ?? history.data?.sessions[0]?.exerciseName ?? humanize(id);
   const recordRows = RECORD_TYPES.map((type) => ({ type, record: records.data?.[type] ?? null })).filter((row) => row.record);
   const suggested = preferences.progressionHints ? previous.data?.suggested ?? null : null;
-  const animation = chartTheme.animationDuration;
   const timeAxis = series.unit === 's' || series.unit === 's/km' || series.unit === 's/mi';
 
   return (
@@ -156,7 +155,7 @@ export function ExerciseTrendSheet({
             <h3 id={`${headingId}-trend`} className="type-label text-text-2">
               {`${PROGRESS_STRINGS.trend} · ${series.what}`}
             </h3>
-            <Tabs variant="segmented" size="sm" aria-label="Trend window" tabs={WINDOWS.map((w) => ({ key: w.key, label: w.label }))} value={window} onChange={(k: string) => setWindow(k as TrendWindow)} />
+            <SegmentedControl size="sm" aria-label="Trend window" tabs={WINDOWS.map((w) => ({ key: w.key, label: w.label }))} value={window} onChange={(k: string) => setWindow(k as TrendWindow)} />
           </div>
           {history.isPending ? (
             <Skeleton className="h-52 w-full rounded-md" />
@@ -166,15 +165,9 @@ export function ExerciseTrendSheet({
             <ChartEmpty height={160} label={shownPoints.length === 1 ? `${PROGRESS_STRINGS.trendEmpty} One so far: ${formatTrendValue(series, shownPoints[0].value)} on ${shownPoints[0].label}.` : PROGRESS_STRINGS.trendEmpty} />
           ) : (
             <div className="h-52 w-full" role="img" aria-label={trendDescription(shownSeries)}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={shownPoints} margin={CHART_MARGIN}>
-                  <CartesianGrid {...chartTheme.cartesianGrid} />
-                  <XAxis dataKey="label" {...chartTheme.axisProps} minTickGap={24} />
-                  <YAxis {...chartTheme.axisProps} width={56} domain={['auto', 'auto']} tickFormatter={(v) => (timeAxis ? formatClock(Number(v)) : String(v))} />
-                  <Tooltip {...chartTheme.tooltip} formatter={(v) => [formatTrendValue(series, Number(v ?? 0)), series.what]} />
-                  <Line type="monotone" dataKey="value" stroke={VIZ.brand} strokeWidth={2} dot={{ r: 3, fill: VIZ.brand, strokeWidth: 0 }} activeDot={{ r: 5 }} isAnimationActive={animation > 0} animationDuration={animation} />
-                </LineChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<Skeleton className="h-full w-full rounded-md" />}>
+                <TrendChart series={series} points={shownPoints} timeAxis={timeAxis} />
+              </Suspense>
             </div>
           )}
           {series.lowerIsBetter && shownPoints.length >= 2 ? <p className="mt-1 text-2xs text-text-3">Pace: a lower line is a faster run.</p> : null}
