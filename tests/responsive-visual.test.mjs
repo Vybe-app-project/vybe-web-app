@@ -145,8 +145,10 @@ test('the shell shows progress and a keyed skeleton while a route chunk download
   assert.doesNotMatch(layout, /<Suspense key=/, 'no per-route Suspense key: it makes a grace period impossible');
   assert.match(layout, /<Suspense fallback=\{<RouteFallback \/>\}>\s+<RouteErrorBoundary>\{waiting \? <PageSkeleton \/> : \(children \?\? <Outlet \/>\)\}<\/RouteErrorBoundary>\s+<\/Suspense>/);
   assert.match(layout, /const pending = pendingPath !== null && pendingPath !== pathname;/);
-  assert.match(layout, /const waiting = pending && slow;\s+const shellMeta = waiting \? navMeta : meta;\s+const shellChrome = waiting \? null : chrome;\s+const shellPath = waiting && pendingPath \? pendingPath : pathname;/);
-  assert.match(layout, /<MobileTopBar meta=\{shellMeta\} title=\{title\} (?:titleNode=\{[^}]*\} )?back=\{shellChrome\?\.back\} actions=\{shellChrome\?\.actions\}/, 'the top bar follows the destination once its skeleton shows');
+  assert.match(layout, /const waiting = pending && slow;\s+const shellMeta = waiting \? navMeta : meta;\s+const shellPath = waiting && pendingPath \? pendingPath : pathname;/);
+  // Instagram shell (Q1): while the destination's skeleton shows nothing a page published counts (chromePath null), and the one header follows the destination's route row.
+  assert.match(layout, /const chromePath = waiting \? null : pathname;/);
+  assert.match(layout, /<AppHeader meta=\{shellMeta\} title=\{title\} chromePath=\{chromePath\}/, 'the header follows the destination once its skeleton shows');
   assert.match(layout, /<SectionTabs hub=\{hub\} pathname=\{shellPath\}/);
   assert.match(layout, /function RouteFallback\(\)[\s\S]*?setChunkLoading\(true\);[\s\S]*?return <PageSkeleton \/>;/, 'a hard load keeps the progress bar up for the whole download');
   assert.match(layout, /const show = usePendingNavigation\(selectNavigating\);/, 'the bar is driven by the store grace flag, not a second timer');
@@ -227,18 +229,20 @@ test('a page whose chunk is already in memory renders without suspending; only a
 /* ------------------------------------------------------------ desktop sidebar */
 
 test('the desktop sidebar scrolls visibly: compact rows, edge fades, no footer links, active item kept in view', () => {
-  const sidebar = layout.slice(layout.indexOf('function Sidebar('), layout.indexOf('function DesktopTopBar('));
+  const sidebar = layout.slice(layout.indexOf('function Sidebar('), layout.indexOf('const wantsBack ='));
   // Gym First (P2): scroll-padding on the list + scroll-margin on the row keep the active hub clear of the edge fades.
   assert.match(sidebar, /className=\{cx\('scroll-visible mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3 \[scroll-padding-block:3rem\] xl:px-4', fadeClass\(edges, 'y'\)\)\}/);
-  assert.match(layout.slice(layout.indexOf('function SideLink('), layout.indexOf('function SidebarGym(')), /scroll-my-12/);
+  assert.match(layout.slice(layout.indexOf('function SideLink('), layout.indexOf('function Sidebar(')), /scroll-my-12/);
+  // Instagram shell (Q1): no gym identity card in the sidebar (Instagram's left nav has no group card); the header carries the page, the sidebar the wordmark.
+  assert.doesNotMatch(sidebar, /SidebarGym|useHomeGym|PlaceImage|NO_GYM_COPY/);
   assert.match(sidebar, /useScrollEdges\(navRef, 'y'\)/);
   assert.match(sidebar, /scrollIntoView\(\{ block: 'nearest' \}\)/);
   assert.doesNotMatch(sidebar, /border-t border-line pt-3/, 'per-group rules cost 4 × 28 px');
   assert.doesNotMatch(sidebar, /to: '\/settings'/, 'Settings lives in the account menu, not a nav footer');
   assert.doesNotMatch(sidebar, /to: '\/support'/, 'Support lives in the account menu, not a nav footer');
   const sideLink = layout.slice(layout.indexOf('function SideLink('), layout.indexOf('function Sidebar('));
-  assert.match(sideLink, /relative flex h-10 items-center/, 'sidebar rows are 40 px');
-  assert.match(sideLink, /pointer-coarse:min-h-11/, 'and still 44 px on touch');
+  assert.match(sideLink, /pressable relative flex h-12 items-center/, 'sidebar rows are 48 px (Instagram) and pressable; 44 px on touch comes free');
+  assert.doesNotMatch(sideLink, /pointer-coarse:min-h-11/, 'no touch-only minimum is needed at 48 px');
   assert.match(css, /\.scroll-visible \{ scrollbar-width: thin; scrollbar-color: var\(--line-strong\) var\(--surface-2\); scrollbar-gutter: stable; \}/);
   assert.match(css, /@utility mask-fade-b \{ mask-image: linear-gradient\(to top, transparent, #000 40px\); \}/);
   // The account menu still offers both destinations.
@@ -279,8 +283,10 @@ test('Notifications has one Mark-all-read control per viewport and PageHeader ho
   assert.equal((page.match(/markAllButton\('(?:sm|md)'\)/g) || []).length, 2, 'md for desktop header, sm for the phone top bar');
   assert.match(page, /mobileActions=\{unreadCount > 0 \? markAllButton\('sm'\) : null\}/);
   assert.doesNotMatch(page, /lg:hidden">[\s\S]{0,200}markAllButton/, 'the inline phone row must not repeat the button');
-  // PageHeader lives in PageChrome.tsx (ui.tsx re-exports it) since the Instagram rebuild.
-  assert.match(read('src/components/PageChrome.tsx'), /actions: mobileActions === undefined \? actions : mobileActions/);
+  // PageHeader lives in PageChrome.tsx (ui.tsx re-exports it) since the Instagram rebuild. It publishes BOTH sets; the
+  // shell header picks: the desktop set from lg, and on phones `mobileActions` unless it is undefined.
+  assert.match(read('src/components/PageChrome.tsx'), /usePageChrome\(\{ title, subtitle, back, actions, mobileActions, rail, wide, hideSectionTabs, hideBottomNav \}\);/);
+  assert.match(layout, /const actions = wide \? desktopActions : mobileActions === undefined \? desktopActions : mobileActions;/);
 });
 
 test('page-level "+" actions use the quiet icon button; the Log circle is the only primary in the bar and shows a plus', () => {
@@ -452,7 +458,12 @@ test('touch targets reach 44 px: chips, 40 px icon buttons, theme segments, smal
 /* ------------------------------------------------------------ headings and landmarks */
 
 test('phone Home has a level-one heading; empty states and card headers default to h2; section tabs are a landmark', () => {
-  assert.match(layout, /<h1 className="sr-only">Home<\/h1>/);
+  // Instagram shell (Q1): the shell header draws the ONE <h1> for both breakpoints; on phone Home the wordmark is the
+  // visual title and the heading is read, not seen. PageHeader draws nothing.
+  assert.equal((layout.match(/<h1[\s>]/g) || []).length, 1, 'exactly one h1 in the shell');
+  assert.doesNotMatch(read('src/components/PageChrome.tsx'), /<h1/, 'PageHeader publishes only');
+  assert.match(layout, /isHome && 'max-lg:sr-only'/);
+  assert.match(layout, /\{titleNode \?\? title\}/);
   // /challenges: the card titles sit directly under the page h1, so they are h2 (axe heading-order).
   const challenges = read('src/pages/Challenges.tsx');
   assert.match(challenges, /<h2 className="line-clamp-2 text-md font-semibold text-text-1">\{challenge\.title\}<\/h2>/);
@@ -552,4 +563,101 @@ test('the gym is a pure-props GymHeader that reserves its geometry and never dra
   assert.doesNotMatch(css, /@property --band-p|band-collapse|\.gym-band\b|--band-h-|--band-ink|--band-chip|--band-scrim|--band-bar-h|--band-bg/);
   assert.doesNotMatch(css, /transition:[^;]*\b(height|width|top|margin|padding)\b/, 'no layout property animates anywhere');
   assert.doesNotMatch(ui, /transition:width/, 'nor in a component');
+});
+
+/* ------------------------------------------------------------ the Instagram shell (Q1) */
+
+test('the shell header is route-keyed and fixed-height, pages publish in a layout effect, and only the header re-renders with a page', () => {
+  const chrome = read('src/components/PageChrome.tsx');
+  // Publishing is a layout effect (the store is written before paint) and so is the cleanup; the store exposes per-field selectors.
+  assert.match(chrome, /useLayoutEffect\(\(\) => \{\s*set\(\{ \.\.\.chrome, path: pathname \}\);\s*\}\);/);
+  assert.doesNotMatch(chrome, /\buseEffect\b/, 'a passive effect publishes after paint: one frame with a bare bar');
+  assert.match(chrome, /export function usePageChromeField</);
+  const typeStart = chrome.indexOf('export type PageChrome = {');
+  const type = chrome.slice(typeStart, chrome.indexOf('};', typeStart));
+  for (const field of ['title?: string', 'titleNode?: ReactNode', 'subtitle?: ReactNode', 'back?: boolean | string', 'actions?: ReactNode', 'mobileActions?: ReactNode | null', 'rail?: ReactNode | null', 'wide?: boolean', 'hideSectionTabs?: boolean', 'hideBottomNav?: boolean']) {
+    assert.ok(type.includes(field), `PageChrome has ${field}`);
+  }
+  assert.doesNotMatch(type, /hideTopBar|band/, 'the shell has no band and no bar-less mode');
+  // The shell reads primitives through selectors, the header alone reads the element-valued fields, nothing subscribes to the whole object.
+  assert.doesNotMatch(layout, /usePageChromeStore/);
+  assert.match(layout, /const pageTitle = usePageChromeField\(chromePath, \(c\) => c\.title\);/);
+  assert.match(layout, /const title = pageTitle \|\| shellMeta\.title;/, 'route → page-published → "Vybe"');
+  assert.match(layout, /const FALLBACK_META: RouteMeta = \{ pattern: '\*', title: 'Vybe'/);
+  const header = layout.slice(layout.indexOf('function AppHeader('), layout.indexOf('const SectionTabs ='));
+  for (const field of ['titleNode', 'subtitle', 'back', 'actions', 'mobileActions']) {
+    assert.match(header, new RegExp(`usePageChromeField\\(chromePath, \\(c\\) => c\\.${field}\\)`), `only the header reads ${field}`);
+  }
+  assert.match(header, /grid h-12 grid-cols-\[1fr_auto_1fr\] items-center px-2 text-text-1 lg:flex lg:h-14/, '48 px on phones (plus the status bar), 56 px from lg: a title that arrives is a text swap');
+  assert.match(header, /className="vt-header safe-top sticky top-0 z-40 border-b border-line bg-surface-1"/);
+  assert.match(header, /subtitle \? 't-section' : 't-title'/, 'the subtitle stacks inside the same bar');
+  assert.match(header, /const homeNav = useNavLinkProps\('\/'\);/, 'the wordmark records intent like every other header link');
+  // Sidebar, bottom nav and section tabs are memoised and take primitives; the rail slot alone subscribes to `rail`.
+  for (const name of ['Sidebar', 'BottomNav', 'SectionTabs']) assert.match(layout, new RegExp(`const ${name} = memo\\(function ${name}\\(`), `${name} is memoised`);
+  assert.match(layout, /function RailSlot\(\{ chromePath, routeDefault \}/);
+  assert.match(layout, /const DEFAULT_RAIL = <DefaultRail \/>;/);
+  // No band anywhere in the shell.
+  assert.doesNotMatch(layout, /ShellBand|GymBand|useBandCollapse|--band|SidebarGym|DesktopTopBar|MobileTopBar|noGymAction|mintLog|useHomeGym|hideTopBar/);
+});
+
+test('the shell holds still through a route change: named view-transition parts, sticky offsets that match the header, one wordmark, 48 px tabs', () => {
+  for (const name of ['vt-header', 'vt-sidebar', 'vt-nav']) assert.equal((layout.match(new RegExp(`\\b${name}\\b`, 'g')) || []).length, 1, `${name} is on exactly one element`);
+  assert.match(css, /\.vt-header \{ view-transition-name: shell-header; \}/);
+  assert.match(css, /::view-transition-old\(shell-header\), ::view-transition-old\(shell-sidebar\), ::view-transition-old\(shell-nav\) \{ display: none; \}/);
+  // Section tabs stick at the header's exact height and scroll-padding-top uses the same numbers (rem is 15 px here: 3rem would be 45 px, not 48).
+  assert.match(layout, /'top-\[calc\(48px\+env\(safe-area-inset-top\)\)\] lg:top-14'/);
+  assert.match(css, /scroll-padding-top: calc\(48px \+ env\(safe-area-inset-top\)\);/);
+  assert.match(css, /@media \(min-width: 64rem\) \{ html \{ scroll-padding-top: 56px; \} \}/);
+  assert.doesNotMatch(layout, /3rem\+env/, 'no rem-based header offset');
+  // Sidebar: an icon rail from lg, the 244 px column from xl, the primary Log button, one wordmark per screen.
+  assert.match(layout, /hidden h-dvh w-18 shrink-0 flex-col border-r border-line bg-surface-1 lg:flex xl:w-sidebar/);
+  assert.match(css, /--container-sidebar: 16\.2667rem;/, '244 px at the 15 px root');
+  assert.match(layout, /<Button variant="primary" block onClick=\{\(\) => setOpen\(true\)\} icon=\{<Plus size=\{20\} \/>\}/, 'the sidebar Log button is the one blue on the desktop shell');
+  assert.match(layout, /className="pressable inline-flex h-11 items-center rounded-sm px-2 lg:hidden">\s*<Brand size="sm" \/>/, 'the phone wordmark hides from lg, where the sidebar carries it');
+  // Bottom tabs: 48 px, pressable, the 11 px labels kept, a red dot (never a count) on Home only, opaque like Instagram's.
+  assert.match(layout, /<ul className="mx-auto flex h-12 max-w-lg items-stretch justify-around">/);
+  assert.match(layout, /'pressable relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0\.5 rounded-sm'/);
+  assert.match(layout, /text-2xs leading-none/);
+  assert.match(css, /--text-2xs: 0\.7333rem;/, '11 px at the 15 px root');
+  assert.match(layout, /h-2 w-2 rounded-full bg-danger ring-2 ring-surface-1/);
+  assert.match(layout, /dot=\{tab\.key === 'home' && unread\}/);
+  assert.doesNotMatch(layout.slice(layout.indexOf('function BottomTab('), layout.indexOf('const BottomNav =')), /CountBadge/, 'no count pills on the tab bar');
+  assert.doesNotMatch(layout, /backdrop-blur/, 'the tab bar is opaque');
+});
+
+test('the sheet-as-page body slides up on transform only and drops the class at rest', () => {
+  // The sheet-as-page body slides up on transform only (240 ms, the route tier) and drops the class at rest.
+  const sheet = read('src/components/RouteSheet.tsx');
+  assert.match(sheet, /const ENTER_MS = 240;/);
+  assert.match(sheet, /className=\{entering \? 'anim-sheet-in' : undefined\}/);
+  assert.match(css, /\.anim-sheet-in \{ transform: translateY\(0\); transition: transform var\(--duration-2\) var\(--ease-out\); \}/);
+});
+
+test('scroll is restored on Back and reset on a new route; focus moves forward only; the foreground refresh keeps what is on screen', () => {
+  assert.match(app, /window\.history\.scrollRestoration = 'manual'/);
+  assert.match(app, /const navigationType = useNavigationType\(\);/);
+  assert.match(app, /if \(navigationType === 'POP'\) \{\s*const y = scrollPositions\.get\(location\.key\);/);
+  assert.match(app, /useLayoutEffect\(\(\) => \{\s*const overSheet = sheet \|\| wasSheet\.current;/, 'restored before paint');
+  assert.match(app, /const sheet = wide && !!backgroundLocationOf\(location\);/, 'on phones a sheet route is an ordinary page and scrolls like one');
+  assert.match(app, /<ScrollRestoration \/>/);
+  assert.doesNotMatch(app, /ScrollToTop/);
+  assert.match(layout, /if \(navigationType !== 'POP'\) \{\s*const main = document\.getElementById\('main'\);/, 'focus follows a forward navigation only');
+  // SessionRefresh: active queries refetch with their data kept; the account, gym, community and capability keys are left alone.
+  assert.match(app, /refetchType: 'active',\s*predicate: \(query\) => query\.state\.status === 'success' && !SESSION_STABLE_KEYS\.has\(String\(query\.queryKey\[0\]\)\)/);
+  assert.match(app, /const SESSION_STABLE_KEYS = new Set\(\['me', 'home-gym', 'community', 'capabilities', 'api-version'\]\);/);
+  assert.doesNotMatch(app, /void qc\.invalidateQueries\(\);/, 'never everything at once');
+});
+
+test('the home gym resolves without waiting for its cover, fills the gym page’s cache and says whether the viewer is a member', () => {
+  const gym = read('src/lib/homeGym.ts');
+  assert.match(gym, /export type HomeGymState = HomeGym & \{[\s\S]*?member: boolean;/);
+  assert.match(gym, /export const communityKey = \(id: string\) => \['community', id\] as const;/);
+  assert.match(gym, /qc\.setQueryData\(communityKey\(id\), community\);/);
+  assert.doesNotMatch(gym.slice(gym.indexOf('async function resolveHomeGym('), gym.indexOf('const refSignature')), /resolveCover/, 'the model returns before the photo');
+  assert.match(gym, /queryKey: \[\.\.\.HOME_GYM_KEY, 'cover', communityId, coverSig\]/, 'the cover is its own query');
+  assert.match(gym, /queryKey: \[\.\.\.HOME_GYM_KEY, 'today', communityId\]/, 'so is the leaderboard line');
+  // /users/me sends a bare id (API.md §1); a populated { _id, name } is tolerated, as PostCard already does.
+  assert.match(gym, /export function communityRefOf\(ref: HomeGymRef \| null \| undefined\)/);
+  assert.match(gym, /if \(typeof c === 'string'\) return isObjectId\(c\) \? \{ id: c \} : null;/);
+  assert.match(gym, /if \(c && typeof c === 'object'\) \{/);
 });
