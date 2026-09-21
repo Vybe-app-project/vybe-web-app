@@ -177,6 +177,8 @@ export default function Workouts() {
   const location = useLocation();
   const tabParam = params.get('tab');
   const kindParam = params.get('kind');
+  // The first-run quiz lands here with the programme that matches the member's goal (`/workouts?tab=browse&suggest=<planId>`).
+  const suggestParam = params.get('suggest');
   const tab: TabKey = tabFrom(tabParam);
   const [addingTo, setAddingTo] = useState<WorkoutPlan | null>(null);
   const [addToPlan, setAddToPlan] = useState<SocialWorkout | null>(null);
@@ -255,7 +257,7 @@ export default function Workouts() {
 
   // `?tab=plans` / `#plans` and `?kind=programs` were panes; now they are sections — scroll to them once they have rendered.
   const wantsPlans = tabParam === 'plans' || location.hash === '#plans';
-  const wantsPrograms = kindParam === 'programs';
+  const wantsPrograms = kindParam === 'programs' || Boolean(suggestParam);
   const plansReady = !browsing && !plans.isPending;
   const programsReady = browsing && !premadePlans.isPending;
   useEffect(() => {
@@ -492,7 +494,13 @@ export default function Workouts() {
               ) : (
                 <RowList>
                   {premadePlans.data.map((plan) => (
-                    <PlanRow key={plan._id} plan={plan} to={TRAIN.plan(plan._id)} state={sheetState} extra={[enrolledMeta(enrolments.byPlan.get(plan._id))]} />
+                    <PlanRow
+                      key={plan._id}
+                      plan={plan}
+                      to={TRAIN.plan(plan._id)}
+                      state={sheetState}
+                      extra={[enrolledMeta(enrolments.byPlan.get(plan._id)), suggestParam === plan._id && 'Suggested for your goal']}
+                    />
                   ))}
                 </RowList>
               )}
