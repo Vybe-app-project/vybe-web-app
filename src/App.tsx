@@ -495,6 +495,10 @@ const ROUTE_TREE = (
       <Route path="health/water" element={<Water />} />
       <Route path="health/photos" element={<ProgressPhotos />} />
       <Route path="challenges" element={<Challenges />} />
+      {/* P8a: one challenge by id. The page opens the same detail its
+          `?open=` parameter does, so a shared link — a chat card, a push, an
+          invite — lands on the challenge itself rather than on the list. */}
+      <Route path="challenges/:challengeId" element={<Challenges />} />
       <Route path="achievements" element={<Achievements />} />
       {/* Weekly and monthly recaps; /recaps/:id is also the mobile deep link. */}
       <Route path="recaps" element={<Recaps />} />

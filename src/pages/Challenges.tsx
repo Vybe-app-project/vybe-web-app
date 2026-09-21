@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isValid, parseISO } from 'date-fns';
 import { api, mediaUrl } from '../lib/api';
@@ -1540,8 +1540,12 @@ export default function Challenges() {
   const [myStatus, setMyStatus] = useState<MyStatus>('active');
   const [createOpen, setCreateOpen] = useState(false);
   // Search results and shared links land on /challenges?open=<id>; links minted before 2026-09-21 used ?challenge=<id>.
+  // P8a: /challenges/<id> is the same thing as a path, so a chat card, a push
+  // or an invite opens the challenge rather than the list it sits in.
   const [searchParams, setSearchParams] = useSearchParams();
-  const openedFromLink = searchParams.get('open') ?? searchParams.get('challenge');
+  const { challengeId: openedFromPath } = useParams();
+  const navigate = useNavigate();
+  const openedFromLink = openedFromPath ?? searchParams.get('open') ?? searchParams.get('challenge');
   const [detailId, setDetailId] = useState<string | null>(() => openedFromLink);
   useEffect(() => {
     if (openedFromLink) setDetailId(openedFromLink);
@@ -1718,9 +1722,14 @@ export default function Challenges() {
     };
   })();
 
-  /** Shared by both details: close and drop the deep-link parameter with it. */
+  /** Shared by both details: close and drop the deep link with it. */
   const closeDetail = () => {
     setDetailId(null);
+    // A path deep link has no parameter to delete: it goes back to the list.
+    if (openedFromPath) {
+      navigate('/challenges', { replace: true });
+      return;
+    }
     if (searchParams.get('open') || searchParams.get('challenge')) {
       setSearchParams(
         (prev) => {

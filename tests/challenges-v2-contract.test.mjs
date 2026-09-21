@@ -92,6 +92,18 @@ test('the flags are named, and the page reads them through this module', () => {
   assert.match(page, /const v2 = useChallengesV2\(\);/);
 });
 
+test('one challenge has a path of its own, so a shared link lands on it', () => {
+  const app = read('src/App.tsx');
+  assert.match(app, /<Route path="challenges\/:challengeId" element=\{<Challenges \/>\} \/>/);
+  // The route is additive: the list keeps its own path and its ?open= link.
+  assert.match(app, /<Route path="challenges" element=\{<Challenges \/>\} \/>/);
+  const page = read('src/pages/Challenges.tsx');
+  assert.match(page, /const \{ challengeId: openedFromPath \} = useParams\(\);/);
+  assert.match(page, /const openedFromLink = openedFromPath \?\? searchParams\.get\('open'\) \?\? searchParams\.get\('challenge'\);/);
+  // Closing a path deep link goes back to the list, not to a dead parameter.
+  assert.match(page, /if \(openedFromPath\) \{\s*navigate\('\/challenges', \{ replace: true \}\);/);
+});
+
 /* ------------------------------------------------------------------ the zero rule */
 
 test('a standing is a fact only after a seat and a counted day', () => {
