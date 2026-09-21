@@ -3,8 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { membershipOf } from '../lib/gyms';
-import { useHomeGym, type HomeGymState } from '../lib/homeGym';
+import { useHomeGym } from '../lib/homeGym';
 import { FEED_PAGE_SIZE, dedupeById, feedPageParams, nextFeedPageParam, type FeedPageParam } from '../lib/feedLogic';
 import {
   ACCEPTED_IMAGE_TYPES,
@@ -470,9 +469,6 @@ function NewPostsPill({ fresh, onShow, busy }: { fresh: Post[]; onShow: () => vo
 /* Feed                                                                */
 /* ------------------------------------------------------------------ */
 
-/** Whether the viewer belongs to the home gym: the shell's answer when it carries one, else the community's own membership flags. */
-const homeGymMember = (home: HomeGymState): boolean => (home as HomeGymState & { member?: boolean }).member ?? membershipOf(home.community).isMember;
-
 export default function Feed() {
   const qc = useQueryClient();
   const online = useOnline();
@@ -569,7 +565,7 @@ export default function Feed() {
           top bar and bled to the viewport (the shell insets <main> by a gutter
           and pads its top 16/24 px). No gym: the 48 px "Find your gym" row —
           the one place Home says it. Both states are the header's own. */}
-      <GymHeader variant="compact" gym={home.gym} member={homeGymMember(home)} loading={home.loading} className="-mx-gutter -mt-4 lg:-mt-6" />
+      <GymHeader variant="compact" gym={home.gym} member={home.member} loading={home.loading} className="-mx-gutter -mt-4 lg:-mt-6" />
       <PullIndicator {...pullState} />
       <NewPostsPill fresh={fresh} onShow={() => void showNew()} busy={showingNew} />
 

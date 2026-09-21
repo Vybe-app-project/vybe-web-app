@@ -226,9 +226,6 @@ const sidebarActive = (meta: RouteMeta, item: SidebarItem): boolean => (item.hub
 
 /** Destinations that only make sense when the server runs the feature. */
 const LIVE_PATH = '/live';
-/** The progression hub exists only while `features.progression` is on for the member (Wave F). */
-const PROGRESS_PATH = '/workouts/progress';
-
 /**
  * The Log action sheet. Targets carry a query flag the destination page reads
  * to open its composer/logger immediately: `?compose=1` on Home, `?log=1` on

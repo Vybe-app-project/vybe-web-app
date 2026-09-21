@@ -41,7 +41,8 @@ test('the route and its entry points are registered, and every one hides behind 
   assert.match(layout, /\{ to: '\/workouts\/progress', label: 'Progress' \}/, 'HUBS.train');
   // Gym First (P2): the sidebar is six flat hubs; Progress lives only in the Train hub's tabs.
   assert.match(layout, /\{ to: '\/workouts', label: 'Train', Icon: Dumbbell, hub: 'train' \}/, 'SIDEBAR Train hub');
-  assert.match(layout, /const PROGRESS_PATH = '\/workouts\/progress';/);
+  // The old shell kept a PROGRESS_PATH constant to filter the sidebar; the six-hub shell has no
+  // such filter, so the path lives in ROUTES and HUBS above, which this test already pins.
   // The hub is visible with the flag off, like the app (GET /workouts/records/summary is not gated): no nav or tab filter.
   assert.doesNotMatch(layout, /progressionEnabled/);
   assert.doesNotMatch(layout, /\{ to: '\/workouts\/progress', label: 'Progress', Icon: TrendingUp \}/, 'no sub-page rows in the flat sidebar');

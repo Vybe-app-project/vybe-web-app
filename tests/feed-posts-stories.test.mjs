@@ -223,7 +223,9 @@ test('card counts prefer the server totals over the capped preview arrays', asyn
 test('Home is Instagram-shaped: the compact gym header, a rail that is never empty, hairline posts (Q2)', () => {
   const feed = read('src/pages/Feed.tsx');
   // The gym is one row at the top of <main>, from the shell's one read; no band, no gym tabs, no hashtag strip on the phone feed.
-  assert.match(feed, /<GymHeader variant="compact" gym=\{home\.gym\} member=\{homeGymMember\(home\)\} loading=\{home\.loading\}/);
+  // `member` comes straight off the shell's one home-gym read; Feed keeps no membership logic of its own.
+  assert.match(feed, /<GymHeader variant="compact" gym=\{home\.gym\} member=\{home\.member\} loading=\{home\.loading\}/);
+  assert.doesNotMatch(feed, /membershipOf/, 'membership is the shell hook’s answer, not recomputed here');
   assert.match(feed, /const home = useHomeGym\(\);/);
   assert.doesNotMatch(feed, /band=\{\{|GymTabs|TrendingHashtags|gym-band-tab|useViewerGym/);
   // Pull to refresh never animates height: a 0 px wrapper and a disc on translateY.

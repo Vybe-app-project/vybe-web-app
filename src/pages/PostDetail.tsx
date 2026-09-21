@@ -344,7 +344,7 @@ export default function PostDetail() {
       />
 
       <div className="space-y-4">
-        {postQuery.isLoading ? <PostCardSkeleton /> : null}
+        {postQuery.isLoading ? <PostCardSkeleton surface="card" /> : null}
 
         {postQuery.isError ? (
           gone ? (
