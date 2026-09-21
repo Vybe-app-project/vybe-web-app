@@ -194,7 +194,41 @@ export async function ackWelcomeBack(body: WelcomeBackAckBody): Promise<void> {
   await api.post('/me/welcome-back/ack', body);
 }
 
+
 /* ----------------------------------------------------------------- copy */
+
+/**
+ * The strings are the design's own table
+ * (~/scratch/2026-09-18-vybe-v2/waveG-prep/design-insights-recap-v2.md §5:
+ * `score.*`, `part.*`, `load.*`), rendered verbatim so web and app say the
+ * same words. The one number is the **Vybe score**: a bounded consistency
+ * summary of what the member logged, never a health reading, a fitness level
+ * or a verdict. The band is a word in the ink colour — never red, never
+ * green — and `movedBy` is neutral hint text, the way the Progress tiles
+ * print their comparison.
+ */
+export const VYBE_SCORE = {
+  name: 'Vybe score',
+  /** What it measures, in one noun. */
+  measure: 'Consistency',
+  eyebrow: (window: string) => `This ${window}`,
+  total: (total: string, outOf: string) => `${total} of ${outOf}`,
+  /** The owner's override for the zero rule: a word in the number's place, never a 0. */
+  calibrating: 'Calibrating',
+  totalWithheld: 'Total shows once every part has data.',
+  showTotalOff: 'The total is off in your insights preferences. The parts below still score.',
+  disclosure: (window: string) => `Based only on what you logged this ${window}. An estimate, not medical advice.`,
+  about: 'About this score',
+  parts: 'The three parts',
+  open: 'Open Progress',
+} as const;
+
+/** `score.band.low / .ok / .high`. Text, never a colour. */
+export const SCORE_BANDS: Readonly<Record<string, string>> = Object.freeze({ low: 'Low', ok: 'OK', high: 'High' });
+
+export function bandWord(band: string | null | undefined): string | null {
+  return SCORE_BANDS[String(band ?? '')] ?? null;
+}
 
 export const SCORE_PART_LABELS: Readonly<Record<string, string>> = Object.freeze({
   sessions: 'Sessions',
@@ -202,11 +236,18 @@ export const SCORE_PART_LABELS: Readonly<Record<string, string>> = Object.freeze
   meals: 'Meals',
 });
 
+/** `part.noData` / `part.off`: an en dash and the word, never a zero. */
+export const PART_NO_DATA = '—';
+export const PART_OFF = 'Off';
+
 /**
- * The backend's reason table, verbatim (`services/rhythmSuggestions.js
- * COPY.reason`): what the member can do so a withheld part scores. `age` is
- * deliberately empty — a minor is told nothing about a part that is off for
- * them.
+ * The exact gap a withheld part still has, from the API's `reason` and
+ * `missing`. The sentences are the backend's own table
+ * (`services/rhythmSuggestions.js COPY.reason`, which the design table
+ * repeats as `part.*.need*` / `load.need*`); they are authored server-side
+ * and never sent over the wire, so they are mirrored here rather than
+ * invented. `age` is deliberately empty: a minor is told nothing about a
+ * part that is off for them.
  */
 export const REASON_COPY = Object.freeze({
   set_target: 'Pick how many days a week you’ll train and this part scores.',
@@ -216,7 +257,6 @@ export const REASON_COPY = Object.freeze({
   age: '',
 });
 
-/** The server's sentence for a withheld part or a withheld load; empty string when it has none. */
 export function reasonCopy(reason: string | null | undefined, missing: number | null | undefined): string {
   const n = Number.isFinite(Number(missing)) ? Math.max(1, Number(missing)) : 1;
   switch (reason) {
@@ -233,159 +273,188 @@ export function reasonCopy(reason: string | null | undefined, missing: number | 
   }
 }
 
+const whole = (n: number) => Math.round(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+const GOAL_SOURCE: Readonly<Record<string, string>> = Object.freeze({
+  setting: 'your setting',
+  default: 'Vybe default',
+  health: 'your Health app goal',
+});
+
 export type ScoreRow = {
   key: string;
   label: string;
-  /** "36 / 40" while the part scored; the reason sentence otherwise, or null when the API withholds both. */
-  value: string | null;
-  /** The inputs the number came from, spelled out. */
+  /** "36 of 40" when the part scored, "Off" when it is off for this member, an en dash otherwise. */
+  value: string;
+  /** The inputs the number came from; null when the API sent none. */
   inputs: string | null;
+  /** The exact gap, on a withheld part only. */
+  gap: string | null;
+  state: ScoreState;
 };
 
-const whole = (n: number) => Math.round(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
-
-const of = (a: number, b: number, noun: string) => `${whole(a)} of ${plural(b, noun)}`;
-
-const GOAL_SOURCE: Readonly<Record<string, string>> = Object.freeze({
-  setting: 'your goal',
-  default: 'the default goal',
-  health: 'the Health app’s goal',
-});
-
-/**
- * The inputs of one part, in its own terms. Every clause is a pair the API
- * sent; a pair with a missing half is left out rather than printed as a zero.
- */
+/** `part.<key>.inputs`: the pairs the part measured, each one straight from `inputs`. */
 export function partInputs(part: Pick<ScorePart, 'key' | 'inputs'>): string | null {
   const i = part.inputs || {};
   const bits: string[] = [];
   if (part.key === 'sessions') {
-    if (Number.isFinite(Number(i.daysCounted)) && Number(i.target) > 0) bits.push(of(Number(i.daysCounted), Number(i.target), 'day'));
+    if (Number.isFinite(Number(i.daysCounted)) && Number(i.target) > 0) bits.push(`${plural(Number(i.daysCounted), 'day')} of ${whole(Number(i.target))}`);
     if (Number.isFinite(Number(i.activeMinutes)) && Number(i.minutesTarget) > 0) bits.push(`${whole(Number(i.activeMinutes))} of ${whole(Number(i.minutesTarget))} min`);
   } else if (part.key === 'movement') {
-    if (Number.isFinite(Number(i.daysAtGoal)) && Number(i.daysWithSteps) > 0) bits.push(`${of(Number(i.daysAtGoal), Number(i.daysWithSteps), 'day')} at goal`);
+    if (Number.isFinite(Number(i.daysAtGoal)) && Number(i.goal) > 0) bits.push(`${plural(Number(i.daysAtGoal), 'day')} at ${whole(Number(i.goal))} steps or more`);
     if (Number(i.goal) > 0) {
       const source = GOAL_SOURCE[String(i.goalSource ?? '')];
-      bits.push(`${whole(Number(i.goal))} steps${source ? ` (${source})` : ''}`);
+      if (source) bits.push(`goal ${whole(Number(i.goal))} steps a day (${source})`);
     }
   } else if (part.key === 'meals') {
-    if (Number.isFinite(Number(i.daysLogged)) && Number(i.needed) > 0) bits.push(`${of(Number(i.daysLogged), Number(i.needed), 'day')} logged`);
-    if (Number(i.weeksConsistent) > 0) bits.push(`${plural(Number(i.weeksConsistent), 'consistent week')}`);
+    if (Number.isFinite(Number(i.daysLogged)) && Number(i.needed) > 0) bits.push(`${plural(Number(i.daysLogged), 'day')} logged · ${whole(Number(i.needed))} a week counts in full`);
+    if (Number(i.weeksConsistent) > 0) bits.push(`${plural(Number(i.weeksConsistent), 'week')} in a row`);
   }
   return bits.length ? bits.join(' · ') : null;
 }
 
+export const MEALS_OFF_COPY = 'No meals logged in 28 days. Log one and this part scores.';
+
 /**
- * The hairline list under the headline: one row per part the API sent, its
- * points against its own budget, and the inputs it read. A part that is
- * `off` for this member carries no row at all — the budget already dropped
- * by its share.
+ * One row per part the API sent, its points against its own budget, the
+ * inputs it read and — on a withheld part — the exact gap. An `off` part
+ * keeps its row and says so: the budget above it has already re-based by its
+ * share, and a member should see why.
  */
 export function scoreRows(score: Pick<InsightsScore, 'parts'> | null | undefined): ScoreRow[] {
   const parts = Array.isArray(score?.parts) ? score.parts : [];
-  const rows: ScoreRow[] = [];
-  for (const part of parts) {
-    if (part.state === 'off') continue;
-    const label = SCORE_PART_LABELS[String(part.key)] ?? String(part.key);
+  return parts.map((part) => {
+    const key = String(part.key);
     const scored = part.state === 'scored' && Number.isFinite(Number(part.points));
-    const reason = scored ? '' : reasonCopy(part.reason, part.missing);
-    rows.push({
-      key: String(part.key),
-      label,
-      value: scored ? `${whole(Number(part.points))} / ${whole(Number(part.outOf))}` : reason || null,
-      inputs: partInputs(part),
-    });
-  }
-  return rows;
+    const off = part.state === 'off';
+    return {
+      key,
+      label: SCORE_PART_LABELS[key] ?? key,
+      value: scored ? `${whole(Number(part.points))} of ${whole(Number(part.outOf))}` : off ? PART_OFF : PART_NO_DATA,
+      inputs: off ? (key === 'meals' ? MEALS_OFF_COPY : null) : partInputs(part),
+      gap: scored || off ? null : reasonCopy(part.reason, part.missing) || null,
+      state: part.state,
+    };
+  });
 }
 
-/**
- * The one plain line under the number, and only from `movedBy` — the single
- * comparison the API makes, against the member's own earlier window and
- * never against another member. Absent on a first window and when nothing
- * moved, so the card says nothing rather than restating the list above it.
- */
-export function movedLine(score: Pick<InsightsScore, 'movedBy'> | null | undefined): string | null {
-  const moved = Array.isArray(score?.movedBy) ? score.movedBy[0] : null;
-  if (!moved) return null;
-  const from = Number(moved.detail?.from);
-  const to = Number(moved.detail?.to);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
-  const label = SCORE_PART_LABELS[String(moved.key)] ?? String(moved.key);
-  return `${label} moved from ${whole(from)} to ${whole(to)} points against the same week a period earlier.`;
-}
-
-/** "62 / 100" when the API sent a total; null when a part was short or the member switched the total off. */
-export function scoreHeadline(score: Pick<InsightsScore, 'total' | 'outOf' | 'showTotal'> | null | undefined): { value: string; outOf: string } | null {
-  if (!score || score.showTotal !== true) return null;
-  const total = Number(score.total);
-  const outOf = Number(score.outOf);
-  if (!Number.isFinite(total) || !Number.isFinite(outOf) || outOf <= 0) return null;
-  return { value: whole(total), outOf: `/ ${whole(outOf)}` };
-}
-
-/** Why the total is withheld: the first part the API is still short of. */
-export function withheldLine(score: Pick<InsightsScore, 'parts' | 'showTotal'> | null | undefined): string | null {
-  if (!score) return null;
-  if (score.showTotal !== true) return 'The total is off in your insights preferences. The parts below still score.';
+/** True while any part the API scored is still short: the headline calibrates instead of showing a number. */
+export function isCalibrating(score: Pick<InsightsScore, 'parts' | 'total'> | null | undefined): boolean {
+  if (!score) return false;
   const parts = Array.isArray(score.parts) ? score.parts : [];
-  for (const part of parts) {
+  return parts.some((part) => part.state === 'not_enough_data');
+}
+
+/** The one gap sentence the calibrating headline shows: the first part the API is still short of. */
+export function calibratingGap(score: Pick<InsightsScore, 'parts'> | null | undefined): string | null {
+  for (const part of Array.isArray(score?.parts) ? score.parts : []) {
     if (part.state !== 'not_enough_data') continue;
-    const reason = reasonCopy(part.reason, part.missing);
-    if (reason) return reason;
+    const gap = reasonCopy(part.reason, part.missing);
+    if (gap) return gap;
   }
   return null;
 }
 
-/**
- * Apple's five words for the load ratio, one rendering per server key. Never
- * a colour and never a judgement: the label says where this week sits
- * against the member's own previous weeks, which is all the ratio measures.
- */
-export const LOAD_LABELS: Readonly<Record<string, string>> = Object.freeze({
-  well_below: 'Well below',
-  below: 'Below',
-  steady: 'Steady',
-  above: 'Above',
-  well_above: 'Well above',
-});
+export type ScoreHeadline = {
+  /** The number, or the word in its place while the score calibrates. */
+  value: string;
+  /** "of 100", absent while calibrating. */
+  outOf: string | null;
+  /** Low / OK / High; absent while calibrating or with the total switched off. */
+  band: string | null;
+  /** The exact gap, or why the total is withheld. */
+  note: string | null;
+  calibrating: boolean;
+};
 
 /**
- * The load's one line. Scored: the server's label plus the window it
- * compared (the chronic mean's own week count). Withheld: the server's
- * reason sentence. Off for a minor: nothing at all.
+ * The headline, by the design's total rules: a number and its band when the
+ * API sent a total; the calibrating word and the exact gap while a part is
+ * short; the parts alone when the member switched the total off (D-105).
  */
+export function scoreHeadline(score: InsightsScore | null | undefined): ScoreHeadline | null {
+  if (!score) return null;
+  if (isCalibrating(score)) {
+    return { value: VYBE_SCORE.calibrating, outOf: null, band: null, note: calibratingGap(score) ?? VYBE_SCORE.totalWithheld, calibrating: true };
+  }
+  if (score.showTotal !== true) return { value: VYBE_SCORE.calibrating, outOf: null, band: null, note: VYBE_SCORE.showTotalOff, calibrating: true };
+  const total = Number(score.total);
+  const outOf = Number(score.outOf);
+  if (!Number.isFinite(total) || !Number.isFinite(outOf) || outOf <= 0) {
+    return { value: VYBE_SCORE.calibrating, outOf: null, band: null, note: VYBE_SCORE.totalWithheld, calibrating: true };
+  }
+  return { value: whole(total), outOf: `of ${whole(outOf)}`, band: bandWord(score.band), note: null, calibrating: false };
+}
+
+/**
+ * The one comparison the API makes — `movedBy`, against the member's own
+ * earlier window of the same length and never against another member — as
+ * neutral hint text: a signed number and the words, no arrow and no verdict
+ * colour (the Progress tiles' rule, design-progression-hub.md §3.8).
+ */
+export function movedHint(score: Pick<InsightsScore, 'movedBy'> | null | undefined): string | null {
+  const moved = Array.isArray(score?.movedBy) ? score.movedBy[0] : null;
+  if (!moved) return null;
+  const delta = Number(moved.delta);
+  if (!Number.isFinite(delta) || delta === 0) return null;
+  const label = SCORE_PART_LABELS[String(moved.key)] ?? String(moved.key);
+  const sign = delta > 0 ? '+' : '−';
+  return `${label} ${sign}${whole(Math.abs(delta))} points vs your previous week`;
+}
+
+/* ----------------------------------------------------------- the load */
+
+/** `load.label.*`: the server's five keys as the design's five sentences. Never a colour. */
+export const LOAD_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  well_below: 'This week is well below your usual.',
+  below: 'This week is below your usual.',
+  steady: 'This week is steady with your usual.',
+  above: 'This week is above your usual.',
+  well_above: 'This week is well above your usual.',
+});
+
+export const LOAD_STRINGS = {
+  title: 'Training load',
+  weeks: 'Load by week',
+  thisWeek: 'This week',
+  usual: 'Your usual',
+  usualNote: 'Your usual is the average of the last four weeks.',
+  showNumbers: 'Show numbers',
+  hideNumbers: 'Hide numbers',
+  explainer: 'Effort times minutes, added up. Rate a session on Workout complete.',
+  offer: 'Want a lighter session today?',
+} as const;
+
+/** The load's one line: the design sentence for the server's label, or the server's gap. */
 export function loadLine(load: TrainingLoad | null | undefined): string | null {
   if (!load || load.state === 'off') return null;
   if (load.state === 'not_enough_data') return reasonCopy(load.reason, load.missing) || null;
-  const label = LOAD_LABELS[String(load.label ?? '')];
-  if (!label) return null;
-  const weeks = Number(load.chronic?.weeks);
-  if (!Number.isFinite(weeks) || weeks < 1) return `${label} your usual.`;
-  return `${label} your usual — this week against your previous ${plural(weeks, 'week')}.`;
+  return LOAD_LABELS[String(load.label ?? '')] ?? null;
 }
 
-/** "3 sessions, 1 effort estimated": what the acute week is made of, for the disclosure. */
-export function loadInputs(load: TrainingLoad | null | undefined): string | null {
+/** `load.numbers(acute, chronic, ratio)` — the disclosure behind "Show numbers". */
+export function loadNumbers(load: TrainingLoad | null | undefined): string | null {
   if (!load || load.state !== 'scored') return null;
-  const bits: string[] = [];
+  const acute = Number(load.acute?.load);
+  const chronic = Number(load.chronic?.weeklyMean);
+  const ratio = Number(load.ratio);
+  if (!Number.isFinite(acute) || !Number.isFinite(chronic)) return null;
+  const tail = Number.isFinite(ratio) ? ` · Ratio ${ratio.toFixed(2)}` : '';
+  return `${LOAD_STRINGS.thisWeek} ${whole(acute)} · ${LOAD_STRINGS.usual} ${whole(chronic)}${tail}`;
+}
+
+/** `load.rated(n, m)` — how much of the week was the member's own rating. */
+export function loadRatedLine(load: TrainingLoad | null | undefined): string | null {
+  if (!load || load.state !== 'scored') return null;
+  const rated = Number(load.acute?.rated);
   const sessions = Number(load.acute?.sessions);
-  if (sessions > 0) bits.push(plural(sessions, 'session'));
-  const estimated = Number(load.acute?.estimated);
-  if (estimated > 0) bits.push(`${whole(estimated)} effort estimated`);
-  const mean = Number(load.chronic?.weeklyMean);
-  if (mean > 0) bits.push(`usual ${whole(mean)} a week`);
-  return bits.length ? bits.join(' · ') : null;
+  if (!Number.isFinite(rated) || !(sessions > 0)) return null;
+  return `${whole(rated)} of ${plural(sessions, 'session')} rated; the rest estimated from your median.`;
 }
 
 /** The lighter-session offer, and only when the API made it (Focus = Recover on a high load). */
-export const LOAD_OFFER_COPY: Readonly<Record<string, string>> = Object.freeze({
-  lighter_session: 'A lighter session would suit this week.',
-});
-
 export function loadOfferLine(load: TrainingLoad | null | undefined): string | null {
-  const offer = String(load?.offer ?? '');
-  return LOAD_OFFER_COPY[offer] ?? null;
+  return load?.offer === 'lighter_session' ? LOAD_STRINGS.offer : null;
 }
 
 /** The bars the weekly strip draws; a `null` load is a week the API could not total, not a zero. */
@@ -394,7 +463,7 @@ export type LoadBar = { weekKey: string; load: number | null; sessions: number; 
 /**
  * The strip's geometry: every week the API sent, scaled against the tallest
  * week in the set. The API gives no scale, so there is no y-axis — the bars
- * are relative to each other and each one says its own number aloud.
+ * are relative to each other and each says its own number aloud.
  */
 export function loadBars(load: Pick<TrainingLoad, 'weekly'> | null | undefined): LoadBar[] {
   const weeks = Array.isArray(load?.weekly) ? load.weekly : [];
@@ -424,6 +493,8 @@ export function loadBarLabel(bar: LoadBar): string {
   return `${when}: ${whole(bar.load)} load from ${plural(bar.sessions, 'session')}`;
 }
 
+/* ------------------------------------------------------------------ focus */
+
 /** The four focus values the route accepts, with the server's own labels (services/focusRules.js FOCUS_LABELS). */
 export const FOCUS_LABELS: Readonly<Record<FocusKind, string>> = Object.freeze({
   build: 'Build',
@@ -436,18 +507,18 @@ export const FOCUS_KINDS: readonly FocusKind[] = ['build', 'event', 'stay_active
 
 export const FOCUS_OPTIONS: ReadonlyArray<{ kind: FocusKind; label: string }> = FOCUS_KINDS.map((kind) => ({ kind, label: FOCUS_LABELS[kind] }));
 
-/** The focus row's value: the server's label, with the event day when it carries one. */
+/** The focus row's value: the server's own label, printed as given. */
 export function focusValue(focus: Focus | null | undefined): string | null {
   if (!focus) return null;
-  const label = focus.label || FOCUS_LABELS[focus.kind] || null;
-  if (!label) return null;
-  return label;
+  return focus.label || FOCUS_LABELS[focus.kind] || null;
 }
+
+/* ------------------------------------------------------------ welcome back */
 
 /**
  * The welcome-back line. The API sends no sentence, only the gap and the
- * offers, so the greeting is composed from `idleDays` and — above zero only
- * — the chain that is still standing. Nothing about what the gap cost.
+ * offers, so the greeting is composed from `idleDays` and — above zero only —
+ * the chain that is still standing. Nothing about what the gap cost.
  */
 export function welcomeBackLine(record: WelcomeBack | null | undefined): string | null {
   if (!record) return null;
@@ -480,15 +551,11 @@ export function welcomeBackOffer(record: WelcomeBack | null | undefined): Welcom
 }
 
 export const INSIGHTS_STRINGS = {
-  scoreTitle: 'This week',
-  scoreLabel: 'Consistency',
-  disclosure: 'About this score',
-  loadTitle: 'Training load',
-  loadWeeks: 'Load by week',
   focusRow: 'This week’s focus',
   focusEdit: 'Change focus',
   focusSheet: 'This week’s focus',
   focusNone: 'Choose one',
   focusSave: 'Save focus',
   focusEventDate: 'Event date',
+  focusClear: 'Clear focus',
 } as const;
