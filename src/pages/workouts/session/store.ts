@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import * as draft from './draft';
 import {
@@ -366,4 +367,32 @@ export function restStats(rest: RestTimerState | null, now: number = Date.now())
   if (!rest) return null;
   const left = remainingMs(rest, now);
   return { remainingMs: left, over: left === 0, durationSec: rest.durationSec, setId: rest.setId, exerciseKey: rest.exerciseKey };
+}
+
+/**
+ * A clock that reads the wall clock rather than counting one. A hidden tab
+ * throttles `setInterval` to once a minute or stops it, so the tick is re-run
+ * the moment the tab is visible or focused again; because the value is always
+ * `Date.now()`, the correction is a re-render and never a repair. Everything
+ * that shows elapsed time or a countdown reads this.
+ */
+export function useSessionClock(active: boolean, intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const tick = () => setNow(Date.now());
+    tick();
+    const id = window.setInterval(tick, intervalMs);
+    const onVisible = () => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', tick);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', tick);
+    };
+  }, [active, intervalMs]);
+  return now;
 }

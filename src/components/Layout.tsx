@@ -126,6 +126,8 @@ export const ROUTES: RouteMeta[] = [
   { pattern: '/communities', title: 'Communities', tab: 'gyms', nav: '/communities', hub: 'community' },
   { pattern: '/communities/:communityId', title: 'Community', tab: 'gyms', nav: '/communities', parent: '/communities' },
   { pattern: '/workouts', title: 'Workouts', tab: 'workouts', nav: '/workouts', root: true, hub: 'train' },
+  { pattern: '/workouts/session', title: 'Session', tab: 'workouts', nav: '/workouts', parent: '/workouts', hub: 'train' },
+  { pattern: '/workouts/session/finish', title: 'Session', tab: 'workouts', nav: '/workouts', parent: '/workouts', hub: 'train' },
   { pattern: '/workouts/history', title: 'History', tab: 'workouts', nav: '/workouts/history', hub: 'train' },
   { pattern: '/workouts/progress', title: 'Progress', tab: 'workouts', nav: '/workouts/progress', hub: 'train' },
   { pattern: '/challenges', title: 'Challenges', tab: 'workouts', nav: '/challenges', hub: 'train' },

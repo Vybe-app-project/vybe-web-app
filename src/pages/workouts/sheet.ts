@@ -46,7 +46,23 @@ export const TRAIN = {
   editPlan: (id: string) => `/workouts/plans/${id}/edit`,
   history: '/workouts/history',
   session: (id: string, options: { edit?: boolean } = {}) => `/workouts/history/${id}${options.edit ? '?edit=1' : ''}`,
-  /** A new session, optionally seeded from a library workout, a past session, or the first-week starter. */
+  /**
+   * The live runner (src/pages/workouts/session/Runner.tsx): a page, not a
+   * sheet. `from` seeds it from a library workout, `repeat` from a past
+   * session, neither starts it empty. This is where every "Start" on the hub
+   * goes; `newSession` below is the post-hoc form, kept for logging a session
+   * that has already happened.
+   */
+  liveSession: (seed: { from?: string; repeat?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (seed.from) q.set('from', seed.from);
+    if (seed.repeat) q.set('repeat', seed.repeat);
+    const s = q.toString();
+    return `/workouts/session${s ? `?${s}` : ''}`;
+  },
+  /** The recap and the pre-filled log form, after Finish. */
+  sessionFinish: '/workouts/session/finish',
+  /** A session logged after the fact, optionally seeded from a library workout, a past session, or the first-week starter. */
   newSession: (seed: { from?: string; repeat?: string; starter?: boolean } = {}) => {
     const q = new URLSearchParams();
     if (seed.from) q.set('from', seed.from);

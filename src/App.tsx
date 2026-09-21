@@ -71,6 +71,9 @@ const PlanEditor = lazyPage(null, () => import('./pages/workouts/PlanEditor'));
 const SessionDetail = lazyPage(null, () => import('./pages/workouts/SessionDetail'));
 // The shared exercise library's page (/exercises/:slug); also a sheet route, so it opens over the hub on desktop.
 const ExerciseDetail = lazyPage(null, () => import('./pages/ExerciseDetail'));
+// The live session: a page on every width (the session is the whole task), and its recap.
+const SessionRunner = lazyPage('/workouts/session', () => import('./pages/workouts/session/Runner'));
+const SessionFinish = lazyPage(null, () => import('./pages/workouts/session/Finish'));
 const MealLog = lazyPage(null, () => import('./pages/MealLog'));
 const WorkoutProgress = lazyPage('/workouts/progress', () => import('./pages/WorkoutProgress'));
 const Meals = lazyPage('/meals', () => import('./pages/Meals'));
@@ -454,6 +457,9 @@ const ROUTE_TREE = (
       <Route path="live/:streamId" element={<Livestreams />} />
 
       <Route path="workouts" element={<Workouts />} />
+      {/* The live runner, before the :param routes: a page, never a sheet. */}
+      <Route path="workouts/session" element={<SessionRunner />} />
+      <Route path="workouts/session/finish" element={<SessionFinish />} />
       <Route path="workouts/history" element={<WorkoutHistory />} />
       <Route path="workouts/logs" element={<RedirectHistory />} />
       <Route path="workouts/progress" element={<WorkoutProgress />} />
