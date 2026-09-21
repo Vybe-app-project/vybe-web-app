@@ -440,10 +440,12 @@ test('Input merges a caller aria-describedby with its own, and the username fiel
 
 test('the welcome sheet closes when a link inside it changes the page', () => {
   const sheet = read('src/pages/WelcomeSheet.tsx');
-  assert.match(sheet, /import \{ useLocation, useSearchParams \} from 'react-router-dom'/);
+  assert.match(sheet, /import \{ useLocation, useNavigate, useSearchParams \} from 'react-router-dom'/);
   assert.match(sheet, /const \{ pathname \} = useLocation\(\);/);
   assert.match(sheet, /const openedOn = useRef<string \| null>\(null\);/);
-  assert.match(sheet, /openedOn\.current = pathname;\s*setOpen\(true\);/, 'the page the sheet opened on is recorded as it opens');
+  // The page is recorded as the first-run moment opens -- the quiz on a fresh
+  // sign-up, this sheet on a ?welcome=1 deep link or after the quiz lands.
+  assert.match(sheet, /openedOn\.current = pathname;\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(viaMarker && !viaParam && !quizDone\.current\) setQuizOpen\(true\);\s*else setOpen\(true\);/, 'the page the sheet opened on is recorded as it opens');
   assert.match(sheet, /if \(open && openedOn\.current !== null && pathname !== openedOn\.current\) setOpen\(false\);/);
   // People rows keep their real profile links (the live suites use the "Open … profile" names).
   assert.match(read('src/pages/UserRow.tsx'), /aria-label=\{`Open \$\{displayName\(user\)\}’s profile`\}/);

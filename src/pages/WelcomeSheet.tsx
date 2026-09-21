@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -11,6 +11,7 @@ import { Avatar, Button, ButtonLink, Modal, Spinner, useToast } from './ui';
 import { Camera, Compass } from './icons';
 import UserRow, { UserRowSkeleton } from './UserRow';
 import WelcomeInviteSection from './WelcomeInvite';
+import OnboardingQuiz from './OnboardingQuiz';
 
 const SUGGESTION_COUNT = 5;
 
@@ -30,7 +31,13 @@ export default function WelcomeSheet() {
   const qc = useQueryClient();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  // The four-question quiz runs before this sheet on a fresh sign-up, and
+  // once only: a second marker (the hand-off after it lands on Workouts)
+  // opens the sheet itself.
+  const [quizOpen, setQuizOpen] = useState(false);
+  const quizDone = useRef(false);
   const [uploading, setUploading] = useState(false);
   // The invite code that came along from /join/<code> through sign-up, offered here first.
   const [pendingInvite, setPendingInvite] = useState<string | null>(null);
@@ -46,7 +53,10 @@ export default function WelcomeSheet() {
     const viaMarker = takeWelcomePending(sessionStorage);
     if (!viaParam && !viaMarker) return;
     openedOn.current = pathname;
-    setOpen(true);
+    // Sign-up answers the quiz first; ?welcome=1 is a deep link straight to
+    // this sheet and never re-asks the questions.
+    if (viaMarker && !viaParam && !quizDone.current) setQuizOpen(true);
+    else setOpen(true);
     if (viaParam) {
       const next = new URLSearchParams(params);
       next.delete(WELCOME_PARAM);
@@ -107,6 +117,24 @@ export default function WelcomeSheet() {
   const firstName = (me.fullName || me.username || '').trim().split(/\s+/)[0] || 'there';
   const busy = uploading || saveAvatar.isPending;
   const close = () => setOpen(false);
+
+  /**
+   * The quiz is finished (or skipped through). With a landing it takes the
+   * member to the Workouts hub on the programme their goal picked, and the
+   * photo-and-people sheet opens there; `openedOn` moves with it, or the
+   * route-change guard would close the sheet the moment it appeared.
+   */
+  const finishQuiz = (landing: string | null) => {
+    quizDone.current = true;
+    setQuizOpen(false);
+    if (landing) {
+      openedOn.current = landing.split('?')[0];
+      navigate(landing, { replace: true });
+    }
+    setOpen(true);
+  };
+
+  if (quizOpen) return <OnboardingQuiz open onDone={finishQuiz} />;
 
   return (
     <Modal
