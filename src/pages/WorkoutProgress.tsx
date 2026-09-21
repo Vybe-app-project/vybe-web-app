@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errMsg } from '../lib/api';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, errMsg, parseApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useFeatureGate } from '../lib/capabilities';
+import { useFeature, useFeatureGate } from '../lib/capabilities';
 import { localDayParams } from '../lib/timezone';
 import { useUnits, weightUnit } from '../lib/units';
 import { CardGrid, EmptyState, ErrorState, PageHeader, PageSkeleton, SkeletonCard, SegmentedControl, useToast } from './ui';
@@ -43,6 +43,18 @@ import { Movements } from './progress/Movements';
 import { RecordsList } from './progress/RecordsList';
 import { RecordAdjustments, RecordsShelf, ResetRecordsDialog, SHELF_COLLAPSED, factLabel, type AdjustmentRow } from './progress/RecordsShelf';
 import { ExerciseTrendSheet } from './progress/ExerciseTrendSheet';
+import { InsightsCard } from './progress/InsightsCard';
+import { TrainingLoad } from './progress/TrainingLoad';
+import { FocusSheet } from './progress/FocusSheet';
+import { VybeScoreAbout } from '../components/VybeScore';
+import {
+  TREND_WINDOWS,
+  fetchFocus,
+  fetchInsights,
+  insightsKeys,
+  saveFocus,
+  type FocusBody,
+} from '../lib/insights';
 import { TRAIN, useSheetNav } from './workouts/sheet';
 
 /**
@@ -87,6 +99,8 @@ export default function WorkoutProgress() {
   const [showAllBests, setShowAllBests] = useState(false);
   const [adjustmentsOpen, setAdjustmentsOpen] = useState(false);
   const [resetRow, setResetRow] = useState<ShelfRow | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [focusOpen, setFocusOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const { state: sheetState } = useSheetNav();
   const toast = useToast();
@@ -110,6 +124,30 @@ export default function WorkoutProgress() {
       const { data } = await api.get<ProgressSummary>('/workouts/records/summary', { params: { from: range.from, to: range.to, ...localDayParams() } });
       return data;
     },
+  });
+
+  // Insights v2 (G-7) and the weekly series H-8 added to the same payload.
+  // Each block rides its own flag and a flagged route answers 404
+  // FEATURE_DISABLED while it is dark, which lib/progress isFeatureDisabled
+  // reads as "render nothing" -- never an error state and never a skeleton.
+  const insightsOn = useFeature('insightsV2');
+  const loadOn = useFeature('trainingLoad');
+  const focusOn = useFeature('focus');
+
+  const insights = useQuery({
+    queryKey: insightsKeys.analytics(TREND_WINDOWS),
+    enabled: insightsOn || loadOn,
+    retry: false,
+    staleTime: 60_000,
+    queryFn: () => fetchInsights(),
+  });
+
+  const focus = useQuery({
+    queryKey: insightsKeys.focus(),
+    enabled: focusOn,
+    retry: false,
+    staleTime: 60_000,
+    queryFn: fetchFocus,
   });
 
   const calendar = useQuery({
@@ -170,6 +208,17 @@ export default function WorkoutProgress() {
     }));
   });
   const adjustmentsLoading = adjustmentsOpen && adjustmentQueries.some((query) => query.isPending);
+
+  const writeFocus = useMutation({
+    mutationFn: (body: FocusBody) => saveFocus(body),
+    onSuccess: (next) => {
+      qc.setQueryData(insightsKeys.focus(), next);
+      setFocusOpen(false);
+      // The server's own rules read Focus, so the score and the load are stale.
+      void qc.invalidateQueries({ queryKey: insightsKeys.all });
+    },
+  });
+  const focusError = writeFocus.isError ? parseApiError(writeFocus.error, 'Could not save that focus.') : null;
 
   const refreshRecords = async () => {
     await qc.invalidateQueries({ queryKey: recordKeys.all });
@@ -298,6 +347,8 @@ export default function WorkoutProgress() {
   const yearNote = period === 'year' ? (calendarHidden ? PROGRESS_STRINGS.yearAllQuarterNote : PROGRESS_STRINGS.yearSummaryNote) : null;
   const heatRangeLabel = heatRange === yearRange ? periodLabel(yearRange) : null;
 
+  // Feature-detected twice: the flag above, and the route's own answer here.
+  const insightsHidden = insights.isError;
   const data = summary.data;
   const nothingLogged = !!data && data.sessions === 0 && (data.prs?.length ?? 0) === 0;
   const exerciseRow = exerciseId ? data?.exercises?.find((row) => row.exerciseId === exerciseId) : undefined;
@@ -328,6 +379,19 @@ export default function WorkoutProgress() {
       ) : (
         <>
           <ProgressTiles summary={data} unit={unit} days={range.days} loading={summary.isPending} />
+
+          {insightsOn && !insightsHidden ? (
+            <InsightsCard
+              score={insights.data?.score ?? null}
+              focus={focus.data ?? null}
+              focusEnabled={focusOn && !focus.isError}
+              onAbout={() => setAboutOpen(true)}
+              onEditFocus={() => setFocusOpen(true)}
+              loading={insights.isPending}
+            />
+          ) : null}
+
+          {loadOn && !insightsHidden ? <TrainingLoad load={insights.data?.trainingLoad ?? null} loading={insights.isPending} /> : null}
 
           {calendarLoading ? (
             <SkeletonCard media={false} />
@@ -376,6 +440,18 @@ export default function WorkoutProgress() {
           )}
         </>
       )}
+
+      <VybeScoreAbout open={aboutOpen} onClose={() => setAboutOpen(false)} score={insights.data?.score ?? null} />
+
+      <FocusSheet
+        open={focusOpen}
+        focus={focus.data ?? null}
+        onClose={() => setFocusOpen(false)}
+        onSave={(body) => writeFocus.mutate(body)}
+        busy={writeFocus.isPending}
+        error={focusError ? errMsg(writeFocus.error, 'Could not save that focus.') : null}
+        fieldError={focusError?.field ?? null}
+      />
 
       <ResetRecordsDialog row={resetRow} busy={!!resetRow && busy === resetRow.exerciseId} onClose={() => setResetRow(null)} onConfirm={(from) => void confirmReset(from)} />
 
