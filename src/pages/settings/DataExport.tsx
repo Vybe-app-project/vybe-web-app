@@ -16,8 +16,15 @@ import {
   type ExportJob,
   type ExportList,
 } from '../../lib/accountLifecycle';
-import { Badge, Button, ErrorState, Skeleton, useToast } from '../ui';
-import { Download } from '../icons';
+import {
+  WORKOUTS_CSV_COPY,
+  fetchWorkoutsCsv,
+  noteIfMissing,
+  saveBlob,
+  usePortabilitySupport,
+} from '../../lib/portability';
+import { Badge, Button, ButtonLink, ErrorState, Skeleton, useToast } from '../ui';
+import { Download, Upload } from '../icons';
 import { SettingsCard, useDeletionStatus } from './shared';
 import { useReauthGate } from './useReauthGate';
 
@@ -27,6 +34,82 @@ const POLL_MS = 10_000;
 const ARCHIVE_CONTENTS = 'A ZIP of your account, posts, messages you sent, workouts, meals, health entries and photos.';
 
 type RowBusy = 'download' | 'remove' | null;
+
+/** Where the import flow lives, and what the two workout rows say. */
+const IMPORT_PATH = '/workouts/import';
+const WORKOUTS_TITLE = 'Your workouts';
+const CSV_ROW = 'Download your workouts (CSV)';
+const IMPORT_ROW = 'Import from Strong or Hevy';
+const IMPORT_ROW_HINT = 'A CSV export from either app. You see what it holds before anything is saved.';
+
+/**
+ * The two workout-portability rows inside the Data card: the whole history out
+ * as one CSV, and the way in from another app. Separate from the archive
+ * above, which is the full ZIP of the account and keeps its own flow: this one
+ * is bearer-scoped and immediate, needs no re-auth and no job, and is the
+ * trust floor a lifter checks before they commit their log to an app.
+ *
+ * The route is bearer-only, so the file is fetched through the one axios
+ * client and handed to the browser as an object URL; there is no signed link
+ * in the contract to point at instead. A 404 NOT_FOUND from a deployment
+ * without the routes takes the matching row away rather than showing an error.
+ */
+export function WorkoutDataRows() {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const canExport = usePortabilitySupport((p) => p.exportSupported);
+  const canImport = usePortabilitySupport((p) => p.importSupported);
+
+  async function download() {
+    setBusy(true);
+    try {
+      const { blob, fileName } = await fetchWorkoutsCsv();
+      saveBlob(blob, fileName);
+    } catch (e) {
+      if (!noteIfMissing('export', e)) toast.error(errMsg(e, 'Could not prepare that file.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!canExport && !canImport) return null;
+  return (
+    <div className="mt-4 space-y-3 border-t border-line pt-4" data-testid="workout-portability">
+      <p className="t-section text-text-1">{WORKOUTS_TITLE}</p>
+      {canExport ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p id="workouts-csv-hint" className="text-sm text-text-1">
+              {CSV_ROW}
+            </p>
+            <p className="t-meta">{WORKOUTS_CSV_COPY}</p>
+          </div>
+          <Button
+            variant="secondary"
+            icon={<Download size={16} />}
+            aria-describedby="workouts-csv-hint"
+            loading={busy}
+            disabled={busy}
+            onClick={() => void download()}
+          >
+            Download
+          </Button>
+        </div>
+      ) : null}
+      {canImport ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm text-text-1">{IMPORT_ROW}</p>
+            <p className="t-meta">{IMPORT_ROW_HINT}</p>
+          </div>
+          <ButtonLink to={IMPORT_PATH} variant="secondary" icon={<Upload size={16} />}>
+            Import
+          </ButtonLink>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function jobDetail(job: ExportJob): string {
   const state = exportStateLabel(job);
@@ -262,6 +345,7 @@ export function DataExport() {
           )}
         </div>
       )}
+      <WorkoutDataRows />
       {gate.dialog}
     </SettingsCard>
   );
