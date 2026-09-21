@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, isValid } from 'date-fns';
 import { api, errMsg } from '../../lib/api';
+import { useWorkoutLogIdempotency } from '../../lib/capabilities';
 import { Button, Callout, DateField, Input, Select, Textarea, useToast } from '../../components/ui';
 import { ExerciseRows, emptyExercise, exerciseDraftFrom, toExercisePayload, type ExerciseDraft, type LogExercise } from './exerciseDraft';
 import { CATEGORY_OPTIONS } from './model';
@@ -13,7 +14,13 @@ import { LOGS_KEY, parseLogDate, type WorkoutLog } from './sessions';
  * and `expectedRevision` so a log written by the set-aware runner is edited
  * rather than refused with a 409, and a stale copy is refused with the
  * server's own words instead of silently overwriting someone's sets.
- * `clientRequestId` is deliberately not sent (the allowlist rejects it).
+ * `clientRequestId` travels on a POST only when the caller hands one over AND
+ * `GET /capabilities` reports `workoutLogIdempotency` — the keyed route splits
+ * the field off before validation, but an older deployment answers 400 to the
+ * unknown field, so it is never sent on a guess. The live runner
+ * (src/pages/workouts/session/Runner.tsx) passes the session's id, so a save
+ * retried after a lost acknowledgement returns the log already created
+ * instead of a duplicate; a PATCH never carries one (the allowlist rejects it).
  */
 
 /** A session seeded from a workout or a previous log; no `_id` means it will be created. */
@@ -54,6 +61,9 @@ export function SessionForm({
   editing,
   seed,
   description,
+  clientRequestId,
+  submitLabel,
+  cancelLabel,
   onSaved,
   onCancel,
 }: {
@@ -62,10 +72,15 @@ export function SessionForm({
   /** Prefill for a new log → POST. */
   seed?: LogSeed | null;
   description?: string;
+  /** One key per save-attempt series; sent only when the capability allows it. */
+  clientRequestId?: string | null;
+  submitLabel?: string;
+  cancelLabel?: string;
   onSaved: (saved: WorkoutLog | undefined) => void;
   onCancel: () => void;
 }) {
   const qc = useQueryClient();
+  const idempotent = useWorkoutLogIdempotency();
   const toast = useToast();
   const formId = useId();
   const [form, setForm] = useState<FormState>(() => formFrom(editing ?? seed));
@@ -97,6 +112,7 @@ export function SessionForm({
         // Every PATCH speaks the set-aware contract; a POST only when it actually carries sets.
         ...(editing || setAware ? { setRecordsVersion: 1 } : {}),
         ...(editing ? { expectedRevision: editing.revision ?? 0 } : {}),
+        ...(!editing && clientRequestId && idempotent ? { clientRequestId } : {}),
       };
 
       const { data } = editing
@@ -176,10 +192,10 @@ export function SessionForm({
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
         <Button type="button" variant="quiet" onClick={onCancel} disabled={save.isPending}>
-          Cancel
+          {cancelLabel ?? 'Cancel'}
         </Button>
         <Button type="submit" form={formId} variant="primary" loading={save.isPending}>
-          {editing ? 'Save changes' : 'Log session'}
+          {submitLabel ?? (editing ? 'Save changes' : 'Log session')}
         </Button>
       </div>
     </form>

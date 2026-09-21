@@ -96,6 +96,19 @@ export function featureEnabled(features: FeatureFlags | null | undefined, name: 
 }
 
 /**
+ * Whether `POST /api/workouts/logs` honours `clientRequestId` on this
+ * deployment (docs/api-contract.md, "`workoutLogIdempotency` capability").
+ * True since v2-be-depth-1, but a client must not guess: the unkeyed route's
+ * validator rejects the unknown field with `400 Unsupported workout field`.
+ * False until the server has answered, so a save on the first frame is
+ * unkeyed rather than refused. Named here so the capability's meaning lives
+ * in one place and the session form does not grow its own query.
+ */
+export function useWorkoutLogIdempotency(): boolean {
+  return useCapabilities().data?.capabilities.workoutLogIdempotency === true;
+}
+
+/**
  * Shared by the shell (to hide entry points for features this server does
  * not run) and by the feature pages (to explain why). One query key per
  * session state, so the sidebar and the Live page never disagree; the

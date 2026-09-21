@@ -329,6 +329,11 @@ test('Live is gated on features.live as well as the relay, everywhere it is prom
   assert.match(caps, /api\.get\('\/capabilities'\)/);
   assert.match(caps, /queryKey: \['capabilities', signedIn \? 'me' : 'public'\]/);
   assert.match(caps, /export function useFeature\(name: string\): boolean/);
+  // Every capability a page needs is named here rather than read ad hoc: the
+  // session form asks `useWorkoutLogIdempotency()`, never the raw map.
+  assert.match(caps, /export function useWorkoutLogIdempotency\(\): boolean/);
+  assert.match(caps, /capabilities\.workoutLogIdempotency === true/);
+  assert.match(read('src/pages/workouts/SessionForm.tsx'), /const idempotent = useWorkoutLogIdempotency\(\);/);
   assert.match(caps, /return caps\?\.livestreamRelay === true;/, 'liveVideoEnabled is unchanged');
   // The admin console keeps its own capabilities query.
   assert.doesNotMatch(read('src/pages/admin/AdminSystem.tsx'), /useCapabilities|useLiveEnabled/);
