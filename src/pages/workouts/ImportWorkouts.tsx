@@ -154,7 +154,8 @@ export function mappingRows(preview: ImportPreview | undefined, picks: Record<st
   return [...matched, ...unmatched];
 }
 
-function MappingTable({
+/** The preview's exercise table. Pure props, so a render test can drive it. */
+export function MappingTable({
   rows,
   onChoose,
   onKeepCustom,
