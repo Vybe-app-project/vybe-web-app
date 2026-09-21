@@ -66,6 +66,7 @@ export const Footprints = make('Footprints', <><path d="M6.5 3.5c-2 0-3 2.5-2.8 
 export const Trash = make('Trash', <><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M10 11v6M14 11v6"/></>);
 export const Edit = make('Edit', <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></>);
 export const Camera = make('Camera', <><path d="M3 8h3l2-2h8l2 2h3v11H3z"/><circle cx="12" cy="13" r="3.5"/></>);
+export const Barcode = make('Barcode', <><path d="M3 6v12M6.5 6v12M10 6v8M13.5 6v12M17 6v8M20.5 6v12"/></>);
 export const Play = make('Play', <><path d="M7 4.5v15l12-7.5z"/></>);
 export const Pause = make('Pause', <><path d="M8 5v14M16 5v14"/></>);
 export const X = make('X', <><path d="M6 6l12 12M18 6 6 18"/></>);

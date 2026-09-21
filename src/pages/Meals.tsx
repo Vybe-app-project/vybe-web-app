@@ -1,9 +1,27 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isToday, isValid, isYesterday, parseISO } from 'date-fns';
 import { api, errMsg, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useFoodBarcode } from '../lib/capabilities';
+import { SCAN_LABEL, type BarcodeFood } from '../lib/foodBarcode';
+import {
+  COPY_YESTERDAY,
+  NOTHING_LOGGED,
+  QUICK_ADD,
+  QUICK_ADD_KCAL_RANGE,
+  QUICK_ADD_MACRO_HINT,
+  WEEK_AVERAGE_LABEL,
+  WEEK_ROWS_LABEL,
+  dayKeyOf,
+  macroCalories,
+  mealRequestId,
+  quickAddError,
+  weekAverages,
+  weekRows,
+  yesterdayKey,
+} from '../lib/mealsWeek';
 import { localDayParams, timeOfDay } from '../lib/timezone';
 import { MAX_UPLOAD_BYTES } from '../lib/hooks';
 import {
@@ -29,6 +47,7 @@ import {
   IconButton,
   Input,
   Menu,
+  Modal,
   PageHeader,
   Progress,
   Ring,
@@ -47,7 +66,8 @@ import {
   useToast,
 } from './ui';
 import type { MenuItem } from './ui';
-import { Utensils, Plus, Trash, Heart, Clock, BookOpen, ChevronRight, Search, Globe, Camera } from './icons';
+import { Utensils, Plus, Trash, Heart, Clock, BookOpen, ChevronRight, Search, Globe, Camera, Barcode, Copy } from './icons';
+import BarcodeScanner from './meals/BarcodeScanner';
 
 /* ------------------------------------------------------------------ types */
 
@@ -407,11 +427,14 @@ const rateLimitCopy = (error: unknown): string | null => {
  */
 export function FoodSearch({
   onAdd,
+  onCreateFood,
   label = 'Search foods',
   placeholder = 'Greek yogurt, banana, chicken breast…',
   autoFocus,
 }: {
   onAdd: (food: SelectedFood) => void;
+  /** An unknown barcode: the host prefills a food with the digits. */
+  onCreateFood?: (gtin: string) => void;
   label?: string;
   placeholder?: string;
   autoFocus?: boolean;
@@ -419,6 +442,11 @@ export function FoodSearch({
   const [term, setTerm] = useState('');
   const [active, setActive] = useState(0);
   const [announcement, setAnnouncement] = useState('');
+  const [scanOpen, setScanOpen] = useState(false);
+  // The scan button is drawn only where the server can answer a lookup
+  // (capabilities.foodBarcode: the route is deployed and a tier is
+  // configured), so it never opens a camera for a 404.
+  const canScan = useFoodBarcode();
   const debounced = useDebounced(term, 400);
   const ready = debounced.trim().length >= 2;
   const listId = useId();
@@ -485,8 +513,19 @@ export function FoodSearch({
   const optionId = (i: number) => `${listId}-option-${i}`;
   const showList = ready && foods.length > 0;
 
+  /** A scanned food is an ordinary catalog row: it goes through the same picker. */
+  const addScanned = (food: BarcodeFood) => {
+    const selected = selectedFoodFrom(food as FoodSearchItem, 0);
+    onAdd(selected);
+    setScanOpen(false);
+    setAnnouncement(`Added ${selected.name}, ${selected.servingLabel}. Search again to add another food.`);
+  };
+
   return (
     <div className="space-y-2">
+      {/* The camera lives in the search header, beside the box it replaces. */}
+      <div className="flex items-end gap-2">
+        <div className="min-w-0 flex-1">
       <Input
         ref={inputRef}
         type="search"
@@ -513,6 +552,16 @@ export function FoodSearch({
               : undefined
         }
       />
+        </div>
+        {canScan ? (
+          <IconButton label={SCAN_LABEL} size={44} variant="secondary" onClick={() => setScanOpen(true)}>
+            <Barcode size={20} />
+          </IconButton>
+        ) : null}
+      </div>
+      {canScan ? (
+        <BarcodeScanner open={scanOpen} onClose={() => setScanOpen(false)} onFound={addScanned} onCreateFood={onCreateFood ? (gtin) => { setScanOpen(false); onCreateFood(gtin); } : undefined} />
+      ) : null}
       <p className="sr-only" aria-live="polite">
         {announcement}
       </p>
@@ -728,6 +777,8 @@ export function LogMealForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const [manual, setManual] = useState<Nutrition>(EMPTY_MANUAL);
   const [nameError, setNameError] = useState<string | undefined>();
   const [photo, setPhoto] = useState<PhotoState | null>(null);
+  /** A scanned code the databases did not know; saved with the food on log. */
+  const [pendingGtin, setPendingGtin] = useState<string | null>(null);
   const nameTouched = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameId = 'log-meal-name';
@@ -781,6 +832,14 @@ export function LogMealForm({ onDone, onCancel }: { onDone: () => void; onCancel
     setPhoto((p) => (p ? { ...p, selectedCandidateId: candidate.id } : p));
   };
 
+  /** "Create food" from the scan sheet: the manual macros take the label over. */
+  const startFoodFromBarcode = (gtin: string) => {
+    setPendingGtin(gtin);
+    setFoods([]);
+    if (!servingSize.trim()) setServingSize('1 serving');
+    document.getElementById(nameId)?.focus();
+  };
+
   const totals = useMemo<Nutrition>(() => {
     if (foods.length === 0) return manual;
     return foods.reduce<Nutrition>(
@@ -807,6 +866,7 @@ export function LogMealForm({ onDone, onCancel }: { onDone: () => void; onCancel
     setFoods([]);
     setManual(EMPTY_MANUAL);
     setNameError(undefined);
+    setPendingGtin(null);
     nameTouched.current = false;
     // The photo was logged with the meal, so keep it on the server.
     removePhoto(false);
@@ -859,6 +919,23 @@ export function LogMealForm({ onDone, onCancel }: { onDone: () => void; onCancel
           nutrition: selectedFoodNutrition({ ...f, servings: 1 }),
         })),
       });
+      // Best effort, and after the meal is safely logged: a refused catalog
+      // write (a duplicate code, a validation quibble) must not cost the log.
+      if (pendingGtin) {
+        await api
+          .post('/food', {
+            gtin: pendingGtin,
+            description: foodName,
+            servingSize: servingSize.trim() || '1 serving',
+            nutritionFacts: {
+              calories: totals.calories ?? 0,
+              protein: totals.protein ?? 0,
+              totalCarbs: totals.carbs ?? 0,
+              totalFat: totals.fat ?? 0,
+            },
+          })
+          .catch(() => undefined);
+      }
       return data;
     },
     onSuccess: () => {
@@ -1003,7 +1080,26 @@ export function LogMealForm({ onDone, onCancel }: { onDone: () => void; onCancel
               setFoods((prev) => [...prev, food]);
               if (!nameTouched.current && !name) setName(food.name);
             }}
+            onCreateFood={startFoodFromBarcode}
           />
+
+          {/* An unknown barcode: the label is typed once here and saved to the
+              catalog with the code, so the next scan of the same packet
+              resolves from tier 1 and never reaches a provider. */}
+          {pendingGtin ? (
+            <Callout
+              tone="brand"
+              title="Create this food"
+              action={
+                <Button size="sm" variant="ghost" onClick={() => setPendingGtin(null)}>
+                  Forget the code
+                </Button>
+              }
+            >
+              <span className="tabular">{pendingGtin}</span> is not in the food database. Name it above and type the macros from the label; it is saved with
+              the code when you log the meal.
+            </Callout>
+          ) : null}
 
           {foods.length > 0 ? (
             <ul className="space-y-2" aria-label="Foods in this meal">
@@ -1282,6 +1378,203 @@ function MealListSkeleton({ count = 3 }: { count?: number }) {
         </div>
       ))}
     </Card>
+  );
+}
+
+/* ------------------------------------------------------------- week rows */
+
+/**
+ * The seven days of the week, whether or not anything was logged on them.
+ *
+ * `GET /meals/by-range?range=week` answers one flat list plus a whole-week
+ * summary — no per-day rows and no averages on the wire — so the layout is
+ * done here (lib/mealsWeek). A day with nothing reads "Nothing logged",
+ * never "0 kcal", and the average is over the days that were logged, so
+ * three days out of seven average over three.
+ */
+function WeekRows({ meals }: { meals: Meal[] }) {
+  const rows = useMemo(() => weekRows(meals), [meals]);
+  const averages = useMemo(() => weekAverages(rows), [rows]);
+  return (
+    <Card container className="space-y-0" aria-label={WEEK_ROWS_LABEL}>
+      <h3 className="type-label pb-2 text-text-2">{WEEK_ROWS_LABEL}</h3>
+      <ul className="divide-y divide-line" aria-label="Days this week">
+        {rows.map((row) => {
+          const day = parseISO(row.dateKey);
+          return (
+            <li key={row.dateKey} className="flex min-h-12 flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2.5">
+              <span className={cx('t-body min-w-24 shrink-0', row.isToday ? 'font-semibold text-text-1' : 'text-text-2')}>
+                {row.isToday ? 'Today' : format(day, 'EEEE')}
+                <span className="t-meta ml-1.5">{format(day, 'd MMM')}</span>
+              </span>
+              {row.logged ? (
+                <span className="tabular flex flex-wrap items-baseline gap-x-3 text-xs text-text-2">
+                  <span>
+                    <span className="type-stat text-md text-text-1">{formatStat(row.kcal)}</span> kcal
+                  </span>
+                  <span>
+                    P {formatStat(row.protein)} g · C {formatStat(row.carbs)} g · F {formatStat(row.fat)} g
+                  </span>
+                </span>
+              ) : (
+                <span className="text-xs text-text-3">{row.isFuture ? 'Still to come' : NOTHING_LOGGED}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {averages ? (
+        <p className="tabular flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-line pt-3 text-xs text-text-2">
+          <span className="font-semibold text-text-1">{WEEK_AVERAGE_LABEL}</span>
+          <span>
+            <span className="type-stat text-md text-text-1">{formatStat(averages.kcal)}</span> kcal · P {formatStat(averages.protein)} g · C{' '}
+            {formatStat(averages.carbs)} g · F {formatStat(averages.fat)} g
+          </span>
+          <span className="w-full text-text-3">
+            Over the {averages.days} {plural(averages.days, 'day')} you logged.
+          </span>
+        </p>
+      ) : null}
+    </Card>
+  );
+}
+
+/* --------------------------------------------------- copy · quick add */
+
+/**
+ * The two one-tap ways to fill a day that are not a full log: repeat
+ * yesterday (`POST /meals/copy`) and a calorie-only entry
+ * (`POST /meals/quick-add`). Both are keyed, so a retry after a lost
+ * acknowledgement replays rather than logging twice.
+ */
+function DayActions() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [mealType, setMealType] = useState<string>(() => defaultMealType());
+  const [kcal, setKcal] = useState('');
+  const [macros, setMacros] = useState({ protein: '', carbs: '', fat: '' });
+  const [kcalError, setKcalError] = useState<string | undefined>();
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['meals'] });
+    qc.invalidateQueries({ queryKey: ['nutrition-summary'] });
+  };
+
+  const copyYesterday = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post('/meals/copy', {
+        fromDate: yesterdayKey(),
+        toDate: dayKeyOf(new Date()),
+        clientRequestId: mealRequestId('copy'),
+        ...localDayParams(),
+      });
+      return data as { message?: string; count?: number };
+    },
+    onSuccess: (data) => {
+      toast.success(data?.message || 'Copied');
+      refresh();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not copy yesterday’s meals.')),
+  });
+
+  const num = (value: string) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+  const derived = macroCalories(num(macros.protein), num(macros.carbs), num(macros.fat));
+
+  const quickAdd = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post('/meals/quick-add', {
+        mealType,
+        kcal: num(kcal),
+        protein: num(macros.protein),
+        carbs: num(macros.carbs),
+        fat: num(macros.fat),
+        clientRequestId: mealRequestId('quick'),
+        ...localDayParams(),
+      });
+      return data as { message?: string };
+    },
+    onSuccess: (data) => {
+      toast.success(data?.message || 'Added');
+      setQuickOpen(false);
+      setKcal('');
+      setMacros({ protein: '', carbs: '', fat: '' });
+      refresh();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not add that.')),
+  });
+
+  const submitQuick = (e: FormEvent) => {
+    e.preventDefault();
+    const problem = quickAddError(num(kcal));
+    setKcalError(problem ?? undefined);
+    if (!problem) quickAdd.mutate();
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button variant="secondary" size="sm" icon={<Copy size={16} />} loading={copyYesterday.isPending} onClick={() => copyYesterday.mutate()}>
+        {COPY_YESTERDAY}
+      </Button>
+      <Button variant="secondary" size="sm" icon={<Plus size={16} />} onClick={() => setQuickOpen(true)}>
+        {QUICK_ADD}
+      </Button>
+
+      <Modal
+        open={quickOpen}
+        onClose={() => setQuickOpen(false)}
+        title={QUICK_ADD}
+        description="Calories now, the detail later. It lands on today."
+        size="sm"
+        footer={
+          <Button type="submit" form="quick-add-form" variant="primary" loading={quickAdd.isPending}>
+            Add
+          </Button>
+        }
+      >
+        <form id="quick-add-form" className="space-y-4" onSubmit={submitQuick} noValidate>
+          <Select label="Meal type" value={mealType} onChange={setMealType} options={MEAL_TYPE_OPTIONS} />
+          <Input
+            id="quick-add-kcal"
+            label="Calories"
+            inputMode="numeric"
+            className="tabular"
+            hint={kcalError ? undefined : QUICK_ADD_KCAL_RANGE}
+            error={kcalError}
+            value={kcal}
+            onChange={(e) => {
+              setKcal(e.target.value.replace(/[^\d.]/g, ''));
+              setKcalError(undefined);
+            }}
+          />
+          <div className="grid grid-cols-3 gap-2">
+            {MACRO_ITEMS.map((m) => (
+              <Input
+                key={m.key}
+                label={`${m.label} (g)`}
+                inputMode="numeric"
+                className="tabular"
+                value={macros[m.key]}
+                onChange={(e) => setMacros((x) => ({ ...x, [m.key]: e.target.value.replace(/[^\d.]/g, '') }))}
+              />
+            ))}
+          </div>
+          {/* Atwater 4/4/9, the same arithmetic the server uses when it
+              derives macros from a calorie goal. Shown, never substituted:
+              the label's own calorie figure is what gets logged. */}
+          {derived > 0 ? (
+            <p className="tabular text-xs text-text-2">
+              Those macros come to <span className="font-semibold text-text-1">{formatStat(derived)} kcal</span>.
+            </p>
+          ) : (
+            <p className="text-xs text-text-3">{QUICK_ADD_MACRO_HINT}</p>
+          )}
+        </form>
+      </Modal>
+    </div>
   );
 }
 
@@ -1601,6 +1894,8 @@ export default function Meals() {
           value={tab}
           onChange={(k: string) => changeTab(k as LogTab)}
         />
+        {tab === 'today' ? <DayActions /> : null}
+        {tab === 'week' && !rangeQuery.isLoading && !rangeQuery.isError ? <WeekRows meals={meals} /> : null}
         {tab === 'community' ? (
           <CommunityMeals onLog={openLog} />
         ) : rangeQuery.isLoading ? (

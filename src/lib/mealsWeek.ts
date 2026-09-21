@@ -164,6 +164,20 @@ export const QUICK_ADD = 'Quick add';
 export const QUICK_ADD_KCAL_RANGE = 'Between 1 and 5,000 kcal.';
 export const QUICK_ADD_MACRO_HINT = 'Optional. Leave a macro blank and it counts as none.';
 
+/**
+ * One `clientRequestId` per write attempt: 16-100 of `[A-Za-z0-9_-]`
+ * (services/clientRequests.js). Both `meal-quick-add` and `meal-copy` are
+ * keyed, so a retry after a lost acknowledgement replays the first answer
+ * instead of logging the meal twice.
+ */
+export function mealRequestId(prefix = 'meal'): string {
+  const c = typeof crypto !== 'undefined' ? crypto : undefined;
+  const random = c && typeof c.randomUUID === 'function'
+    ? c.randomUUID().replace(/-/g, '')
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${random}`.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 100).padEnd(16, '0');
+}
+
 /** `kcal` is 1–5000 and required; the macros are 0–5000 and optional. */
 export function quickAddError(kcal: number): string | null {
   if (!Number.isFinite(kcal) || kcal <= 0) return 'Enter the calories for this meal.';

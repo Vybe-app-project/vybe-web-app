@@ -173,6 +173,47 @@ export function attributionLine(answer: BarcodeAnswer | null | undefined): { tex
   return { text: sentence, href, licence: a.licence ?? null };
 }
 
+/* -------------------------------------------------- reading the payload */
+
+/**
+ * USDA nutrient ids, the same four `nutritionFromFood` reads on the search
+ * rows. The barcode payload carries no flat `calories`/`protein` pair — the
+ * macros are rows in `foodNutrients` — so the preview in the scan sheet
+ * has to pull them out the same way.
+ */
+export const BARCODE_NUTRIENT_IDS = Object.freeze({ calories: 1008, protein: 1003, carbs: 1005, fat: 1004 });
+
+export type BarcodeMacros = { calories: number; protein: number; carbs: number; fat: number };
+
+/** The four macros of one base serving, rounded to a tenth as the log does. */
+export function barcodeMacros(food: BarcodeFood | null | undefined): BarcodeMacros {
+  const byId = new Map<number, number>();
+  for (const n of food?.foodNutrients ?? []) {
+    if (typeof n?.nutrientId === 'number' && typeof n.value === 'number') byId.set(n.nutrientId, n.value);
+  }
+  const pick = (id: number) => Math.round((byId.get(id) ?? 0) * 10) / 10;
+  return {
+    calories: pick(BARCODE_NUTRIENT_IDS.calories),
+    protein: pick(BARCODE_NUTRIENT_IDS.protein),
+    carbs: pick(BARCODE_NUTRIENT_IDS.carbs),
+    fat: pick(BARCODE_NUTRIENT_IDS.fat),
+  };
+}
+
+/**
+ * What one serving of this row is, in words: the household measure the
+ * label prints where there is one, else the numeric serving, else the
+ * per-100 g basis. Never a bare "1 serving" when the payload said more.
+ */
+export function servingTextOf(food: BarcodeFood | null | undefined): string {
+  const household = typeof food?.householdServingFullText === 'string' ? food.householdServingFullText.trim() : '';
+  if (household) return household;
+  if (typeof food?.servingSize === 'number' && food.servingSize > 0) {
+    return `${food.servingSize}${food.servingSizeUnit ? ` ${food.servingSizeUnit}` : ''}`;
+  }
+  return '1 serving';
+}
+
 /* ------------------------------------------------------------------ copy */
 
 export const SCAN_LABEL = 'Scan a barcode';
