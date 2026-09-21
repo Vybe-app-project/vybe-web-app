@@ -37,13 +37,14 @@
  * installation and the PWA loses precaching, offline and the update prompt
  * along with push. The one thing that realistically throws is the site's
  * Content-Security-Policy: `script-src 'self'` (deploy/caddy/vybe.caddy)
- * blocks these two imports until https://www.gstatic.com is added to it.
+ * would block third-party scripts; the two SDK bundles are therefore vendored
+ * from the pinned npm package under /vendor/firebase/<version>/ (same origin).
  * Caught, background push is the only thing missing.
  */
 var vybeFcmReady = false;
 try {
-  importScripts('https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js');
-  importScripts('https://www.gstatic.com/firebasejs/12.19.0/firebase-messaging-compat.js');
+  importScripts('/vendor/firebase/12.19.0/firebase-app-compat.js');
+  importScripts('/vendor/firebase/12.19.0/firebase-messaging-compat.js');
   vybeFcmReady = true;
 } catch (error) {
   console.warn('Vybe: FCM background handling is unavailable in this worker', error);

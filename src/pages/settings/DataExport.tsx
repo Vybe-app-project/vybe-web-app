@@ -131,7 +131,8 @@ export function DataExport() {
   const list = useQuery<ExportList>({
     queryKey: DATA_EXPORTS_KEY,
     queryFn: async () => (await api.get<ExportList>('/users/me/exports')).data,
-    refetchInterval: (query) => (query.state.data?.jobs.some(isExportActive) ? POLL_MS : false),
+    // An unexpected shape (no `jobs` array) must stop the polling, not throw inside react-query's timer.
+    refetchInterval: (query) => (Array.isArray(query.state.data?.jobs) && query.state.data.jobs.some(isExportActive) ? POLL_MS : false),
   });
 
   const refresh = () => qc.invalidateQueries({ queryKey: DATA_EXPORTS_KEY });

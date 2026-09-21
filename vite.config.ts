@@ -80,6 +80,7 @@ export default defineConfig({
           'offline.html',
           'offline.js',
           'screenshots/**',
+          'vendor/**',
           // Pulled into sw.js by importScripts below, so the browser already
           // caches it as part of the worker script; precaching it as well
           // would only add a second copy that nothing ever reads.

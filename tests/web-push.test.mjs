@@ -189,7 +189,8 @@ test('the worker is imported into the generated one and matches the installed SD
 
   const sw = read('public/firebase-messaging-sw.js');
   for (const bundle of ['firebase-app-compat.js', 'firebase-messaging-compat.js']) {
-    assert.ok(sw.includes(`https://www.gstatic.com/firebasejs/${version}/${bundle}`), `${bundle} must match firebase@${version}`);
+    assert.ok(sw.includes(`/vendor/firebase/${version}/${bundle}`), `${bundle} must match firebase@${version}`);
+    assert.ok(fs.existsSync(path.join(root, 'public', 'vendor', 'firebase', version, bundle)), `${bundle} is vendored for firebase@${version}`);
   }
 
   // One config, two files: a drifted sender id or app id means the worker
@@ -216,8 +217,8 @@ test('the worker is imported into the generated one and matches the installed SD
 
   // A throw here aborts the APP SHELL's worker, not just push: this file is
   // imported into it. Production CSP is `script-src 'self'`, which blocks
-  // gstatic outright, so the imports have to be survivable.
-  assert.match(sw, /try \{\s*importScripts\('https:\/\/www\.gstatic\.com[\s\S]*?\} catch \(error\) \{/);
+  // the vendored files outright (or a stale cache lacks them), so the imports have to be survivable.
+  assert.match(sw, /try \{\s*importScripts\('\/vendor\/firebase\/[\s\S]*?\} catch \(error\) \{/);
   assert.match(sw, /if \(vybeFcmReady\) \{\s*firebase\.initializeApp\(/);
   assert.match(sw, /if \(vybeFcmReady\) \{\s*firebase\.messaging\(\)\.onBackgroundMessage\(/);
 });
