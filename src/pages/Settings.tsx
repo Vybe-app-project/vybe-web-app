@@ -8,6 +8,7 @@ import { PlaceImage } from '../components/PlaceImage';
 import { compactMetaLine } from '../components/GymHeader';
 import { communityPath } from '../lib/gyms';
 import { HOME_GYM_KEY, useHomeGym, useSetHomeGym } from '../lib/homeGym';
+import { exerciseKeys, fetchExerciseMeta } from '../lib/exerciseLibrary';
 import AccountPreferenceSections from './SettingsPreferences';
 import { SettingsCard, ToggleRow } from './SettingsPieces';
 import {
@@ -57,7 +58,7 @@ import {
   useToast,
 } from './ui';
 import type { IconComponent } from './icons';
-import { Award, Bell, ChevronRight, ExternalLink, FileText, Info, LifeBuoy, Lock, LogOut, MapPin, Monitor, Palette, Shield, User as UserIcon } from './icons';
+import { Award, Bell, BookOpen, ChevronRight, ExternalLink, FileText, Info, LifeBuoy, Lock, LogOut, MapPin, Monitor, Palette, Shield, User as UserIcon } from './icons';
 import { PasswordField } from './Login';
 import { PasswordRules } from './Register';
 import { DataLifecycleSection } from './settings/DataLifecycleSection';
@@ -1000,9 +1001,48 @@ const ABOUT_LINKS: Array<{ label: string; hint: string; icon: ReactNode; to?: st
   { label: 'Terms and conditions', hint: 'The rules of the road.', icon: <FileText size={20} />, href: '/terms-and-conditions.html' },
 ];
 
+const ABOUT_ROW =
+  'flex min-h-14 items-center gap-3 rounded-sm px-3 py-2 text-left transition-colors dur-1 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px]';
+
+/**
+ * "Data sources & licences": every attribution the exercise library reports
+ * (`GET /exercises/library/meta`), each sentence linking to its source. The
+ * licences require the credit and the API generates the text from the rows'
+ * own provenance, so this renders what it is given rather than a hard-coded
+ * paragraph. Absent until `meta` resolves with entries — a deployment without
+ * the library shows no row at all, never an empty one.
+ */
+function DataSourcesRow() {
+  const meta = useQuery({ queryKey: exerciseKeys.meta(), queryFn: fetchExerciseMeta, retry: false, staleTime: 24 * 60 * 60_000 });
+  const attributions = (meta.data?.attributions ?? []).filter((a) => a?.text);
+  if (!attributions.length) return null;
+  return (
+    <li data-testid="about-data-sources" className="flex min-h-14 items-center gap-3 px-3 py-2">
+      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2">
+        <BookOpen size={20} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-text-1">Data sources &amp; licences</span>
+        <ul className="mt-1 space-y-1">
+          {attributions.map((a) => (
+            <li key={a.source ?? a.text} className="t-meta">
+              {a.url ? (
+                <a href={a.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-text-1">
+                  {a.text}
+                </a>
+              ) : (
+                a.text
+              )}
+            </li>
+          ))}
+        </ul>
+      </span>
+    </li>
+  );
+}
+
 function AboutSection() {
-  const rowCls =
-    'flex min-h-14 items-center gap-3 rounded-sm px-3 py-2 text-left transition-colors dur-1 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px]';
+  const rowCls = ABOUT_ROW;
   return (
     <SettingsCard id="about" title="Help and legal" padded={false}>
       <ul className="divide-y divide-line">
@@ -1031,6 +1071,7 @@ function AboutSection() {
             </li>
           );
         })}
+        <DataSourcesRow />
         <VersionRow />
       </ul>
     </SettingsCard>

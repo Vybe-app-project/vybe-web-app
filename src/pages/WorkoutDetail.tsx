@@ -21,12 +21,13 @@ import {
   Skeleton,
   SkeletonRow,
   SkeletonText,
+  cx,
   formatStat,
   humanize,
   type MenuItem,
   useToast,
 } from './ui';
-import { Activity, Clock, Copy, Dumbbell, Edit, Flag, Flame, Layers, MessageCircle, Play, Send, ShareUp, Trash } from './icons';
+import { Activity, ChevronRight, Clock, Copy, Dumbbell, Edit, Flag, Flame, Layers, MessageCircle, Play, Send, ShareUp, Trash } from './icons';
 import { RouteSheet } from '../components/RouteSheet';
 import { LikeButton, MetaList, categoryTone } from './workouts/cards';
 import { shareWorkout, type SocialWorkout, type WorkoutAuthor, type WorkoutExercise, type WorkoutPlan } from './workouts/model';
@@ -125,7 +126,7 @@ export default function WorkoutDetail() {
   const qc = useQueryClient();
   const toast = useToast();
   const { user } = useAuth();
-  const { open } = useSheetNav();
+  const { open, state: sheetState } = useSheetNav();
   const close = useSheetClose(TRAIN.hub);
   const [comment, setComment] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -411,7 +412,17 @@ export default function WorkoutDetail() {
         ) : (
           <ol className="divide-y divide-line overflow-hidden rounded-md bg-surface-2">
             {exercises.map((ex, i) => (
-              <li key={ex._id ?? `${ex.name}-${i}`} className="flex gap-3 p-4">
+              // A row chosen from the library carries its slug, so the whole row opens that exercise's page.
+              <li key={ex._id ?? `${ex.name}-${i}`} className={cx('relative flex gap-3 p-4', ex.exerciseId && 'pressable')}>
+                {ex.exerciseId ? (
+                  <Link
+                    to={`/exercises/${ex.exerciseId}`}
+                    state={sheetState}
+                    viewTransition
+                    aria-label={`About ${ex.name}`}
+                    className="absolute inset-0 z-[1] rounded-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
+                  />
+                ) : null}
                 <span className="type-stat inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-1 text-sm text-text-2" aria-hidden="true">
                   {i + 1}
                 </span>
@@ -423,6 +434,11 @@ export default function WorkoutDetail() {
                   <Prescription ex={ex} />
                   {ex.notes ? <p className="text-sm text-text-2">{ex.notes}</p> : null}
                 </div>
+                {ex.exerciseId ? (
+                  <span aria-hidden="true" className="relative z-[2] inline-flex shrink-0 items-center text-text-3">
+                    <ChevronRight size={20} />
+                  </span>
+                ) : null}
               </li>
             ))}
           </ol>

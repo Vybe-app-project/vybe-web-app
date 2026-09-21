@@ -12,6 +12,13 @@ import { humanize, type SelectOption, type useToast } from '../../components/ui'
 
 export type WorkoutExercise = {
   _id?: string;
+  /**
+   * The shared library's slug, when the row was chosen from the exercise
+   * picker (models/SocialWorkout.js keeps it). The same key the per-set
+   * WorkoutLog contract uses, so a session started from this routine logs
+   * under the library exercise and shares its records, history and page.
+   */
+  exerciseId?: string;
   name: string;
   sets?: number;
   reps?: number;
