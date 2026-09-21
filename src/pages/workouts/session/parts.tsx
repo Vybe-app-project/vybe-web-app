@@ -398,8 +398,7 @@ export function SessionRecap({ summary, children }: { summary: SessionSummary; c
               <li key={exercise.exerciseId} className="flex items-center justify-between gap-3 py-2">
                 <span className="t-body min-w-0 truncate text-text-1">{exercise.name}</span>
                 <span className="t-meta tabular shrink-0 whitespace-nowrap">
-                  {`${formatStat(exercise.setCount)} ${exercise.setCount === 1 ? 'set' : 'sets'}`}
-                  {best ? ' · ' : ''}
+                  {`${formatStat(exercise.setCount)} ${exercise.setCount === 1 ? 'set' : 'sets'}${best ? ' · ' : ''}`}
                   {best ? <span className="font-semibold text-text-1">{best}</span> : null}
                 </span>
               </li>
