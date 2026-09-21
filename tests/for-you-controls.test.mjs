@@ -230,11 +230,11 @@ test('the undo row is a 56 px hairline with one text Undo, and it settles only o
   assert.match(snoozed, /<button[^>]*disabled=""[^>]*aria-busy="true"|<button[^>]*aria-busy="true"[^>]*disabled=""/);
 
   assert.equal(HIDDEN_ROW_UNDO_MS, 5000);
-  assert.equal(canSettle({ top: 900, bottom: 956 }, 844, false), true, 'below the viewport nothing visible moves');
-  assert.equal(canSettle({ top: -100, bottom: -44 }, 844, true), true, 'above it, scroll anchoring holds the view');
-  assert.equal(canSettle({ top: -100, bottom: -44 }, 844, false), false, 'without anchoring the row stays put');
-  assert.equal(canSettle({ top: 300, bottom: 356 }, 844, true), false, 'on screen it never vanishes on its own');
-  assert.equal(canSettle({ top: -20, bottom: 36 }, 844, true), false, 'partly visible counts as on screen');
+  assert.equal(canSettle({ top: 900, bottom: 956 }, 844), true, 'a row’s height below the fold: nothing visible moves, nothing rises into view');
+  assert.equal(canSettle({ top: 880, bottom: 936 }, 844), false, 'just below the fold the card closing the gap would rise into view');
+  assert.equal(canSettle({ top: -100, bottom: -44 }, 844), false, 'above the fold it stays: removing it there is a shift even under scroll anchoring');
+  assert.equal(canSettle({ top: 300, bottom: 356 }, 844), false, 'on screen it never vanishes on its own');
+  assert.equal(canSettle({ top: -20, bottom: 36 }, 844), false, 'partly visible counts as on screen');
 
   for (const words of [forYouCopy.hiddenRow, forYouCopy.sheetBody, forYouCopy.notInterestedHint, forYouCopy.snoozeHint, forYouCopy.hideFailed, forYouCopy.undoFailed]) {
     assert.ok(!words.includes('!'), `no exclamation mark: ${words}`);
@@ -247,6 +247,7 @@ test('the snooze sheet offers exactly the periods the server accepts, as plain b
   assert.match(src, /\{SNOOZE_DAYS\.map\(\(days\) => \(/, 'the periods come from the typed constant, not a local list');
   assert.deepEqual([...controls.SNOOZE_DAYS], [7, 30]);
   assert.match(src, /variant="secondary"/);
+  assert.doesNotMatch(src, /overflow-anchor|supportsAnchoring/, 'settling never leans on scroll anchoring');
   assert.doesNotMatch(src, /variant="primary"|variant="brand"|btn-primary/, 'Home’s one filled button is not here');
   assert.match(src, /<Modal open=\{!!post\} onClose=\{onClose\} title=\{forYouCopy\.sheetTitle\(handle\)\} description=\{forYouCopy\.sheetBody\} size="sm">/);
   assert.match(src, /snoozeAuthor\(String\(post\.author\?\._id\), days\)/);

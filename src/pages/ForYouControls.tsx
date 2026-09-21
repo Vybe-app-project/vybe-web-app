@@ -16,9 +16,12 @@
  * back with a quiet toast if it refuses. The row itself never shifts what
  * is on screen — it is the same height whatever it replaced, and it settles
  * (the post leaves the cache, the row goes) only once its five seconds are up
- * AND it is off screen: below the viewport nothing visible moves, above it
- * scroll anchoring holds the view still, and on a browser without anchoring
- * it simply stays until Home refetches or the mode changes.
+ * AND it sits below the viewport by more than its own height, so nothing
+ * that is or becomes visible moves. A row on screen, or scrolled above the
+ * fold, stays with its Undo: removing it above the fold registers as a
+ * layout shift even when scroll anchoring holds the view still (the P8c
+ * drive measured 0.06 of CLS from exactly that), so Home's next refetch,
+ * the next mode change or leaving the page settles it instead.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -73,23 +76,16 @@ const omit = <T extends Record<string, unknown>>(record: T, keys: readonly strin
 
 /**
  * Whether a row whose time is up may leave without moving anything the
- * member can see. Below the viewport: nothing visible moves. Above it: the
- * browser's scroll anchoring keeps the view still, so only where that exists.
- * On screen: never — the row stays, Undo and all, until it is scrolled away.
+ * member can see: only when it sits below the viewport by more than its own
+ * height, so the content that closes its gap stays below the fold too. On
+ * screen it stays, Undo and all. Above the fold it stays as well — removing
+ * it there is a layout shift whether or not scroll anchoring keeps the view
+ * still — and Home's next refetch or mode change settles it.
  */
-export function canSettle(rect: { top: number; bottom: number }, viewportHeight: number, anchoring: boolean): boolean {
-  if (rect.top >= viewportHeight) return true;
-  if (rect.bottom <= 0) return anchoring;
-  return false;
+export function canSettle(rect: { top: number; bottom: number }, viewportHeight: number): boolean {
+  const height = Math.max(0, rect.bottom - rect.top);
+  return rect.top >= viewportHeight + height;
 }
-
-const supportsAnchoring = (): boolean => {
-  try {
-    return typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('overflow-anchor', 'auto');
-  } catch {
-    return false;
-  }
-};
 
 /* ------------------------------------------------------------------ the row */
 
@@ -118,10 +114,9 @@ export function HiddenPostRow({
       return () => clearTimeout(t);
     }
     let expired = false;
-    const anchoring = supportsAnchoring();
     const check = () => {
       if (!expired) return;
-      if (canSettle(el.getBoundingClientRect(), window.innerHeight, anchoring)) done();
+      if (canSettle(el.getBoundingClientRect(), window.innerHeight)) done();
     };
     // Any change in visibility re-asks; the timer asks once when the five seconds are up.
     const io = new IntersectionObserver(check, { threshold: 0 });
