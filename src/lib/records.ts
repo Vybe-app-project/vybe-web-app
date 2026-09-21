@@ -77,7 +77,7 @@ const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
  * `workoutId`, an id outside the alphabet). Never guess an id: an unparseable
  * one would answer 400 RECORD_ID_INVALID, so the row simply offers no removal.
  */
-export function recordIdOf(exerciseId: string, record: Pick<ProgressRecord, 'workoutId' | 'setId'> | null | undefined): string | null {
+export function recordIdOf(exerciseId: string, record: { workoutId?: string | null; setId?: string | null } | null | undefined): string | null {
   const workoutId = record?.workoutId;
   if (typeof workoutId !== 'string' || !OBJECT_ID.test(workoutId)) return null;
   if (!ID_PART.test(exerciseId)) return null;

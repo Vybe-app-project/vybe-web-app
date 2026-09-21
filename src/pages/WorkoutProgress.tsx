@@ -1,31 +1,47 @@
 import { useMemo, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useFeatureGate } from '../lib/capabilities';
 import { localDayParams } from '../lib/timezone';
 import { useUnits, weightUnit } from '../lib/units';
-import { CardGrid, EmptyState, ErrorState, PageHeader, PageSkeleton, SkeletonCard, SegmentedControl } from './ui';
+import { CardGrid, EmptyState, ErrorState, PageHeader, PageSkeleton, SkeletonCard, SegmentedControl, useToast } from './ui';
 import { Plus } from './icons';
 import {
   PERIODS,
   PROGRESS_STRINGS,
   YEAR_FALLBACK,
+  adjustmentLine,
   isFeatureDisabled,
   isProgressPeriod,
   periodLabel,
   periodRange,
+  shelfRows,
+  shortDate,
   workoutPreferencesOf,
   type ProgressCalendar,
   type ProgressPeriod,
   type ProgressSummary,
+  type ShelfRow,
 } from '../lib/progress';
+import {
+  clearRecordsReset,
+  deleteRecord,
+  fetchAdjustments,
+  fetchRecords,
+  isNotDeployed,
+  recordIdOf,
+  recordKeys,
+  resetRecords,
+  restoreRecord,
+} from '../lib/records';
 import { ProgressTiles } from './progress/ProgressTiles';
 import { TrainingCalendar } from './progress/TrainingCalendar';
 import { MuscleGroups } from './progress/MuscleGroups';
 import { Movements } from './progress/Movements';
 import { RecordsList } from './progress/RecordsList';
+import { RecordAdjustments, RecordsShelf, ResetRecordsDialog, SHELF_COLLAPSED, factLabel, type AdjustmentRow } from './progress/RecordsShelf';
 import { ExerciseTrendSheet } from './progress/ExerciseTrendSheet';
 import { TRAIN, useSheetNav } from './workouts/sheet';
 
@@ -48,6 +64,14 @@ import { TRAIN, useSheetNav } from './workouts/sheet';
  * (365 days), which the server keeps behind the flag per caller. A 404
  * FEATURE_DISABLED there (a rollout bucket, a 30 s cache window) degrades to
  * `summary.byDay` with an honest line, never an error.
+ *
+ * Personal records (P4): GET /workouts/records for the movements the summary
+ * named, plus the two corrections the API supports per exercise — remove one
+ * record (with an Undo through .../restore) and start fresh from a date (with
+ * an Undo through DELETE .../reset). `GET /workouts/records/adjustments` reads
+ * one exercise at a time, so the Adjustments line asks only once it is opened.
+ * A 404 NOT_FOUND on any of them (a server without the routes) hides the
+ * shelf; it is never an error state.
  */
 
 export default function WorkoutProgress() {
@@ -60,7 +84,13 @@ export default function WorkoutProgress() {
   const preferences = useMemo(() => workoutPreferencesOf(user), [user]);
   const [showAllMuscles, setShowAllMuscles] = useState(false);
   const [showAllRecords, setShowAllRecords] = useState(false);
+  const [showAllBests, setShowAllBests] = useState(false);
+  const [adjustmentsOpen, setAdjustmentsOpen] = useState(false);
+  const [resetRow, setResetRow] = useState<ShelfRow | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const { state: sheetState } = useSheetNav();
+  const toast = useToast();
+  const qc = useQueryClient();
 
   const periodParam = params.get('period');
   const period: ProgressPeriod = isProgressPeriod(periodParam) ? periodParam : 'month';
@@ -93,6 +123,131 @@ export default function WorkoutProgress() {
       return data;
     },
   });
+
+  // The movements the summary named, which is what the bests read is keyed on
+  // (the route takes up to 50 ids and lib/records trims to that).
+  const exerciseIds = useMemo(
+    () => (summary.data?.exercises ?? []).map((row) => row.exerciseId).filter((id): id is string => typeof id === 'string' && !!id),
+    [summary.data],
+  );
+
+  const bests = useQuery({
+    queryKey: recordKeys.bests(exerciseIds),
+    enabled: exerciseIds.length > 0,
+    // A 404 from a server without the maintenance routes is an answer, not a fault.
+    retry: false,
+    staleTime: 60_000,
+    queryFn: () => fetchRecords(exerciseIds),
+  });
+
+  const shelf = useMemo(() => shelfRows(summary.data?.exercises, bests.data, system), [summary.data, bests.data, system]);
+  const shownIds = useMemo(
+    () => (showAllBests ? shelf : shelf.slice(0, SHELF_COLLAPSED)).map((row) => row.exerciseId),
+    [shelf, showAllBests],
+  );
+
+  // One read per movement on screen: the route has no "every exercise" form,
+  // so nothing is asked until the member opens the line.
+  const adjustmentQueries = useQueries({
+    queries: shownIds.map((id) => ({
+      queryKey: recordKeys.adjustments(id),
+      enabled: adjustmentsOpen,
+      retry: false,
+      staleTime: 60_000,
+      queryFn: () => fetchAdjustments(id),
+    })),
+  });
+
+  const adjustmentRows: AdjustmentRow[] = adjustmentQueries.flatMap((query, index) => {
+    const exerciseId = shownIds[index];
+    const name = shelf.find((row) => row.exerciseId === exerciseId)?.name ?? exerciseId;
+    return (query.data ?? []).map((adjustment) => ({
+      id: adjustment.id,
+      exerciseId: adjustment.exerciseId,
+      name,
+      kind: adjustment.kind,
+      text: adjustmentLine(adjustment.kind, null, adjustment.kind === 'reset' ? shortDate(adjustment.from ?? '') : null),
+    }));
+  });
+  const adjustmentsLoading = adjustmentsOpen && adjustmentQueries.some((query) => query.isPending);
+
+  const refreshRecords = async () => {
+    await qc.invalidateQueries({ queryKey: recordKeys.all });
+    await qc.invalidateQueries({ queryKey: ['workout-progress'] });
+  };
+
+  async function removeRecord(row: ShelfRow, factIndex: number) {
+    const recordId = recordIdOf(row.exerciseId, row.facts[factIndex]);
+    if (!recordId) return;
+    setBusy(row.exerciseId);
+    try {
+      await deleteRecord(recordId);
+      await refreshRecords();
+      toast.success(`${factLabel(row, factIndex)} no longer counts for ${row.name}.`, {
+        action: { label: PROGRESS_STRINGS.undo, onClick: () => void undoRemove(recordId) },
+        duration: 12_000,
+      });
+    } catch (e) {
+      toast.error(errMsg(e, 'Could not remove that record.'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function undoRemove(recordId: string) {
+    try {
+      await restoreRecord(recordId);
+      await refreshRecords();
+      toast.success('That record counts again.');
+    } catch (e) {
+      toast.error(errMsg(e, 'Could not put that record back.'));
+    }
+  }
+
+  async function confirmReset(from: string) {
+    const row = resetRow;
+    if (!row) return;
+    setBusy(row.exerciseId);
+    try {
+      await resetRecords(row.exerciseId, from);
+      setResetRow(null);
+      await refreshRecords();
+      toast.success(`${row.name}: records before ${shortDate(from)} no longer count.`, {
+        action: { label: PROGRESS_STRINGS.undo, onClick: () => void undoReset(row.exerciseId) },
+        duration: 12_000,
+      });
+    } catch (e) {
+      toast.error(errMsg(e, 'Could not start fresh for that movement.'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function undoReset(exerciseId: string) {
+    try {
+      await clearRecordsReset(exerciseId);
+      await refreshRecords();
+      toast.success('Every session counts again.');
+    } catch (e) {
+      toast.error(errMsg(e, 'Could not undo that.'));
+    }
+  }
+
+  async function undoAdjustment(row: AdjustmentRow) {
+    setBusy(row.id);
+    try {
+      if (row.kind === 'reset') await clearRecordsReset(row.exerciseId);
+      else {
+        const found = adjustmentQueries.flatMap((query) => query.data ?? []).find((item) => item.id === row.id);
+        if (found && found.kind === 'exclude') await restoreRecord(found.recordId);
+      }
+      await refreshRecords();
+    } catch (e) {
+      toast.error(errMsg(e, 'Could not undo that.'));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const setPeriod = (next: ProgressPeriod) => {
     setParams(
@@ -130,6 +285,8 @@ export default function WorkoutProgress() {
   if (!enabled && period === 'year') return <Navigate to="/workouts/progress" replace />;
 
   // Which days feed the heatmap, and what the calendar card says about them.
+  // A server without the records routes answers 404 NOT_FOUND: hide the shelf, never an error state.
+  const bestsHidden = bests.isError && isNotDeployed(bests.error);
   const calendarHidden = period === 'year' && calendar.isError && isFeatureDisabled(calendar.error);
   const calendarFailed = period === 'year' && calendar.isError && !calendarHidden;
   const calendarLoading = period === 'year' ? (calendarHidden ? summary.isPending : calendar.isPending) : summary.isPending;
@@ -192,10 +349,35 @@ export default function WorkoutProgress() {
                 <Movements exercises={data?.exercises} system={system} onOpen={openExercise} />
               </CardGrid>
               <RecordsList prs={data?.prs} system={system} showAll={showAllRecords} onToggle={() => setShowAllRecords((v) => !v)} />
+              {bestsHidden ? null : (
+                <RecordsShelf
+                  rows={shelf}
+                  loading={exerciseIds.length > 0 && bests.isPending}
+                  showAll={showAllBests}
+                  onToggle={() => setShowAllBests((v) => !v)}
+                  onRemove={(row, index) => void removeRecord(row, index)}
+                  onReset={setResetRow}
+                  busyExerciseId={busy}
+                  footer={
+                    shelf.length ? (
+                      <RecordAdjustments
+                        open={adjustmentsOpen}
+                        rows={adjustmentRows}
+                        loading={adjustmentsLoading}
+                        onOpen={() => setAdjustmentsOpen(true)}
+                        onUndo={(row) => void undoAdjustment(row)}
+                        busyId={busy}
+                      />
+                    ) : null
+                  }
+                />
+              )}
             </>
           )}
         </>
       )}
+
+      <ResetRecordsDialog row={resetRow} busy={!!resetRow && busy === resetRow.exerciseId} onClose={() => setResetRow(null)} onConfirm={(from) => void confirmReset(from)} />
 
       <ExerciseTrendSheet exerciseId={exerciseId} name={exerciseRow?.name} measure={exerciseRow?.measure} system={system} preferences={preferences} onClose={closeExercise} />
     </div>

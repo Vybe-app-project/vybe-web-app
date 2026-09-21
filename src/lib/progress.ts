@@ -1,5 +1,5 @@
 import { KG_PER_LB, KM_PER_MI, kgToLb, kmToMi, weightUnit, type UnitSystem } from './unitConversions';
-import { formatDuration, formatSummaryVolume, formatSummaryWeight } from './workoutSummary';
+import { formatBestSet, formatDuration, formatSummaryVolume, formatSummaryWeight } from './workoutSummary';
 import { apiErrorDetails } from './apiError';
 
 /**
@@ -170,6 +170,20 @@ export const PROGRESS_STRINGS = {
   records: 'Records',
   recordsEmptyTitle: 'No new records this period',
   recordsEmptyBody: 'Log a session and beat your own past.',
+  bests: 'Personal records',
+  bestsEmpty: 'Records appear after your first logged sets.',
+  bestsRemove: 'Remove this record',
+  bestsReset: 'Start fresh from a date…',
+  bestsResetTitle: 'Start fresh?',
+  bestsResetConfirm: 'Start fresh',
+  bestsResetFrom: 'Records set before',
+  bestsResetUndo: 'You can undo this.',
+  bestsPerExercise: 'Starting fresh applies to one movement at a time, from its own menu.',
+  adjustments: 'Adjustments',
+  adjustmentsShow: 'Show',
+  adjustmentsNone: 'Nothing has been removed or reset.',
+  undo: 'Undo',
+  estimateMark: 'est.',
   emptyTitle: 'Nothing logged this period',
   emptyBody: 'Log a session and this fills in.',
   emptyCta: 'Log session',
@@ -544,6 +558,110 @@ export function recordRows(prs: ReadonlyArray<ProgressPr> | null | undefined, sy
       date: shortDate(pr.date, now),
       estimated: pr.estimated === true,
     }));
+}
+
+/* ------------------------------------------------------------------ records shelf */
+
+/**
+ * The shelf's reading order: the heaviest set first (what a lifter looks for),
+ * then the estimate it implies, then the best single-set volume, then the
+ * aggregate records a timed or distance movement carries, then reps.
+ */
+export const SHELF_ORDER: readonly RecordType[] = [
+  'heaviestWeightKg',
+  'estimatedOneRepMaxKg',
+  'bestSetVolumeKg',
+  'longestDurationMin',
+  'longestDistanceKm',
+  'bestPaceSecPerKm',
+  'mostReps',
+];
+
+/** Short labels for a dense row; the long titles stay on the trend sheet. */
+export const SHELF_LABELS: Record<RecordType, string> = {
+  heaviestWeightKg: 'Best set',
+  estimatedOneRepMaxKg: '1RM',
+  bestSetVolumeKg: 'Best volume',
+  mostReps: 'Most reps',
+  longestDurationMin: 'Longest hold',
+  longestDistanceKm: 'Longest distance',
+  bestPaceSecPerKm: 'Best pace',
+};
+
+export type ShelfFact = {
+  type: RecordType;
+  label: string;
+  value: string;
+  /** Epley: shown with "est." so an estimate is never read as a lift that happened. */
+  estimated: boolean;
+  date: string;
+  workoutId: string;
+  /** The achieving set, or null for an aggregate (duration / distance / pace) record. */
+  setId: string | null;
+};
+
+export type ShelfRow = {
+  exerciseId: string;
+  name: string;
+  facts: ShelfFact[];
+  /** "3 Sep": when the newest of this row's records was set. */
+  when: string;
+};
+
+/**
+ * One row per movement: its best set, the estimated 1RM, the best volume and
+ * when, from `GET /workouts/records` keyed by the exercises the summary named.
+ * An exercise the member has never recorded produces no row at all — the zero
+ * rule: a missing record is omitted, never drawn as a dash.
+ */
+export function shelfRows(
+  exercises: ReadonlyArray<{ exerciseId: string; name?: string }> | null | undefined,
+  records: ProgressRecords | null | undefined,
+  system: UnitSystem,
+  now: Date = new Date(),
+): ShelfRow[] {
+  const rows: ShelfRow[] = [];
+  for (const exercise of exercises ?? []) {
+    const id = exercise?.exerciseId;
+    if (typeof id !== 'string' || !id) continue;
+    const entry = records?.[id];
+    if (!entry) continue;
+    const facts: ShelfFact[] = [];
+    for (const type of SHELF_ORDER) {
+      const record = entry[type];
+      if (!record || !Number.isFinite(record.value)) continue;
+      // The heaviest set reads as the set it was ("105 kg × 5"), which is what
+      // the number means; every other type is its own formatted value.
+      const value =
+        type === 'heaviestWeightKg' && Number.isFinite(record.reps)
+          ? formatBestSet({ reps: record.reps as number, weightKg: record.weightKg ?? record.value }, weightUnit(system))
+          : formatRecordValue(type, record.value, system);
+      if (!value) continue;
+      facts.push({
+        type,
+        label: SHELF_LABELS[type],
+        value,
+        estimated: record.estimated === true,
+        date: record.date,
+        workoutId: record.workoutId,
+        setId: record.setId ?? null,
+      });
+    }
+    if (!facts.length) continue;
+    const newest = facts.reduce((best, fact) => (Date.parse(fact.date) > Date.parse(best) ? fact.date : best), facts[0].date);
+    rows.push({ exerciseId: id, name: exercise.name || id, facts, when: shortDate(newest, now) });
+  }
+  return rows;
+}
+
+/**
+ * "Removed 105 kg × 5, 3 Sep" / "Records before 1 Jan do not count" — one
+ * line per active adjustment, in the words of what it did. `from` and the
+ * record's own label come from the API; nothing is inferred.
+ */
+export function adjustmentLine(kind: 'exclude' | 'reset', detail: string | null, when: string | null): string {
+  if (kind === 'reset') return when ? `Records before ${when} do not count` : 'Records before a chosen day do not count';
+  return detail ? `Removed ${detail}` : 'One record removed';
 }
 
 /* ------------------------------------------------------------------ movements */
