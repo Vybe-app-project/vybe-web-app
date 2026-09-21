@@ -44,7 +44,7 @@ import {
   humanize,
   useToast,
 } from './ui';
-import { Check, ChevronLeft, ChevronRight, Clock, Image as ImageIcon, Lock, MapPin, Plus, Shield, Users, X } from './icons';
+import { Check, ChevronLeft, ChevronRight, Clock, Image as ImageIcon, Lock, MapPin, Plus, Share, Shield, Users, X } from './icons';
 
 /* ------------------------------------------------------------------ types (shared with the detail pages) */
 
@@ -78,7 +78,35 @@ export type Community = CommunityLike & {
   googleMapsData?: { rating?: number | null } | null;
   stats?: { totalMembers?: number; activeMembers?: number; totalPosts?: number };
   settings?: { isPublic?: boolean; requireApproval?: boolean; maxMembers?: number };
+  /** `member` when a member created it from a place they typed in (`user-<24hex>`); such communities carry a `reviewState`. */
+  source?: string;
+  /** `pending` until an operator reviews a member-created community; pending and rejected ones are members-only in every list. */
+  reviewState?: string;
 };
+
+/** The public face of a member on the activity routes (`active-this-week`, `trained-today`). */
+export type PublicActor = { _id: string; username?: string; fullName?: string; avatar?: string };
+
+/**
+ * `GET /gyms/community/:id/active-this-week` — `count` is the exact number of
+ * distinct members with a check-in this week (only-me, blocked and
+ * undiscoverable included); `members` is the visible subset, at most 12,
+ * newest first; `sample` is true when the subset is shorter than the count.
+ */
+export type ActiveThisWeek = { count: number; members: PublicActor[]; sample?: boolean };
+
+/** `GET /gyms/community/:id/trained-today?timeZone=` — the same shape for the local day, plus which zone drew the day. */
+export type TrainedToday = {
+  count: number;
+  members: PublicActor[];
+  localDay?: string;
+  timezone?: string;
+  /** `default` means the day was computed in UTC: the community has no zone yet. */
+  timezoneSource?: 'community' | 'query' | 'viewer' | 'default' | string;
+};
+
+/** `GET /gyms/places/:placeId/hours?timeZone=` — `open: null` means the provider has no hours for the place. */
+export type PlaceHours = { open: boolean | null; closesAt?: string | null; opensAt?: string | null; openingHours?: unknown };
 
 type Paged<T> = {
   gymCommunities: T[];
@@ -107,6 +135,152 @@ export const nameOf = (u?: { username?: string; fullName?: string } | null) => u
 export const unwrapCommunity = (data: any): Community => (data?.data || data?.gymCommunity || data) as Community;
 
 export const statusOf = (error: unknown): number | undefined => (error as { response?: { status?: number } } | null)?.response?.status;
+
+/** The device's IANA zone: what the activity routes and the event form are told (API.md §11b). */
+export const zoneOf = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+};
+
+/** The activity routes answer `{ count, members }`, sometimes inside a `data` envelope; anything else is "no figure". */
+function unwrapActivity<T extends { count: number; members: PublicActor[] }>(data: unknown): T | null {
+  const outer = data as { data?: unknown } | null;
+  const inner = outer?.data;
+  const body = (inner && typeof inner === 'object' && 'count' in (inner as object) ? inner : data) as Partial<T> | null;
+  if (!body || typeof body !== 'object' || typeof body.count !== 'number' || !Number.isFinite(body.count)) return null;
+  const members = Array.isArray(body.members) ? body.members.filter((m): m is PublicActor => Boolean(m && typeof m === 'object' && (m as PublicActor)._id)) : [];
+  return { ...(body as T), count: Math.max(0, Math.round(body.count)), members };
+}
+
+const ACTIVITY_QUERY = { retry: false, staleTime: 60_000 } as const;
+
+/**
+ * Who was active this week: the header's third figure and the Today tab's
+ * faces. Additive on the API (2026-09-20), so a 404 — an older API, or a
+ * community the viewer may not see — is simply "no figure", never an error.
+ */
+export function useActiveThisWeek(communityId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['community', communityId, 'active-this-week'],
+    enabled,
+    ...ACTIVITY_QUERY,
+    queryFn: async () => {
+      try {
+        const { data } = await api.get(`/gyms/community/${communityId}/active-this-week`);
+        return unwrapActivity<ActiveThisWeek>(data);
+      } catch (e) {
+        if (statusOf(e) === 404) return null;
+        throw e;
+      }
+    },
+  });
+}
+
+/** Who trained today, in the device's zone; the same 404 rule. */
+export function useTrainedToday(communityId: string, enabled: boolean) {
+  const timeZone = zoneOf();
+  return useQuery({
+    queryKey: ['community', communityId, 'trained-today', timeZone],
+    enabled,
+    ...ACTIVITY_QUERY,
+    queryFn: async () => {
+      try {
+        const { data } = await api.get(`/gyms/community/${communityId}/trained-today`, { params: { timeZone } });
+        return unwrapActivity<TrainedToday>(data);
+      } catch (e) {
+        if (statusOf(e) === 404) return null;
+        throw e;
+      }
+    },
+  });
+}
+
+/** Opening hours for a place. Only OpenStreetMap ids resolve, so nothing else is even asked. */
+export function usePlaceHours(placeId: string | null | undefined, enabled = true) {
+  const timeZone = zoneOf();
+  const resolvable = typeof placeId === 'string' && /^osm-/.test(placeId);
+  return useQuery({
+    queryKey: ['place', placeId, 'hours', timeZone],
+    enabled: enabled && resolvable,
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      try {
+        const { data } = await api.get(`/gyms/places/${encodeURIComponent(placeId!)}/hours`, { params: { timeZone } });
+        const outer = data as { data?: unknown } | null;
+        const body = (outer?.data && typeof outer.data === 'object' && 'open' in (outer.data as object) ? outer.data : data) as PlaceHours | null;
+        return body && typeof body === 'object' && 'open' in body ? body : null;
+      } catch (e) {
+        if (statusOf(e) === 404) return null;
+        throw e;
+      }
+    },
+  });
+}
+
+/** "22:00" as sent, or an instant rendered as a 24-hour clock; anything else is dropped rather than guessed. */
+function clockOf(value?: string | null): string | null {
+  if (!value) return null;
+  const text = String(value).trim();
+  const clock = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(text);
+  if (clock) return `${clock[1].padStart(2, '0')}:${clock[2]}`;
+  const d = new Date(text);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+  } catch {
+    return null;
+  }
+}
+
+/** "Open now · closes 22:00" / "Closed · opens 06:00"; `open: null` (no hours known) says nothing. */
+export function hoursLine(hours?: PlaceHours | null): string | null {
+  if (!hours || typeof hours.open !== 'boolean') return null;
+  if (hours.open) {
+    const closes = clockOf(hours.closesAt);
+    return closes ? `Open now · closes ${closes}` : 'Open now';
+  }
+  const opens = clockOf(hours.opensAt);
+  return opens ? `Closed · opens ${opens}` : 'Closed now';
+}
+
+/** The blue text button of a page header (Instagram's "Edit"/"Next"): the one primary action when it is a verb, not a form. */
+export const TEXT_ACTION = 'pressable -mr-2 inline-flex min-h-11 shrink-0 items-center rounded-sm px-2 text-sm font-semibold text-brand';
+
+async function copyLink(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The tonal second control of a gym header: Web Share where the browser has it, otherwise the link goes to the clipboard. */
+export function ShareButton({ path, title, className }: { path: string; title: string; className?: string }) {
+  const toast = useToast();
+  const share = async () => {
+    const url = `${window.location.origin}${path}`;
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title, url });
+        return;
+      } catch (e) {
+        if ((e as { name?: string } | null)?.name === 'AbortError') return;
+      }
+    }
+    if (await copyLink(url)) toast.success('Link copied');
+    else toast.error('Could not copy the link');
+  };
+  return (
+    <Button variant="secondary" icon={<Share size={18} />} onClick={() => void share()} className={className}>
+      Share
+    </Button>
+  );
+}
 
 /** The community route; `communityPath()` in lib/gyms (the `?community=` share form) redirects here. */
 export const communityHref = (id: string) => `/communities/${encodeURIComponent(id)}`;
@@ -246,10 +420,33 @@ export function VisibilityBadge({ community }: { community: Community }) {
 
 export type JoinOutcome = 'member' | 'pending' | 'none';
 
+type PagedCommunities = { gymCommunities?: Community[] };
+const isPagedCommunities = (v: unknown): v is PagedCommunities => Boolean(v && typeof v === 'object' && Array.isArray((v as PagedCommunities).gymCommunities));
+
+/** What a tap on Join will most likely come back as, so the button can read it before the server does. */
+export function optimisticJoin(c: Community): { status: JoinOutcome; community: Community } {
+  const current = membershipOf(c);
+  const status: JoinOutcome = current.pending ? 'none' : visibilityBadge(c) ? 'pending' : 'member';
+  const joined = status === 'member';
+  const members = typeof c.totalMembers === 'number' ? c.totalMembers + (joined && !current.isMember ? 1 : 0) : c.totalMembers;
+  return {
+    status,
+    community: {
+      ...c,
+      isMember: joined,
+      userRole: joined ? 'member' : null,
+      userMembership: { ...(c.userMembership || {}), status, isMember: joined, role: joined ? 'member' : null },
+      ...(members !== undefined ? { totalMembers: members } : {}),
+    },
+  };
+}
+
 /**
  * `POST /gyms/community/join { gymId }` joins, requests, or cancels a pending
  * request (a second tap). The server's membership status is the truth: after
- * a cancel it reports `none` and the button simply reads Join again.
+ * a cancel it reports `none` and the button simply reads Join again. The tap
+ * shows first, though: the detail and every list holding the community are
+ * rewritten to the likely outcome and put back if the server refuses.
  */
 export function useJoinMutation(onJoined?: (communityId: string, status: JoinOutcome) => void) {
   const qc = useQueryClient();
@@ -258,6 +455,21 @@ export function useJoinMutation(onJoined?: (communityId: string, status: JoinOut
     mutationFn: async (gymId: string) => {
       const { data } = await api.post('/gyms/community/join', { gymId });
       return { gymId, ...(data as { message?: string; membership?: { status?: string } }) };
+    },
+    onMutate: async (gymId: string) => {
+      await qc.cancelQueries({ queryKey: ['community', gymId], exact: true });
+      const detail = qc.getQueryData<Community>(['community', gymId]);
+      const lists = qc.getQueriesData<unknown>({ queryKey: ['communities'] });
+      if (detail?._id) qc.setQueryData<Community>(['community', gymId], optimisticJoin(detail).community);
+      qc.setQueriesData<unknown>({ queryKey: ['communities'] }, (old: unknown) =>
+        isPagedCommunities(old) ? { ...old, gymCommunities: old.gymCommunities!.map((c) => (c._id === gymId ? optimisticJoin(c).community : c)) } : old,
+      );
+      return { detail, lists };
+    },
+    onError: (e, gymId, ctx) => {
+      if (ctx?.detail) qc.setQueryData(['community', gymId], ctx.detail);
+      for (const [key, data] of ctx?.lists || []) qc.setQueryData(key, data);
+      toast.error(errMsg(e, statusOf(e) === 409 ? 'This community is not taking requests right now' : 'Could not update your membership'));
     },
     onSuccess: (data) => {
       const msg = data?.message || '';
@@ -270,7 +482,6 @@ export function useJoinMutation(onJoined?: (communityId: string, status: JoinOut
       qc.invalidateQueries({ queryKey: ['home-gym'] });
       onJoined?.(data.gymId, status);
     },
-    onError: (e) => toast.error(errMsg(e, statusOf(e) === 409 ? 'This community is not taking requests right now' : 'Could not update your membership')),
   });
 }
 
@@ -310,14 +521,14 @@ export function JoinButton({
 
 function CommunityCardSkeleton() {
   return (
-    <div className="card p-3" aria-hidden="true">
+    <Card padded={false} className="p-3" aria-hidden="true">
       <Skeleton className="aspect-video w-full rounded-md" />
       <div className="mt-3 space-y-2 px-1">
         <Skeleton className="h-4 w-2/3" />
         <Skeleton className="h-3 w-1/2" />
         <Skeleton className="h-6 w-24 rounded-xs" />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -780,14 +991,11 @@ export default function GymCommunity() {
       <PageHeader
         title="Communities"
         subtitle="The crews built around a gym. Join one, or start the first."
-        band={{
-          context: 'Crews built around a gym',
-          action: (
-            <Button variant="primary" size="lg" icon={<Plus size={18} />} onClick={() => startCommunity()}>
-              Start a community
-            </Button>
-          ),
-        }}
+        actions={
+          <button type="button" className={TEXT_ACTION} onClick={() => startCommunity()}>
+            Start a community
+          </button>
+        }
         mobileActions={
           <IconButton label="Start a community" onClick={() => startCommunity()}>
             <Plus size={22} />

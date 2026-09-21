@@ -8,7 +8,7 @@ import { PlaceImage } from '../components/PlaceImage';
 import { osmHref } from '../components/MapTile';
 import { memberCountLabel } from '../components/GymBand';
 import { dedupeProviderPlaces, distanceLabelKm, haversineKm, presetFromPlace, providerRadiusMeters } from '../lib/gyms';
-import { Pager, communityHref, communityLinkState, memberTotalOf, useCommunityAtPlace, useCommunityCover, type Community } from './GymCommunity';
+import { Pager, TEXT_ACTION, communityHref, communityLinkState, memberTotalOf, useCommunityAtPlace, useCommunityCover, type Community } from './GymCommunity';
 import {
   Badge,
   Button,
@@ -240,13 +240,13 @@ function OsmAttribution({ className }: { className?: string }) {
 
 function GymCardSkeleton() {
   return (
-    <div className="card p-3" aria-hidden="true">
+    <Card padded={false} className="p-3" aria-hidden="true">
       <Skeleton className="aspect-video w-full rounded-md" />
       <div className="mt-3 space-y-2 px-1">
         <Skeleton className="h-4 w-2/3" />
         <Skeleton className="h-3 w-1/2" />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -366,7 +366,8 @@ function PlaceRow({
   const distance = distanceLabelKm(placeDistanceKm(place, coords));
   const name = place.name || 'Place';
   return (
-    <li className="card @container p-3">
+    <li>
+      <Card padded={false} container className="p-3">
       <div className="flex items-start gap-3">
         <PlaceImage src={place.photoUrl} name={place.name} className="h-14 w-14 rounded-sm" />
         <div className="min-w-0 flex-1">
@@ -418,6 +419,7 @@ function PlaceRow({
           Add to directory
         </Button>
       </div>
+      </Card>
     </li>
   );
 }
@@ -426,12 +428,14 @@ function PlaceListSkeleton({ label }: { label: string }) {
   return (
     <ul className="space-y-2" aria-busy="true" aria-label={label}>
       {Array.from({ length: 4 }).map((_, i) => (
-        <li key={i} className="card flex items-center gap-3 p-3">
-          <Skeleton className="h-14 w-14 rounded-sm" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-3 w-1/2" />
-            <Skeleton className="h-3 w-3/4" />
-          </div>
+        <li key={i}>
+          <Card padded={false} className="flex items-center gap-3 p-3">
+            <Skeleton className="h-14 w-14 rounded-sm" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          </Card>
         </li>
       ))}
     </ul>
@@ -544,6 +548,17 @@ export default function Gyms() {
   const changeDirectorySearch = (value: string) => {
     setDirectorySearch(value);
     setPage(1);
+  };
+  // One field at the top, bound to the list under it: the directory's own
+  // term on Directory, the map's everywhere else. Typing on Nearby is a
+  // search, and the results live on Places.
+  const changeSearch = (value: string) => {
+    if (tab === 'all') {
+      changeDirectorySearch(value);
+      return;
+    }
+    setPlacesSearch(value);
+    if (tab !== 'places' && value.trim()) switchTab('places');
   };
   const changeRadius = (value: string) => {
     setRadius(value);
@@ -727,14 +742,23 @@ export default function Gyms() {
       <PageHeader
         title="Gyms"
         subtitle="Find where you train. Search for the place, and its community is one tap away."
-        band={{
-          context: 'Find where you train',
-          action: (
-            <Button variant="primary" size="lg" icon={<Plus size={18} />} onClick={addAGym}>
-              Add a gym
-            </Button>
-          ),
-        }}
+        actions={
+          <button type="button" className={TEXT_ACTION} onClick={addAGym}>
+            Add a gym
+          </button>
+        }
+      />
+
+      {/* The search is the first thing on the page: searching a real place and starting its community is
+          how a gym comes to exist on Vybe. "Search for your gym" is said here, once. */}
+      <SearchField
+        id={PLACE_SEARCH_ID}
+        label={tab === 'all' ? 'Search the directory' : 'Search for your gym'}
+        hideLabel
+        placeholder={tab === 'all' ? 'Search the directory by name or address' : 'Search for your gym'}
+        value={tab === 'all' ? directorySearch : placesSearch}
+        onChange={(e) => changeSearch(e.target.value)}
+        enterKeyHint="search"
       />
 
       <SegmentedControl
@@ -751,23 +775,15 @@ export default function Gyms() {
       {/* ---------------------------------------------------------------- places */}
       {tab === 'places' ? (
         <section className="space-y-4" aria-label="Place search">
-          <SearchField
-            id={PLACE_SEARCH_ID}
-            label="Search for your gym"
-            hideLabel
-            placeholder="Search for your gym, e.g. “Iron Works Bethlehem”"
-            value={placesSearch}
-            onChange={(e) => setPlacesSearch(e.target.value)}
-            autoFocus
-          />
           {!debouncedPlaces ? (
             <EmptyState
+              size="sm"
               family="community"
-              title="Search for your gym"
+              title="Your gym is already on the map"
               message={
                 coords
-                  ? 'Type its name and pick it from the map, closest to you first. If nobody has started its community yet, you can start it in a minute.'
-                  : 'Type its name and pick it from the map. If nobody has started its community yet, you can start it in a minute.'
+                  ? 'Type its name, for example “Iron Works Bethlehem”, and pick it, closest to you first. If nobody has started its community yet, you can start it in a minute.'
+                  : 'Type its name, for example “Iron Works Bethlehem”, and pick it from the map. If nobody has started its community yet, you can start it in a minute.'
               }
             />
           ) : null}
@@ -825,7 +841,7 @@ export default function Gyms() {
               </div>
 
               <section className="space-y-3" aria-label="Gyms on Vybe near you">
-                <h2 className="type-heading text-lg text-text-1">On Vybe</h2>
+                <h2 className="t-section text-text-1">On Vybe</h2>
                 {nearby.isLoading || (nearby.isPending && !nearby.data) ? <ListSkeleton count={3} /> : null}
                 {nearby.isError ? <ErrorState error={nearby.error} onRetry={() => nearby.refetch()} /> : null}
                 {nearby.isSuccess && gyms.length === 0 ? (
@@ -857,7 +873,7 @@ export default function Gyms() {
 
               <section className="space-y-3" aria-label="Gyms near you on the map">
                 <div>
-                  <h2 className="type-heading text-lg text-text-1">On the map</h2>
+                  <h2 className="t-section text-text-1">On the map</h2>
                   <p className="text-sm text-text-2">Gyms and studios around you. Start the community at yours, or add it to the directory to review it.</p>
                 </div>
                 {providerNearby.isLoading ? <PlaceListSkeleton label="Searching the map" /> : null}
@@ -894,18 +910,8 @@ export default function Gyms() {
       {/* ---------------------------------------------------------------- directory */}
       {tab === 'all' ? (
         <section className="space-y-4" aria-label="Gym directory">
-          <div className="@container">
-            <div className="flex flex-col gap-3 @md:flex-row @md:items-center">
-              <SearchField
-                label="Search the directory"
-                hideLabel
-                placeholder="Search by gym name or address"
-                value={directorySearch}
-                onChange={(e) => changeDirectorySearch(e.target.value)}
-                containerClassName="flex-1"
-              />
-              <Select label="Sort gyms" hideLabel options={SORT_OPTIONS} value={sort} onChange={changeSort} containerClassName="@md:w-44" />
-            </div>
+          <div className="flex justify-end">
+            <Select label="Sort gyms" hideLabel options={SORT_OPTIONS} value={sort} onChange={changeSort} containerClassName="w-44" />
           </div>
           {all.isLoading ? <ListSkeleton /> : null}
           {all.isError ? <ErrorState error={all.error} onRetry={() => all.refetch()} /> : null}
