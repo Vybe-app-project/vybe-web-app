@@ -54,15 +54,15 @@ import {
 } from './icons';
 
 export { Brand, BrandMark, PairFigure };
-/* Gym copy helpers (and the deprecated GymBand shim), the map tile, and the
+/* Gym copy helpers, the map tile, and the
    page chrome store — PageChrome.tsx owns it now, re-exported here so no import
    site moves. */
-export { GymBand, NO_GYM_COPY, memberCountLabel, trainingTodayLine } from './GymBand';
-export type { GymBandGym, GymBandProps } from './GymBand';
+export { NO_GYM_COPY, memberCountLabel, trainingTodayLine } from './GymBand';
+export type { GymBandGym } from './GymBand';
 export { MapTile, osmHref } from './MapTile';
 export type { MapTileProps } from './MapTile';
 export { PageHeader, usePageChrome, usePageChromeStore } from './PageChrome';
-export type { PageBand, PageChrome } from './PageChrome';
+export type { PageChrome } from './PageChrome';
 export type { IllustrationFamily } from './icons';
 
 /* ================================================================== helpers */

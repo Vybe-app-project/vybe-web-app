@@ -92,7 +92,9 @@
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 
   /* shell metrics */
-  --nav-h: 56px;
+  --nav-h: 48px;
+  /** A StatTile's measured height (114 px), so a skeleton reserves the real thing. */
+  --height-tile: 7.6rem;
   --topbar-h: 48px;
 
   /* space and measure — fixed, as Instagram's: 16 px gutters on phones and
@@ -164,6 +166,7 @@
 }
 
 @theme inline {
+  --height-tile: var(--height-tile);
   --color-bg: var(--bg); --color-surface-1: var(--surface-1); --color-surface-2: var(--surface-2); --color-surface-3: var(--surface-3);
   --color-line: var(--line); --color-line-strong: var(--line-strong); --color-control: var(--control-border);
   --color-text-1: var(--text-1); --color-text-2: var(--text-2); --color-text-3: var(--text-3);

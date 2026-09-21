@@ -46,12 +46,6 @@ export type PageChrome = {
   hideBottomNav?: boolean;
 };
 
-/**
- * @deprecated The shell draws no band; the gym is a <GymHeader> the page places
- * itself. Kept as a type only so a page that still passes `band={{…}}` to
- * PageHeader compiles until its owner removes the prop; delete with that prop.
- */
-export type PageBand = Record<string, unknown>;
 
 type PageChromeState = { chrome: PageChrome | null; set: (c: PageChrome | null) => void };
 export const usePageChromeStore = create<PageChromeState>((set) => ({
@@ -111,8 +105,6 @@ export function PageHeader({
   wide?: boolean;
   hideSectionTabs?: boolean;
   hideBottomNav?: boolean;
-  /** @deprecated Ignored: the shell draws no band. Remove the prop; see PageBand. */
-  band?: PageBand;
   /** @deprecated Ignored: the header is the shell's. */
   className?: string;
 }) {

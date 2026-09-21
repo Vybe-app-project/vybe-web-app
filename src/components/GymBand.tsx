@@ -1,5 +1,4 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { GymHeader } from './GymHeader';
 import { cx, formatStat } from './ui';
 
 /**
@@ -80,49 +79,4 @@ export function coverGeometry(id?: string): CSSProperties {
     '--geo2-y': `${-40 + slot(s, 4) * 50}%`,
     '--geo2-d': `${180 + slot(s, 5) * 160}px`,
   } as CSSProperties;
-}
-
-/** @deprecated The shell band's props; only the shim below still reads them. Deleted with ShellBand. */
-export type GymBandProps = {
-  variant?: 'full' | 'hub';
-  /** null/undefined => the "find your gym" state. */
-  gym?: GymBandGym | null;
-  /** Hub title, e.g. "Workouts". */
-  title?: string;
-  /** e.g. "Your week at Bethlehem Barbell". */
-  context?: string;
-  /** Drawn ONLY when > 0. */
-  figure?: number | null;
-  figureLabel?: string;
-  figureUnit?: string;
-  action?: ReactNode;
-  secondaryAction?: ReactNode;
-  /** Gym-scoped tabs rendered on the band. */
-  tabs?: ReactNode;
-  /** Brand / search / inbox / Log row rendered on the band; stays through the collapse. */
-  chrome?: ReactNode;
-  loading?: boolean;
-  /** Replaces the figure block when `figure` is falsy. */
-  children?: ReactNode;
-  /** Heading element for the band title; the shell decides who owns the page h1. */
-  titleAs?: 'h1' | 'h2' | 'p';
-  className?: string;
-};
-
-/**
- * @deprecated Compatibility shim for the shell: Layout.tsx renders it above
- * every hub until the shell package deletes ShellBand. It draws no band — the
- * chrome row the shell passes in keeps its place (a plain dark bar, so the
- * inverse wordmark still reads), a `full` band shows the compact <GymHeader>
- * so Home previews the real thing, and hub titles, figures and copy are
- * dropped: the page header below carries them. Delete with ShellBand.
- */
-export function GymBand({ variant = 'hub', gym, loading = false, action, tabs, chrome, className }: GymBandProps) {
-  return (
-    <div className={className} data-band-shim={variant}>
-      {chrome ? <div className="dark flex h-14 items-center gap-1 bg-surface-1 px-4 text-text-1 lg:px-6">{chrome}</div> : null}
-      {variant === 'full' ? <GymHeader variant="compact" gym={gym ?? null} loading={loading} action={action} /> : null}
-      {tabs && !loading ? <div className={cx('flex gap-1 overflow-x-auto px-4 py-2 lg:px-6', 'no-scrollbar')}>{tabs}</div> : null}
-    </div>
-  );
 }

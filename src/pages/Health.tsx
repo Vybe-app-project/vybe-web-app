@@ -639,6 +639,15 @@ export default function Health() {
 
       {overview.isError ? (
         <ErrorState error={overview.error} title="Could not load your health summary" retry={() => overview.refetch()} />
+      ) : !settled ? (
+        // The tiles only exist once every query has answered, and appearing late
+        // shoved the charts below them down the page. Hold the steady state's
+        // five tiles at their measured height so the answer lands in reserved space.
+        <CardGrid min="clamp(8.5rem, 22%, 15rem)" aria-hidden="true">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-tile rounded-lg" />
+          ))}
+        </CardGrid>
       ) : tiles.length > 0 ? (
         <CardGrid min="clamp(8.5rem, 22%, 15rem)" aria-label="Health summary">
           {tiles.map((t) => (
