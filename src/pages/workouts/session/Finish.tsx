@@ -117,7 +117,7 @@ export default function Finish() {
             <SessionRecap summary={counted.summary} />
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-3">
               <p className="t-body text-text-1">{line}</p>
-              <button type="button" className={ROW_ACTION} disabled={undo.isPending} onClick={() => undo.mutate(counted)}>
+              <button type="button" className={`${ROW_ACTION} ml-auto`} disabled={undo.isPending} onClick={() => undo.mutate(counted)}>
                 Undo
               </button>
             </div>
@@ -182,7 +182,7 @@ export default function Finish() {
             qc.invalidateQueries({ queryKey: LOGS_KEY });
             qc.invalidateQueries({ queryKey: ['workout-progress'] });
             qc.invalidateQueries({ queryKey: ['workouts'] });
-            toast.success('Session logged');
+            toast.success('Session logged', { key: 'session-saved' });
             if (!slot) {
               navigate(saved?._id ? TRAIN.session(saved._id) : TRAIN.history, { replace: true, viewTransition: true });
               return;

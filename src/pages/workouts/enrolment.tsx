@@ -92,7 +92,7 @@ export function EnrolmentCard(props: EnrolmentCardProps) {
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-3">
           <p className="t-body min-w-0 truncate text-text-1">{`Next: ${nextUpLine(next)}`}</p>
           {nextTo ? (
-            <Link to={nextTo} viewTransition aria-label={`Start ${next.title || 'the next session'}`} className={ROW_ACTION}>
+            <Link to={nextTo} viewTransition aria-label={`Start ${next.title || 'the next session'}`} className={cx(ROW_ACTION, 'ml-auto')}>
               Start
             </Link>
           ) : null}

@@ -175,7 +175,7 @@ test('the slot travels from a plan row, through the runner, to the mark on the r
   assert.match(finish, /export function countedLine\(/);
   assert.match(finish, /`Counted toward \$\{planTitle \|\| 'your plan'\} · Week \$\{slot\.week\} · Day \$\{slot\.day\}`/);
   assert.match(finish, /unmarkSession\(done\.program\.planId, done\.program\)/);
-  assert.match(finish, /className=\{ROW_ACTION\}[\s\S]{0,120}Undo/);
+  assert.match(finish, /\$\{ROW_ACTION\} ml-auto`[\s\S]{0,140}Undo/);
   assert.ok(!/variant="primary"/.test(finish), 'the form’s Log session stays the recap screen’s one filled brand');
   // "Plan complete — {next.title} is next" only when the API names one.
   assert.match(finish, /next\?\.title \? `Plan complete — \$\{next\.title\} is next` : 'Plan complete'/);

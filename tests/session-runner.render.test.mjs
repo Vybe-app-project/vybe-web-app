@@ -299,7 +299,9 @@ test('the save is keyed and set-aware, and the recap pre-fills the form it sits 
   assert.match(finish, /queryKey: LOGS_KEY/);
   assert.match(finish, /queryKey: \['workout-progress'\]/);
   assert.match(finish, /queryKey: \['workouts'\]/);
-  assert.match(finish, /toast\.success\('Session logged'\)/);
+  // Keyed since P3: the form says it too, and the recap now holds on screen
+  // when a programme slot was marked, so two identical toasts would stack.
+  assert.match(finish, /toast\.success\('Session logged', \{ key: 'session-saved' \}\)/);
   assert.match(finish, /TRAIN\.session\(saved\._id\)/);
   const form = read('src/pages/workouts/SessionForm.tsx');
   assert.match(form, /\.\.\.\(!editing && clientRequestId && idempotent \? \{ clientRequestId \} : \{\}\)/);

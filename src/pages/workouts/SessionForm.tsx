@@ -122,7 +122,8 @@ export function SessionForm({
       return saved && typeof saved === 'object' && '_id' in saved ? saved : undefined;
     },
     onSuccess: (saved) => {
-      toast.success(editing ? 'Session saved' : 'Session logged');
+      // Keyed: the recap says the same thing when the log lands, and two identical toasts is one too many.
+      toast.success(editing ? 'Session saved' : 'Session logged', { key: 'session-saved' });
       qc.invalidateQueries({ queryKey: LOGS_KEY });
       if (editing) qc.invalidateQueries({ queryKey: ['workout-log', editing._id] });
       // The progress hub's tiles, calendar, movements and records count this session too.
