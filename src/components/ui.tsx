@@ -23,7 +23,7 @@ import type {
   TextareaHTMLAttributes,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { create } from 'zustand';
 import { errMsg, mediaUrl } from '../lib/api';
 import { RATE_LIMITED_TOAST_KEY, isRateLimitedCopy, parseApiError } from '../lib/apiError';
@@ -54,15 +54,16 @@ import {
 } from './icons';
 
 export { Brand, BrandMark, PairFigure };
-/* Gym First foundation: the band, its map tile and the collapse hook live in their own files. */
-export { GymBand, NO_GYM_COPY, trainingTodayLine } from './GymBand';
+/* Gym copy helpers (and the deprecated GymBand shim), the map tile, and the
+   page chrome store — PageChrome.tsx owns it now, re-exported here so no import
+   site moves. */
+export { GymBand, NO_GYM_COPY, memberCountLabel, trainingTodayLine } from './GymBand';
 export type { GymBandGym, GymBandProps } from './GymBand';
 export { MapTile, osmHref } from './MapTile';
 export type { MapTileProps } from './MapTile';
-export { useBandCollapse } from '../lib/gymBand';
-export type { BandCollapse } from '../lib/gymBand';
+export { PageHeader, usePageChrome, usePageChromeStore } from './PageChrome';
+export type { PageBand, PageChrome } from './PageChrome';
 export type { IllustrationFamily } from './icons';
-import type { GymBandGym as GymBandGymType } from './GymBand';
 
 /* ================================================================== helpers */
 
@@ -71,9 +72,10 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 }
 
 /**
- * Generated identity: one of five token gradient pairs (--identity-1..5) with
- * its ink, picked by hashing an id or handle so a person or place always gets
- * the same colour everywhere. The grey-initials tile is gone.
+ * Generated identity: a neutral disc with initials (Instagram's #efefef / #666
+ * in light, #2a2a2a / #a8a8a8 in dark). The five --identity-N slots all bind
+ * to that one pair now; the hash stays so a seed keeps a stable slot should
+ * the set ever grow again, and PlaceImage shares it.
  */
 export function identityIndex(seed?: string | null): 1 | 2 | 3 | 4 | 5 {
   const text = (seed ?? '').trim() || '?';
@@ -123,6 +125,20 @@ export function formatStat(n?: number | null, opts: { compact?: boolean } = {}):
   if (!Number.isFinite(v)) return '0';
   if (opts.compact || Math.abs(v) >= 100_000) return compactFormat.format(v);
   return numberFormat.format(v);
+}
+
+/**
+ * A number worth drawing as a metric: finite and above zero. Zero is never a
+ * metric ("0 kcal" is a hole, not a fact); StatTile, StatStrip, Ring and
+ * Metric render their `fallback` — the next action — instead.
+ */
+export function hasMetric(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0;
+}
+
+/** null, undefined or a number that is not a metric: the cases `fallback` covers. Strings and nodes render as given. */
+export function isEmptyMetric(v: unknown): boolean {
+  return v === null || v === undefined || (typeof v === 'number' && !hasMetric(v));
 }
 
 /* ================================================================== motion */
@@ -342,116 +358,9 @@ export function useDocumentTitle(title: string | undefined, suffix = ' · Vybe')
   }, [title, suffix]);
 }
 
-/* ================================================================== page chrome */
+/* ================================================================== section */
 
-/**
- * Pages describe their mobile top bar (title, back, actions) and optional
- * desktop right rail here; the shell renders it. Kept in an external store so
- * a page re-render never loops through the shell.
- */
-export type PageChrome = {
-  path: string;
-  title?: string;
-  /** Rendered in place of `title` in the phone top bar; `title` still names the document. */
-  titleNode?: ReactNode;
-  subtitle?: string;
-  /** `true` = history back with a sensible fallback; a string = explicit target. */
-  back?: boolean | string;
-  actions?: ReactNode;
-  rail?: ReactNode | null;
-  hideTopBar?: boolean;
-  hideSectionTabs?: boolean;
-  hideBottomNav?: boolean;
-  /** Use the full content width (no feed max-width). */
-  wide?: boolean;
-  /** Declares the hub band the shell renders above <main>. Omit for pages with no band. */
-  band?: PageBand;
-};
-
-/**
- * What a page declares about its band; the shell merges it with the viewer's
- * home gym and renders <GymBand>. Pages never render the band themselves.
- */
-export type PageBand = {
-  variant?: 'full' | 'hub';
-  /** Overrides the band title; defaults to `title`. */
-  bandTitle?: string;
-  context?: string;
-  figure?: number | null;
-  figureLabel?: string;
-  figureUnit?: string;
-  action?: ReactNode;
-  secondaryAction?: ReactNode;
-  /** Rendered instead of the figure block when `figure` is falsy. */
-  children?: ReactNode;
-  /** Gym-scoped tabs rendered on the band itself. */
-  tabs?: ReactNode;
-  /** Page-supplied gym; when omitted the shell uses the viewer's home gym. */
-  gym?: GymBandGymType | null;
-};
-
-type PageChromeState = { chrome: PageChrome | null; set: (c: PageChrome | null) => void };
-export const usePageChromeStore = create<PageChromeState>((set) => ({
-  chrome: null,
-  set: (chrome) => set({ chrome }),
-}));
-
-export function usePageChrome(chrome: Omit<PageChrome, 'path'>) {
-  const { pathname } = useLocation();
-  const set = usePageChromeStore((s) => s.set);
-  useEffect(() => {
-    set({ ...chrome, path: pathname });
-    if (chrome.title) document.title = `${chrome.title} · Vybe`;
-  });
-  useEffect(() => () => { if (usePageChromeStore.getState().chrome?.path === pathname) set(null); }, [pathname, set]);
-}
-
-/**
- * The one page-title treatment. On phones the title lives in the shell's top
- * bar; on desktop it renders inline here. Pages never render their own h1.
- */
-export function PageHeader({
-  title,
-  subtitle,
-  back,
-  actions,
-  mobileActions,
-  rail,
-  wide,
-  hideSectionTabs,
-  band,
-  className,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  back?: boolean | string;
-  actions?: ReactNode;
-  /** Compact actions for the mobile top bar when the desktop set is too wide. */
-  mobileActions?: ReactNode;
-  rail?: ReactNode | null;
-  wide?: boolean;
-  hideSectionTabs?: boolean;
-  /** The hub band this page wears; forwarded to the shell through usePageChrome. */
-  band?: PageBand;
-  className?: string;
-  children?: ReactNode;
-}) {
-  // `mobileActions={null}` means "nothing in the top bar"; only undefined falls back to the desktop set.
-  usePageChrome({ title, subtitle, back, actions: mobileActions === undefined ? actions : mobileActions, rail, wide, hideSectionTabs, band });
-  return (
-    <header className={cx('mb-6 hidden items-end justify-between gap-4 lg:flex', className)}>
-      <div className="min-w-0">
-        <h1 className="type-heading truncate text-2xl text-text-1">{title}</h1>
-        {subtitle ? <p className="mt-1 text-sm text-text-2">{subtitle}</p> : null}
-        {children}
-      </div>
-      {actions ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div> : null}
-    </header>
-  );
-}
-
-/** Card-group heading: 20/28 heading + optional trailing action. */
+/** Section heading: `.t-section` (16/600) + optional trailing action. */
 export function Section({
   title,
   action,
@@ -469,7 +378,7 @@ export function Section({
     <section className={cx('space-y-3', className)}>
       <div className="flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="type-heading text-lg text-text-1">{title}</h2>
+          <h2 className="t-section text-text-1">{title}</h2>
           {description ? <p className="text-sm text-text-2">{description}</p> : null}
         </div>
         {action}
@@ -536,7 +445,7 @@ export function SkeletonRow({ className }: { className?: string }) {
   );
 }
 
-/** Matches PostCard: header, media, two lines, action bar. */
+/** Boxed skeleton for card consumers (header, media, two lines, action bar). The feed's hairline rows have their own PostCardSkeleton in PostCard.tsx. */
 export function SkeletonCard({ media = true, className }: { media?: boolean; className?: string }) {
   return (
     <div className={cx('card p-4', className)}>
@@ -589,6 +498,7 @@ export function Avatar({
   ring,
   ringTone = 'brand',
   seed,
+  loading = 'eager',
 }: {
   src?: string | null;
   name?: string;
@@ -600,6 +510,8 @@ export function Avatar({
   ringTone?: 'brand' | 'accent' | 'neutral';
   /** Id or handle that picks the generated colour; falls back to the name. */
   seed?: string | null;
+  /** `lazy` defers the fetch until the avatar nears the viewport — for long lists only. Above the fold an eager avatar never pops in late. */
+  loading?: 'eager' | 'lazy';
 }) {
   const px = avatarPx(size);
   const [broken, setBroken] = useState(false);
@@ -630,7 +542,10 @@ export function Avatar({
       <img
         src={url}
         alt={alt || name || 'avatar'}
-        loading="lazy"
+        width={px}
+        height={px}
+        loading={loading === 'lazy' ? 'lazy' : undefined}
+        decoding="async"
         style={style}
         onError={() => {
           setBroken(true);
@@ -830,7 +745,7 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const ICON_BUTTON_VARIANT = {
-  ghost: 'text-text-2 hover:bg-surface-2 hover:text-text-1',
+  ghost: 'text-text-2 hover:text-text-1',
   secondary: 'border border-line-strong bg-surface-2 text-text-1 hover:bg-surface-3',
   primary: 'bg-brand text-on-brand hover:bg-brand-hover',
   danger: 'text-danger hover:bg-danger-soft',
@@ -851,7 +766,7 @@ export function IconButton({
   ...rest
 }: IconButtonProps) {
   const cls = cx(
-    'relative inline-flex shrink-0 items-center justify-center rounded-sm transition-colors dur-1',
+    'pressable relative inline-flex shrink-0 items-center justify-center rounded-sm transition-colors dur-1',
     size === 40 ? 'h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11' : size === 48 ? 'h-12 w-12' : 'h-11 w-11',
     ICON_BUTTON_VARIANT[variant],
     active && variant === 'ghost' && 'bg-brand-soft text-brand-text',
@@ -877,7 +792,7 @@ export function IconButton({
   );
 }
 
-/** Unread pill used on nav items and icon buttons. */
+/** Unread pill on nav items and icon buttons: Instagram's red, the one semantic colour in the chrome. */
 export function CountBadge({ value, className, max = 99 }: { value: number | string; className?: string; max?: number }) {
   const n = typeof value === 'number' ? value : Number(value);
   if (typeof value === 'number' && value <= 0) return null;
@@ -885,7 +800,7 @@ export function CountBadge({ value, className, max = 99 }: { value: number | str
   return (
     <span
       className={cx(
-        'tabular inline-flex min-w-4.5 items-center justify-center rounded-full bg-accent px-1 text-2xs font-bold leading-4.5 text-on-brand ring-2 ring-bg',
+        'tabular inline-flex min-w-4.5 items-center justify-center rounded-full bg-danger px-1 text-2xs font-bold leading-4.5 text-on-brand ring-2 ring-bg',
         className,
       )}
     >
@@ -1621,15 +1536,15 @@ export function CardHeader({
   return (
     <div className={cx('mb-3 flex items-start justify-between gap-3', className)}>
       <div className="min-w-0">
-        <Heading className="truncate text-md font-semibold text-text-1">{title}</Heading>
-        {subtitle ? <p className="mt-0.5 truncate text-xs text-text-2">{subtitle}</p> : null}
+        <Heading className="t-section truncate text-text-1">{title}</Heading>
+        {subtitle ? <p className="t-meta mt-0.5 truncate">{subtitle}</p> : null}
       </div>
       {action ? <div className="relative z-[2] shrink-0">{action}</div> : null}
     </div>
   );
 }
 
-/** Media slot inside a card: 14 px radius (card 20 → media 14 → chip 6). */
+/** Media slot inside a card: --radius-md (card 12 → media 10 → chip 6). */
 export function CardMedia({
   className,
   children,
@@ -1656,13 +1571,15 @@ export function CardMedia({
 
 export type BadgeTone = 'brand' | 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'accent';
 
+/* One accent: `info` reads as brand, `success` in its own green (5.4:1 on the
+   soft), `accent` (ember) is for effort — a PR badge — and never for chrome. */
 const BADGE_TONES: Record<BadgeTone, string> = {
   brand: 'bg-brand-soft text-brand-text',
   neutral: 'bg-surface-2 text-text-2 border border-line',
-  success: 'bg-success-soft text-brand-text dark:text-success',
+  success: 'bg-success-soft text-success',
   warning: 'bg-warning-soft text-warning-text',
   danger: 'bg-danger-soft text-danger-text',
-  info: 'bg-info-soft text-info-text',
+  info: 'bg-brand-soft text-brand-text',
   accent: 'bg-accent-soft text-accent-text',
 };
 
@@ -1713,7 +1630,7 @@ export function Chip({
   removeLabel?: string;
 }) {
   const cls = cx(
-    'relative inline-flex h-9 items-center gap-1.5 rounded-xs px-3 text-xs font-semibold transition-colors dur-1 pointer-coarse:min-h-11',
+    'pressable relative inline-flex h-9 items-center gap-1.5 rounded-xs px-3 text-xs font-semibold transition-colors dur-1 pointer-coarse:min-h-11',
     'before:absolute before:-inset-1 before:content-[""]',
     selected ? 'bg-brand-soft text-brand-text' : 'border border-line bg-surface-2 text-text-2 hover:text-text-1',
     className,
@@ -1751,7 +1668,15 @@ export function Chip({
 /* ================================================================== modal / sheet */
 
 let lockCount = 0;
-let lockedOverflow = '';
+let lockedScrollY = 0;
+const LOCK_KEYS = ['overflow', 'position', 'top', 'left', 'right', 'width'] as const;
+let lockedStyle: Partial<Record<(typeof LOCK_KEYS)[number], string>> = {};
+
+/** iPhone, iPod and iPad (which reports itself as a Mac with touch points): the Safari that scrolls the page behind an overflow:hidden body. */
+function isIOS(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /iP(hone|ad|od)/.test(navigator.platform) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1);
+}
 /**
  * How many modals/sheets are mounted. The toast viewport reads this so that
  * on a phone, while a sheet is open, toasts anchor to the top instead of
@@ -1770,15 +1695,33 @@ export function useLockBody(active: boolean) {
   useEffect(() => {
     if (!active) return;
     if (lockCount === 0) {
-      lockedOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
+      const body = document.body;
+      lockedScrollY = window.scrollY;
+      lockedStyle = Object.fromEntries(LOCK_KEYS.map((k) => [k, body.style[k]]));
+      body.style.overflow = 'hidden';
+      // iOS Safari keeps scrolling the page under a sheet despite overflow:hidden.
+      // Pinning the body at its scroll offset stops it for real; the offset is
+      // put back on release so the page never jumps to the top. (html carries
+      // scrollbar-gutter: stable, so desktop loses no width when the bar goes.)
+      if (isIOS()) {
+        body.style.position = 'fixed';
+        body.style.top = `-${lockedScrollY}px`;
+        body.style.left = '0';
+        body.style.right = '0';
+        body.style.width = '100%';
+      }
     }
     lockCount++;
     enter();
     return () => {
       lockCount--;
       leave();
-      if (lockCount === 0) document.body.style.overflow = lockedOverflow;
+      if (lockCount === 0) {
+        const body = document.body;
+        const pinned = body.style.position === 'fixed';
+        for (const k of LOCK_KEYS) body.style[k] = lockedStyle[k] ?? '';
+        if (pinned) window.scrollTo(0, lockedScrollY);
+      }
     };
   }, [active, enter, leave]);
 }
@@ -1859,7 +1802,12 @@ export type ModalProps = {
 /**
  * Dialog on desktop, drag-to-dismiss sheet on phones. Focus is trapped and
  * restored, Escape closes, body scroll locks, and both surfaces animate in
- * and out (durations collapse under reduced motion).
+ * and out (durations collapse under reduced motion). The panel has ONE motion
+ * source: the .anim-*-in/-out classes are transitions (entering from
+ * @starting-style), never a keyframe with a forwards fill — that fill pinned
+ * the transform and swallowed the drag — so the inline transform the
+ * swipe-to-dismiss writes is honoured and the snap-back rides the same
+ * transition.
  */
 export function Modal({
   open,
@@ -1878,7 +1826,7 @@ export function Modal({
 }: ModalProps) {
   const compact = useIsCompact();
   const asSheet = presentation === 'sheet' || (presentation === 'auto' && compact);
-  const { mounted, exiting } = usePresence(open, DURATION[3]);
+  const { mounted, exiting } = usePresence(open, DURATION[2]);
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const descId = useId();
@@ -1979,7 +1927,6 @@ export function Modal({
             ? 'max-h-[calc(100dvh-4rem)] rounded-t-xl border-t border-line pb-[env(safe-area-inset-bottom)]'
             : cx('max-h-[calc(100dvh-2rem)] rounded-lg border border-line', MODAL_WIDTH[size]),
           asSheet ? (exiting ? 'anim-sheet-out' : 'anim-sheet-in') : exiting ? 'anim-dialog-out' : 'anim-dialog-in',
-          '[transition:transform_var(--duration-3)_var(--ease-out)]',
           className,
         )}
       >
@@ -2297,7 +2244,10 @@ const TOAST_ICON: Record<ToastKind, ReactNode> = {
   info: <InfoIcon size={20} className="text-info" />,
 };
 
-function ToastItem({ t, onDismiss }: { t: Toast; onDismiss: (id: number) => void }) {
+/** The toast's exit (`.anim-toast-out`, --duration-out); the item stays mounted this long after dismiss. */
+const TOAST_EXIT_MS = 140;
+
+function ToastItem({ t, exiting, onDismiss }: { t: Toast; exiting: boolean; onDismiss: (id: number) => void }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const start = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
@@ -2319,7 +2269,7 @@ function ToastItem({ t, onDismiss }: { t: Toast; onDismiss: (id: number) => void
       onMouseLeave={start}
       onFocus={pause}
       onBlur={start}
-      className="anim-toast-in card pointer-events-auto flex w-full max-w-sm items-start gap-3 py-2.5 pl-3.5 pr-1.5 shadow-2"
+      className={cx(exiting ? 'anim-toast-out' : 'anim-toast-in', 'card pointer-events-auto flex w-full max-w-sm items-start gap-3 py-2.5 pl-3.5 pr-1.5 shadow-2')}
     >
       <span className="mt-2 shrink-0">{TOAST_ICON[t.kind]}</span>
       <p className="min-w-0 flex-1 py-2 text-sm font-medium text-text-1">{t.message}</p>
@@ -2345,11 +2295,24 @@ function ToastItem({ t, onDismiss }: { t: Toast; onDismiss: (id: number) => void
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [leaving, setLeaving] = useState<ReadonlySet<number>>(() => new Set());
   const seq = useRef(0);
 
-  const dismiss = useCallback((id: number) => {
+  const remove = useCallback((id: number) => {
     setToasts((list) => list.filter((x) => x.id !== id));
+    setLeaving((s) => {
+      if (!s.has(id)) return s;
+      const next = new Set(s);
+      next.delete(id);
+      return next;
+    });
   }, []);
+  // Dismiss plays the exit first: the item is marked leaving (its class flips
+  // to .anim-toast-out) and leaves the list once the transition has run.
+  const dismiss = useCallback((id: number) => {
+    setLeaving((s) => (s.has(id) ? s : new Set(s).add(id)));
+    setTimeout(() => remove(id), prefersReducedMotion() ? 0 : TOAST_EXIT_MS);
+  }, [remove]);
 
   const toast = useCallback((message: string, kindOrOptions: ToastKind | ToastOptions = 'info') => {
     if (!message) return -1;
@@ -2399,7 +2362,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         className={toastViewportClass(compact, modalOpen)}
       >
         {toasts.map((t) => (
-          <ToastItem key={t.id} t={t} onDismiss={dismiss} />
+          <ToastItem key={t.id} t={t} exiting={leaving.has(t.id)} onDismiss={dismiss} />
         ))}
       </div>
     </ToastCtx.Provider>
@@ -2425,21 +2388,20 @@ function isActionSpec(a: EmptyStateAction): a is EmptyStateActionSpec {
 function renderAction(a: EmptyStateAction, fallbackVariant: ButtonVariant) {
   if (!a) return null;
   if (isActionSpec(a)) {
-    // The first action in an empty state is the thing to do next. Pages pass
-    // `secondary` because the band already spends the brand blue; a bare grey
-    // pill under a heading still read as disabled, so a secondary first action
-    // takes the ink fill (the same treatment as a "Start" on a recent workout).
-    const ink = fallbackVariant === 'primary' && (a.variant ?? fallbackVariant) === 'secondary';
-    const cls = ink ? 'btn-ink' : undefined;
+    // The first action in an empty state is the screen's one blue: nothing
+    // else on an empty screen competes for it. Pages that passed `secondary`
+    // while the shell band held the blue are promoted; `quiet`/`link` stay.
+    const requested = a.variant ?? fallbackVariant;
+    const variant: ButtonVariant = fallbackVariant === 'primary' && requested === 'secondary' ? 'primary' : requested;
     if (a.to) {
       return (
-        <ButtonLink to={a.to} state={a.state} variant={a.variant ?? fallbackVariant} icon={a.icon} className={cls}>
+        <ButtonLink to={a.to} state={a.state} variant={variant} icon={a.icon}>
           {a.label}
         </ButtonLink>
       );
     }
     return (
-      <Button variant={a.variant ?? fallbackVariant} onClick={a.onClick} icon={a.icon} className={cls}>
+      <Button variant={variant} onClick={a.onClick} icon={a.icon}>
         {a.label}
       </Button>
     );
@@ -2611,16 +2573,22 @@ export function Tabs({
   const selected = active ?? value ?? '';
   const listRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState<{ x: number; w: number } | null>(null);
+  // The indicator slides only between positions it has already painted: the
+  // first measurement lands it in place with no transition.
+  const [settled, setSettled] = useState(false);
   const [fade, setFade] = useState<'' | 'l' | 'r' | 'x'>('');
+  const frame = useRef(0);
   const items = tabs.filter((t) => (t.key ?? t.value) !== undefined);
   const keyOf = (t: TabItem) => (t.key ?? t.value) as string;
 
-  const measure = useCallback(() => {
+  const measureNow = useCallback(() => {
     const list = listRef.current;
     if (!list) return;
     const el = list.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (el) setIndicator({ x: el.offsetLeft, w: el.offsetWidth });
-    else setIndicator(null);
+    if (el) {
+      const next = { x: el.offsetLeft, w: el.offsetWidth };
+      setIndicator((prev) => (prev && prev.x === next.x && prev.w === next.w ? prev : next));
+    } else setIndicator(null);
     const overflow = list.scrollWidth - list.clientWidth;
     if (overflow <= 4) setFade('');
     else {
@@ -2629,9 +2597,18 @@ export function Tabs({
       setFade(left && right ? 'x' : left ? 'l' : right ? 'r' : '');
     }
   }, []);
+  // Scroll and resize fire faster than frames: one forced layout per frame is
+  // plenty, and the fade and indicator still settle before paint.
+  const measure = useCallback(() => {
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      measureNow();
+    });
+  }, [measureNow]);
 
   useLayoutEffect(() => {
-    measure();
+    measureNow();
     const list = listRef.current;
     if (!list) return;
     const el = list.querySelector<HTMLElement>('[aria-selected="true"]');
@@ -2645,8 +2622,18 @@ export function Tabs({
     ro.observe(list);
     for (const child of Array.from(list.children)) ro.observe(child);
     document.fonts?.ready.then(measure).catch(() => {});
-    return () => ro.disconnect();
-  }, [selected, items.length, measure]);
+    return () => {
+      ro.disconnect();
+      if (frame.current) cancelAnimationFrame(frame.current);
+      frame.current = 0;
+    };
+  }, [selected, items.length, measure, measureNow]);
+
+  useEffect(() => {
+    if (!indicator || settled) return;
+    const id = requestAnimationFrame(() => setSettled(true));
+    return () => cancelAnimationFrame(id);
+  }, [indicator, settled]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const keys = items.filter((t) => !t.disabled).map(keyOf);
@@ -2668,14 +2655,23 @@ export function Tabs({
   const segmented = variant === 'segmented';
   const tabCls = (isActive: boolean, disabled?: boolean) =>
     cx(
-      'snap-item relative z-[1] inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap font-semibold outline-none transition-colors dur-1',
+      'pressable snap-item relative z-[1] inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap font-semibold outline-none transition-colors dur-1',
       size === 'sm' ? 'min-h-10 px-3 text-xs pointer-coarse:min-h-11' : 'min-h-11 px-3.5 text-sm',
       segmented ? 'rounded-[calc(var(--radius-sm)-2px)]' : 'rounded-xs',
       fill && 'flex-1',
       disabled ? 'cursor-not-allowed text-text-3' : isActive ? 'text-text-1' : 'text-text-2 hover:text-text-1',
-      !segmented && !isActive && !disabled && 'hover:bg-surface-2',
       'focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
     );
+
+  // The indicator moves on `transform` only, never on `width`. The underline
+  // is a 1 px bar scaled to the tab (scaleX of a solid bar is exact); the
+  // segmented thumb keeps a real width — scaling would stretch its corners and
+  // shadow — and slides on translateX, its width set without a transition.
+  const indicatorStyle: CSSProperties | undefined = indicator
+    ? segmented
+      ? { width: indicator.w, transform: `translateX(${indicator.x}px)` }
+      : { width: 1, transform: `translateX(${indicator.x}px) scaleX(${indicator.w})` }
+    : undefined;
 
   return (
     <div className={cx('relative', segmented ? 'rounded-sm border border-line bg-surface-2 p-1' : 'border-b border-line', className)}>
@@ -2686,8 +2682,7 @@ export function Tabs({
         onScroll={measure}
         onKeyDown={onKeyDown}
         className={cx(
-          'no-scrollbar snap-row relative flex overflow-x-auto',
-          segmented ? 'gap-1' : 'gap-1',
+          'no-scrollbar snap-row relative flex gap-1 overflow-x-auto',
           fade === 'l' && 'mask-fade-l',
           fade === 'r' && 'mask-fade-r',
           fade === 'x' && 'mask-fade-x',
@@ -2697,10 +2692,11 @@ export function Tabs({
           <span
             aria-hidden="true"
             className={cx(
-              'pointer-events-none absolute transition-[transform,width] dur-2 ease-out',
-              segmented ? 'inset-y-0 rounded-[calc(var(--radius-sm)-2px)] bg-surface-1 shadow-1' : 'bottom-0 h-0.5 rounded-full bg-brand',
+              'pointer-events-none absolute left-0 origin-left',
+              settled && 'transition-transform dur-2 ease-out',
+              segmented ? 'inset-y-0 rounded-[calc(var(--radius-sm)-2px)] bg-surface-1 shadow-1' : 'bottom-0 h-0.5 bg-brand',
             )}
-            style={{ width: indicator.w, transform: `translateX(${indicator.x}px)`, left: 0 }}
+            style={indicatorStyle}
           />
         ) : null}
         {items.map((t) => {
@@ -2976,6 +2972,7 @@ export function StatTile({
   loading = false,
   className,
   hint,
+  fallback,
 }: {
   label: string;
   value: ReactNode;
@@ -2986,16 +2983,20 @@ export function StatTile({
   to?: string;
   onClick?: () => void;
   tone?: 'neutral' | 'brand' | 'accent';
-  /** `hero` sets the value in the fluid --text-stat role (the one big number on a hub). */
+  /** `hero` sets the value in `.t-metric` (32–44 px, the one big number on a hub). */
   size?: 'md' | 'lg' | 'hero';
   loading?: boolean;
   className?: string;
   hint?: string;
+  /** In the value's place when `value` is 0, null or undefined: the next action, never a zero. The tile keeps its box. */
+  fallback?: ReactNode;
 }) {
   if (loading) return <SkeletonTile className={className} />;
+  const empty = fallback !== undefined && isEmptyMetric(value);
   const dir = delta?.direction ?? (typeof delta?.value === 'number' ? (delta.value > 0 ? 'up' : delta.value < 0 ? 'down' : 'flat') : 'flat');
   const good = delta ? (dir === 'flat' ? null : (dir === 'up') === (delta.upIsGood ?? true)) : null;
-  const deltaTone: BadgeTone = good === null ? 'neutral' : good ? 'brand' : 'accent';
+  // Semantic colour only where it means something: green for the good direction, red for the bad one.
+  const deltaTone: BadgeTone = good === null ? 'neutral' : good ? 'success' : 'danger';
   const deltaText = typeof delta?.value === 'number' ? `${delta.value > 0 ? '+' : ''}${formatStat(delta.value)}` : delta?.value;
   const body = (
     <>
@@ -3005,11 +3006,15 @@ export function StatTile({
       </div>
       <div className="mt-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <span className={cx('type-stat block truncate text-text-1', size === 'hero' ? 'text-stat' : size === 'lg' ? 'text-3xl' : 'text-2xl', tone === 'brand' && 'text-brand-text', tone === 'accent' && 'text-accent-text')}>
-            {value}
-            {unit ? <span className="ml-1 align-baseline text-xs font-semibold tracking-normal text-text-2 [font-variation-settings:'wdth'_100]">{unit}</span> : null}
-          </span>
-          {delta ? (
+          {empty ? (
+            <div className="t-body min-h-8 text-text-2">{fallback}</div>
+          ) : (
+            <span className={cx('type-stat block truncate text-text-1', size === 'hero' ? 't-metric' : size === 'lg' ? 'text-3xl' : 'text-2xl', tone === 'brand' && 'text-brand-text', tone === 'accent' && 'text-accent-text')}>
+              {value}
+              {unit ? <span className="ml-1 align-baseline text-xs font-semibold tracking-normal text-text-2 [font-variation-settings:'wdth'_100]">{unit}</span> : null}
+            </span>
+          )}
+          {!empty && delta ? (
             <span className="mt-1.5 inline-flex items-center gap-1.5">
               <Badge tone={deltaTone} size="sm">
                 {dir === 'up' ? <TrendingUp size={12} /> : dir === 'down' ? <TrendingDown size={12} /> : null}
@@ -3021,7 +3026,7 @@ export function StatTile({
             <span className="mt-1.5 block text-2xs text-text-3">{hint}</span>
           ) : null}
         </div>
-        {spark && spark.length > 1 ? <Sparkline data={spark} width={72} height={36} className={cx('shrink-0', tone === 'accent' ? 'text-accent' : 'text-brand')} /> : null}
+        {!empty && spark && spark.length > 1 ? <Sparkline data={spark} width={72} height={36} className={cx('shrink-0', tone === 'accent' ? 'text-accent' : 'text-brand')} /> : null}
       </div>
     </>
   );
@@ -3060,10 +3065,12 @@ export function StatGrid({ children, className, columns = 4 }: { children: React
 
 export type StatStripItem = {
   label: string;
-  value: number | string;
+  value?: number | string | null;
   to?: string;
   onClick?: () => void;
   tone?: 'neutral' | 'brand';
+  /** In the number's place when `value` is 0, null or undefined — the next action ("Share one"), never a zero. */
+  fallback?: ReactNode;
 };
 
 /**
@@ -3076,11 +3083,16 @@ export function StatStrip({ items, className, 'aria-label': ariaLabel = 'Stats' 
   return (
     <ul aria-label={ariaLabel} className={cx('card grid divide-x divide-line', className)} style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
       {items.map((item) => {
+        const empty = item.fallback !== undefined && isEmptyMetric(item.value);
         const body = (
           <>
-            <span className={cx('type-stat block truncate text-stat-sm', item.tone === 'brand' ? 'text-brand-text' : 'text-text-1')}>
-              {typeof item.value === 'number' ? formatStat(item.value) : item.value}
-            </span>
+            {empty ? (
+              <span className="t-meta block truncate text-text-1">{item.fallback}</span>
+            ) : (
+              <span className={cx('type-stat block truncate text-stat-sm', item.tone === 'brand' ? 'text-brand-text' : 'text-text-1')}>
+                {typeof item.value === 'number' ? formatStat(item.value) : item.value}
+              </span>
+            )}
             <span className="type-label block truncate text-text-2">{item.label}</span>
           </>
         );
@@ -3106,29 +3118,38 @@ export function StatStrip({ items, className, 'aria-label': ariaLabel = 'Stats' 
   );
 }
 
-/** Progress ring (macros, goals). Stroke 10, animates once on mount. */
+/**
+ * Progress ring (macros, goals). Stroke 10, animates once on mount. Without a
+ * metric (0, null) there is no goal to measure against: the dashed "nothing
+ * yet" ring, `fallback` in the centre, no percentage in the accessible name.
+ */
 export function Ring({
   value,
-  max = 100,
+  max: maxProp = 100,
   size = 96,
   stroke = 10,
   color = 'brand',
   children,
+  fallback,
   label,
   className,
 }: {
-  value: number;
+  value?: number | null;
   max?: number;
   size?: number;
   stroke?: number;
   color?: VizKey | string;
   children?: ReactNode;
+  /** Rendered in the centre in place of `children` when `value` is not a metric: the next action, never "0". */
+  fallback?: ReactNode;
   label?: string;
   className?: string;
 }) {
+  const empty = !hasMetric(value);
+  const max = empty ? 0 : maxProp;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+  const pct = max > 0 ? Math.max(0, Math.min(1, (hasMetric(value) ? value : 0) / max)) : 0;
   const [drawn, setDrawn] = useState(prefersReducedMotion());
   useEffect(() => {
     const id = requestAnimationFrame(() => setDrawn(true));
@@ -3163,7 +3184,11 @@ export function Ring({
           style={{ transition: 'stroke-dashoffset var(--duration-4) var(--ease-out)' }}
         />
       </svg>
-      {children ? <div className="type-stat absolute inset-0 flex flex-col items-center justify-center text-center text-text-1">{children}</div> : null}
+      {empty && fallback !== undefined ? (
+        <div className="t-meta absolute inset-0 flex flex-col items-center justify-center px-3 text-center text-text-1">{fallback}</div>
+      ) : children ? (
+        <div className="type-stat absolute inset-0 flex flex-col items-center justify-center text-center text-text-1">{children}</div>
+      ) : null}
     </div>
   );
 }
@@ -3205,7 +3230,8 @@ export function Progress({
       aria-valuenow={Math.round(value)}
       className={cx('w-full overflow-hidden rounded-full bg-surface-3', size === 'sm' ? 'h-1.5' : 'h-2.5', className)}
     >
-      <div className="h-full rounded-full [transition:width_var(--duration-4)_var(--ease-out)]" style={{ width: `${pct}%`, background: bg }} />
+      {/* The fill grows on transform, never on width. */}
+      <div className="h-full w-full origin-left rounded-full [transition:transform_var(--duration-4)_var(--ease-out)]" style={{ transform: `scaleX(${pct / 100})`, background: bg }} />
     </div>
   );
 }

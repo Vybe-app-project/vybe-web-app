@@ -17,6 +17,9 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icon-apple-touch-180.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- The Latin Archivo file the whole UI renders in, fetched with the HTML instead of after the stylesheet
+         has parsed. Vite rewrites this to the same hashed asset the CSS @font-face points at. -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/node_modules/@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2" />
     <title>Vybe</title>
   </head>
   <body>
