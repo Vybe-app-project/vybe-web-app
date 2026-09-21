@@ -647,3 +647,17 @@ test('scroll is restored on Back and reset on a new route; focus moves forward o
   assert.match(app, /const SESSION_STABLE_KEYS = new Set\(\['me', 'home-gym', 'community', 'capabilities', 'api-version'\]\);/);
   assert.doesNotMatch(app, /void qc\.invalidateQueries\(\);/, 'never everything at once');
 });
+
+test('the home gym resolves without waiting for its cover, fills the gym page’s cache and says whether the viewer is a member', () => {
+  const gym = read('src/lib/homeGym.ts');
+  assert.match(gym, /export type HomeGymState = HomeGym & \{[\s\S]*?member: boolean;/);
+  assert.match(gym, /export const communityKey = \(id: string\) => \['community', id\] as const;/);
+  assert.match(gym, /qc\.setQueryData\(communityKey\(id\), community\);/);
+  assert.doesNotMatch(gym.slice(gym.indexOf('async function resolveHomeGym('), gym.indexOf('const refSignature')), /resolveCover/, 'the model returns before the photo');
+  assert.match(gym, /queryKey: \[\.\.\.HOME_GYM_KEY, 'cover', communityId, coverSig\]/, 'the cover is its own query');
+  assert.match(gym, /queryKey: \[\.\.\.HOME_GYM_KEY, 'today', communityId\]/, 'so is the leaderboard line');
+  // /users/me sends a bare id (API.md §1); a populated { _id, name } is tolerated, as PostCard already does.
+  assert.match(gym, /export function communityRefOf\(ref: HomeGymRef \| null \| undefined\)/);
+  assert.match(gym, /if \(typeof c === 'string'\) return isObjectId\(c\) \? \{ id: c \} : null;/);
+  assert.match(gym, /if \(c && typeof c === 'object'\) \{/);
+});
