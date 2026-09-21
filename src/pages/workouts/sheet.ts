@@ -33,6 +33,28 @@ export function useSheetClose(fallback: string) {
   };
 }
 
+/** The plan slot a live session counts toward (src/lib/programs.ts `ProgramSlot`). */
+export type ProgramSlotParam = { planId: string; week: number; day: number; order: number };
+
+/**
+ * The slot a runner URL carries, or null when it carries none. The four
+ * parameters travel together or not at all: a half-written link starts an
+ * ordinary session rather than marking the wrong day done.
+ */
+export function programSlotFromParams(params: URLSearchParams): ProgramSlotParam | null {
+  const planId = params.get('plan');
+  if (!planId) return null;
+  const read = (name: string) => {
+    const value = Number(params.get(name));
+    return Number.isInteger(value) && value >= 1 ? value : null;
+  };
+  const week = read('week');
+  const day = read('day');
+  const order = read('order');
+  if (week === null || day === null || order === null) return null;
+  return { planId, week, day, order };
+}
+
 /* Train hub paths, in one place. */
 export const TRAIN = {
   hub: '/workouts',
@@ -52,11 +74,23 @@ export const TRAIN = {
    * session, neither starts it empty. This is where every "Start" on the hub
    * goes; `newSession` below is the post-hoc form, kept for logging a session
    * that has already happened.
+   *
+   * `program` names the plan slot this session is being trained for, so the
+   * recap can mark it done without the member going back to the plan page to
+   * do it by hand. It rides the session (and its draft) all the way to
+   * Finish; it never reaches `POST /workouts/logs`, which knows nothing
+   * about programmes.
    */
-  liveSession: (seed: { from?: string; repeat?: string } = {}) => {
+  liveSession: (seed: { from?: string; repeat?: string; program?: ProgramSlotParam | null } = {}) => {
     const q = new URLSearchParams();
     if (seed.from) q.set('from', seed.from);
     if (seed.repeat) q.set('repeat', seed.repeat);
+    if (seed.program?.planId) {
+      q.set('plan', seed.program.planId);
+      q.set('week', String(seed.program.week));
+      q.set('day', String(seed.program.day));
+      q.set('order', String(seed.program.order));
+    }
     const s = q.toString();
     return `/workouts/session${s ? `?${s}` : ''}`;
   },

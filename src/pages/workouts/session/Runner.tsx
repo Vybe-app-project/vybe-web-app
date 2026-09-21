@@ -8,7 +8,7 @@ import { Trash } from '../../../components/icons';
 import { ExercisePicker, type ExercisePick } from '../ExercisePicker';
 import { fetchWorkout, type SocialWorkout } from '../model';
 import { fetchLog, type WorkoutLog } from '../sessions';
-import { TRAIN } from '../sheet';
+import { TRAIN, programSlotFromParams } from '../sheet';
 import { AddExerciseForm, ExerciseCard, RestDock, SessionMetrics, sessionMetrics } from './parts';
 import { restStats, sessionStats, useSessionClock, useSessionStore } from './store';
 import { canFinish, weightUnitFor } from './math';
@@ -28,7 +28,10 @@ import type { PreviousSet, SessionSeed, WeightUnit } from './types';
  * same elapsed origin, same rest deadline.
  *
  * `?from=<workoutId>` seeds from a library workout, `?repeat=<logId>` from a
- * past session, and no parameter starts empty with the add field focused. A
+ * past session, and no parameter starts empty with the add field focused.
+ * `?plan=&week=&day=&order=` names the programme slot the session is being
+ * trained for — carried to the recap, which marks it done once the log
+ * exists, and invisible here: a programme day is an ordinary session. A
  * draft that is already open always wins: sets nobody typed are cheap, sets
  * somebody typed are not.
  */
@@ -112,6 +115,8 @@ export default function Runner() {
 
   const fromId = params.get('from');
   const repeatId = params.get('repeat');
+  // The four slot parameters travel together; a half-written link is no slot at all.
+  const program = useMemo(() => programSlotFromParams(params), [params]);
   const from = useQuery({ queryKey: ['workout', fromId], queryFn: () => fetchWorkout(fromId as string), enabled: Boolean(fromId) && !session, retry: false });
   const repeat = useQuery({ queryKey: ['workout-log', repeatId], queryFn: () => fetchLog(repeatId as string), enabled: Boolean(repeatId) && !session, retry: false });
 
@@ -126,7 +131,7 @@ export default function Runner() {
     if (started.current) return;
     if (session) {
       started.current = true;
-      if (fromId || repeatId) {
+      if (fromId || repeatId || program) {
         setParams(new URLSearchParams(), { replace: true });
         toast.info('You already had a session open.');
       }
@@ -135,12 +140,15 @@ export default function Runner() {
     if (fromId && from.isPending) return;
     if (repeatId && repeat.isPending) return;
     started.current = true;
-    const seed = from.data ? seedFromWorkout(from.data) : repeat.data ? seedFromLog(repeat.data) : null;
+    const loaded = from.data ? seedFromWorkout(from.data) : repeat.data ? seedFromLog(repeat.data) : null;
+    // A slot with no readable workout still starts the session, so the recap
+    // can mark the day done from whatever the member logs by hand.
+    const seed = loaded || program ? { ...(loaded ?? {}), program } : null;
     start({ from: seed, unit });
-    if ((fromId || repeatId) && !seed) toast.error('Could not load that workout. Add your exercises to start.');
-    if (fromId || repeatId) setParams(new URLSearchParams(), { replace: true });
+    if ((fromId || repeatId) && !loaded) toast.error('Could not load that workout. Add your exercises to start.');
+    if (fromId || repeatId || program) setParams(new URLSearchParams(), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, fromId, repeatId, from.isPending, from.data, repeat.isPending, repeat.data, unit]);
+  }, [session, fromId, repeatId, program, from.isPending, from.data, repeat.isPending, repeat.data, unit]);
 
   /* The PREVIOUS column: one request per card, in first-appearance order. */
   const exerciseIds = useMemo(() => {

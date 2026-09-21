@@ -470,6 +470,7 @@ export function createSession(
     notes: '',
     clientRequestId: newClientRequestId(),
     seedWorkoutId: seed?.workoutId ?? null,
+    program: seed?.program ?? null,
   };
 }
 

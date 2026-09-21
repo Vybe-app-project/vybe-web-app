@@ -4,14 +4,26 @@
  * needs: reps × weight sets, one rest timer, one draft.
  *
  * What the mobile types carry and this one deliberately does not: measures
- * (timed / distance / rounds), sides, supersets, set types, RPE, per-set
- * notes, PR hits and programme pointers. Every one of those rides a sidecar
- * route or a phone-local store; none of them is on `POST /workouts/logs`, so
- * the web port stays on the per-set contract in
- * `int-vybe-backend/docs/workout-set-records.md` and nothing else.
+ * (timed / distance / rounds), sides, supersets, set types, RPE and per-set
+ * notes. Every one of those rides a sidecar route or a phone-local store;
+ * none of them is on `POST /workouts/logs`, so the web port stays on the
+ * per-set contract in `int-vybe-backend/docs/workout-set-records.md` and
+ * nothing else.
+ *
+ * The one exception is `program`: the plan slot a session was started for.
+ * It is carried, never sent — the log POST rejects unknown fields — and the
+ * recap uses it to mark the slot done on `POST /plans/:id/enrollment/sessions`
+ * once the log exists.
  */
 
 export type WeightUnit = 'kg' | 'lb';
+
+/**
+ * The programme slot this session was started for. Written once, when the
+ * session starts, and read once, by the recap. Nothing in the runner behaves
+ * differently because it is there: a programme day is an ordinary session.
+ */
+export type SessionProgram = { planId: string; week: number; day: number; order: number };
 
 /**
  * A set from the member's last session with this exerciseId
@@ -73,6 +85,8 @@ export type WorkoutSession = {
   clientRequestId: string;
   /** The library workout or past log this session was seeded from, for "started from". */
   seedWorkoutId: string | null;
+  /** The plan slot the recap marks done, when this session was started from a programme. */
+  program?: SessionProgram | null;
 };
 
 /** Rest timer state; the deadline is absolute, so a hidden tab costs nothing. */
@@ -109,6 +123,8 @@ export type SessionSeed = {
   /** The workout or log id the session came from. */
   workoutId?: string | null;
   exercises?: TemplateExercise[];
+  /** The plan slot this session is being trained for, from `?plan=&week=&day=&order=`. */
+  program?: SessionProgram | null;
 };
 
 /* --------------------------------------------------------------- the wire */
