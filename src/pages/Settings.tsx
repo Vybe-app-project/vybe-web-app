@@ -4,6 +4,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { api, errMsg, fieldErrorsOf, tokenStore } from '../lib/api';
 import { BIRTH_DATE_LABEL, storedBirthDate } from '../lib/birthDate';
+import { jwtExpiryMs } from '../lib/authDrafts';
+import {
+  CURRENT_DEVICE,
+  LOGIN_ACTIVITY_DESCRIPTION,
+  LOGIN_ACTIVITY_TITLE,
+  NO_DEVICE_LIST,
+  SIGN_OUT_EVERYWHERE,
+  deviceLabel,
+  sessionLifetimeLine,
+} from '../lib/loginActivity';
 import { UnitsControl } from '../components/UnitsControl';
 import { VersionRow } from '../components/VersionRow';
 import { PlaceImage } from '../components/PlaceImage';
@@ -991,22 +1001,45 @@ function PrivacySection() {
  * "Sign out" at the top of the page ends this device only (POST /auth/logout
  * revokes the presenting session). Ending every session is a different,
  * deliberate action, so it lives here behind a confirmation.
+ *
+ * The API keeps no session list -- see lib/loginActivity for why -- so the
+ * card describes the one session it can read (this browser, this tab's
+ * token) and says plainly that the others cannot be enumerated, rather than
+ * showing an empty table or a per-device control no route can honour.
  */
 function SessionsSection() {
   const logoutEverywhere = useAuth((s) => s.logoutEverywhere);
   const [confirming, setConfirming] = useState(false);
+  // Read once on mount: the token and the agent do not change under the page.
+  const [device] = useState(() => deviceLabel(typeof navigator === 'undefined' ? null : navigator.userAgent));
+  const [lifetime] = useState(() =>
+    sessionLifetimeLine(jwtExpiryMs(tokenStore.get()), tokenStore.persistence(), (at) => format(at, 'd MMMM yyyy')),
+  );
   return (
-    <SettingsCard id="sessions" title="Devices" description="Signing out from the top of this page only signs out this device.">
+    <SettingsCard id="sessions" title={LOGIN_ACTIVITY_TITLE} description={LOGIN_ACTIVITY_DESCRIPTION}>
+      {/* The one session this page can honestly describe. */}
+      <div className="flex min-h-14 items-center gap-3 border-b border-line pb-3">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-brand-soft text-brand-text">
+          <Monitor size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-text-1">
+            {device} <span className="font-normal text-text-2">· {CURRENT_DEVICE}</span>
+          </p>
+          {lifetime ? <p className="text-xs text-text-2">{lifetime}</p> : null}
+        </div>
+      </div>
+      <p className="pt-3 text-xs text-text-2">{NO_DEVICE_LIST}</p>
       <div className="flex min-h-11 flex-wrap items-center gap-4 py-2">
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2">
-          <Monitor size={20} />
+          <Lock size={20} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-text-1">Sign out of all devices</p>
           <p className="text-xs text-text-2">Ends every session on every phone, tablet and computer, including this one. Use it if you left yourself signed in somewhere.</p>
         </div>
         <Button variant="secondary" icon={<Lock size={18} />} onClick={() => setConfirming(true)}>
-          Sign out everywhere
+          {SIGN_OUT_EVERYWHERE}
         </Button>
       </div>
       <ConfirmDialog
@@ -1120,7 +1153,7 @@ type GroupId = 'account' | 'preferences' | 'privacy' | 'notifications' | 'about'
 const GROUPS: Array<{ id: GroupId; label: string; hint: string; icon: IconComponent; cards: string[] }> = [
   { id: 'account', label: 'Account', hint: 'Who you are and where you train', icon: UserIcon, cards: ['account', 'home-gym', 'invite-code', 'invites', 'coaching'] },
   { id: 'preferences', label: 'Preferences', hint: 'Appearance, units, comments, accessibility, workouts', icon: Palette, cards: ['appearance', 'units', 'comments', 'accessibility', 'workouts'] },
-  { id: 'privacy', label: 'Privacy & safety', hint: 'Who can see you, your password and devices', icon: Shield, cards: ['privacy', 'password', 'sessions'] },
+  { id: 'privacy', label: 'Privacy & safety', hint: 'Who can see you, your password and login activity', icon: Shield, cards: ['privacy', 'password', 'sessions'] },
   { id: 'notifications', label: 'Notifications', hint: 'Push and email', icon: Bell, cards: ['push-device', 'notifications', 'email'] },
   { id: 'about', label: 'About & data', hint: 'Help, legal and your data', icon: Info, cards: ['about', 'legal', 'data', 'delete'] },
 ];
