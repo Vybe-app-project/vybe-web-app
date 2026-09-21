@@ -245,9 +245,7 @@ export function SliderSticker({
           {committed === null ? `${value}` : `You: ${committed}`}
         </span>
         {typeof average === 'number' ? (
-          <span className="tabular text-2xs" style={MUTED_STYLE}>
-            Average {average}
-          </span>
+          <span className="tabular text-2xs" style={MUTED_STYLE}>{`Average ${average}`}</span>
         ) : null}
       </div>
       <CountLine sticker={sticker} />
