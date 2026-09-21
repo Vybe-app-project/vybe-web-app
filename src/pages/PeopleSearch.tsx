@@ -180,7 +180,7 @@ export function PersonRow({
   const name = personName(user);
   const aside = trailingInteractive && !!trailing;
   return (
-    <li className={cx('flex items-center rounded-md transition-colors dur-1', aside && (selected ? 'bg-brand-soft' : 'hover:bg-surface-2'), aside && className)}>
+    <li className={cx('flex items-center rounded-md transition-colors dur-1', aside && selected && 'bg-brand-soft', aside && className)}>
       <button
         type="button"
         ref={buttonRef}
@@ -192,8 +192,8 @@ export function PersonRow({
         role={selected === undefined ? undefined : 'checkbox'}
         aria-checked={selected === undefined ? undefined : selected}
         className={cx(
-          'flex min-h-14 w-full min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand',
-          !aside && !locked && (selected ? 'bg-brand-soft' : 'hover:bg-surface-2 active:bg-surface-2 focus-visible:bg-surface-2'),
+          'pressable flex min-h-14 w-full min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand',
+          !aside && !locked && (selected ? 'bg-brand-soft' : 'focus-visible:bg-surface-2'),
           (disabled || locked) && 'opacity-60',
           locked && 'cursor-not-allowed',
           !aside && className,

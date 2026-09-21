@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useDebounced, type Post, type PublicUser } from '../lib/hooks';
 import { ButtonLink, Callout, EmptyState, ErrorState, PageHeader, SearchField, SegmentedControl, cx } from './ui';
-import { Award, Search as SearchIcon } from './icons';
+import { Award } from './icons';
 import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
 import { SuggestionList } from './SuggestionRow';
@@ -20,9 +20,6 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 const isTabKey = (v: string): v is TabKey => TABS.some((t) => t.key === v);
-
-/** The band's context line: "Saturday, 20 September" in the viewer's locale. */
-const todayLine = () => new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 
 function PostList({
   queryKey,
@@ -46,7 +43,7 @@ function PostList({
 
   if (isLoading)
     return (
-      <div className="space-y-4" aria-busy="true">
+      <div aria-busy="true">
         {Array.from({ length: 3 }).map((_, i) => (
           <PostCardSkeleton key={i} />
         ))}
@@ -64,8 +61,9 @@ function PostList({
       />
     );
 
+  // Hairline rows, as on Home: the items rule themselves, so nothing sits between them.
   return (
-    <div className="space-y-4">
+    <div>
       {data.map((post) => (
         <PostCard key={post._id} post={post} invalidate={[[queryKey], ['feed']]} />
       ))}
@@ -98,7 +96,7 @@ function PeopleList({
 
   if (isLoading)
     return (
-      <div className="space-y-2" aria-busy="true">
+      <div aria-busy="true">
         {Array.from({ length: 5 }).map((_, i) => (
           <UserRowSkeleton key={i} />
         ))}
@@ -118,7 +116,7 @@ function PeopleList({
     );
 
   return (
-    <div className={cx('space-y-2 transition-opacity dur-2', isPlaceholderData && 'opacity-60')} aria-busy={isPlaceholderData || undefined}>
+    <div className={cx('transition-opacity dur-2', isPlaceholderData && 'opacity-60')} aria-busy={isPlaceholderData || undefined}>
       {data.map((user) => (
         <UserRow key={user._id} user={user} />
       ))}
@@ -154,22 +152,9 @@ export default function Discover() {
 
   return (
     <>
-      {/* The Explore hub wears the band; the shell renders it. Its one action is the search
-          the hub is for, so the page body keeps to tonal controls. */}
-      <PageHeader
-        title="Explore"
-        subtitle="Fresh posts, trending workouts and people worth following."
-        band={{
-          context: todayLine(),
-          children: <p className="text-sm text-band-ink-2">Fresh posts, trending workouts and people worth following.</p>,
-          action: (
-            <ButtonLink to="/search" variant="primary" size="lg" icon={<SearchIcon size={18} />}>
-              Search Vybe
-            </ButtonLink>
-          ),
-        }}
-      />
-      <div className="w-full max-w-form space-y-section">
+      {/* The shell's search is this hub's action; the page adds none, so the body keeps to tonal controls. */}
+      <PageHeader title="Explore" subtitle="Fresh posts, trending workouts and people worth following." />
+      <div className="w-full max-w-feed space-y-section">
         {/* One underline row per screen: the hub's section tabs. These are a segmented control. */}
         <SegmentedControl
           aria-label="Explore"

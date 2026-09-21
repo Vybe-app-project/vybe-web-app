@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { compactNumber, displayName, followerCount, type PublicUser } from '../lib/hooks';
-import { Avatar, Badge, Button, Card, SkeletonRow, Skeleton, humanize, useToast, type ButtonSize } from './ui';
+import { Avatar, Badge, Button, Skeleton, humanize, useToast, type ButtonSize } from './ui';
 import { BadgeCheck, Check, Lock, UserPlus } from './icons';
 
 export type FollowState = 'none' | 'following' | 'requested';
@@ -152,9 +152,23 @@ export function UserBadges({ user, compact = false }: { user: PublicUser; compac
   );
 }
 
-/** Text link with a 44 px-tall hit area (pseudo-element, no visual change). */
+/** Text link with a 44 px-tall hit area (pseudo-element, no visual change), for a name that links inside a list item. */
 export const ROW_LINK = 'relative truncate text-md font-semibold text-text-1 hover:underline before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[""]';
 
+/**
+ * The whole-row profile link of a person row: an overlay under the action,
+ * carrying the `.pressable` wash, bleeding 8 px past the text on each side so
+ * the wash has an edge. Shared with the Friends page's rows.
+ */
+export const ROW_OVERLAY = 'pressable absolute -inset-x-2 inset-y-0 z-[1] rounded-md focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus';
+
+/**
+ * One person, as Instagram lists them: a 44 px avatar, the bold name, the
+ * handle and followers under it, the action at the right. No card and no
+ * rule — the row is the unit, and a list spaces its rows itself. The whole
+ * row opens the profile (an overlay link with the press wash); the action
+ * sits above the overlay, so a Follow never navigates.
+ */
 export default function UserRow({ user, trailing, below }: { user: PublicUser; trailing?: React.ReactNode; below?: React.ReactNode }) {
   const me = useAuth((s) => s.user);
   const isMe = !!me && String(me._id) === String(user._id);
@@ -162,18 +176,15 @@ export default function UserRow({ user, trailing, below }: { user: PublicUser; t
   const followers = followerCount(user);
 
   return (
-    <Card padded={false} className="flex items-center gap-3 p-3">
-      <Link to={href} viewTransition className="shrink-0 rounded-full" aria-label={`Open ${displayName(user)}’s profile`}>
-        <Avatar src={user.avatar} name={displayName(user)} size={44} />
-      </Link>
+    <div className="relative flex min-h-16 items-center gap-3 py-2">
+      <Link to={href} viewTransition className={ROW_OVERLAY} aria-label={`Open ${displayName(user)}’s profile`} />
+      <Avatar src={user.avatar} name={displayName(user)} size={44} seed={user._id} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-x-2">
-          <Link to={href} viewTransition className={ROW_LINK}>
-            {displayName(user)}
-          </Link>
+          <span className="t-name truncate text-text-1">{displayName(user)}</span>
           <UserBadges user={user} compact />
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-2">
+        <div className="t-meta flex flex-wrap items-center gap-x-3">
           <span className="inline-flex min-w-0 items-center gap-1">
             <span className="truncate">@{user.username}</span>
             <PrivateMark user={user} />
@@ -203,16 +214,21 @@ export default function UserRow({ user, trailing, below }: { user: PublicUser; t
         ) : null}
         {user.bio ? <p className="mt-1 line-clamp-2 text-xs text-text-2">{user.bio}</p> : null}
       </div>
-      <div className="shrink-0">{trailing ?? <FollowButton user={user} size="sm" />}</div>
-    </Card>
+      <div className="relative z-[2] shrink-0">{trailing ?? <FollowButton user={user} size="sm" />}</div>
+    </div>
   );
 }
 
+/** The row's exact geometry while it loads: the 44 px disc, two lines, the 40 px action. */
 export function UserRowSkeleton() {
   return (
-    <Card padded={false} className="flex items-center gap-3 p-3" aria-hidden="true">
-      <SkeletonRow className="flex-1 py-0" />
+    <div className="flex min-h-16 items-center gap-3 py-2" aria-hidden="true">
+      <Skeleton className="h-11 w-11 shrink-0 rounded-full" />
+      <div className="min-w-0 flex-1 space-y-2">
+        <Skeleton className="h-3.5 w-32 max-w-full" />
+        <Skeleton className="h-3 w-24" />
+      </div>
       <Skeleton className="h-10 w-20 rounded-sm" />
-    </Card>
+    </div>
   );
 }

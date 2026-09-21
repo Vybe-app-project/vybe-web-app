@@ -6,12 +6,13 @@ import { api, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { type CommunityPreset, isObjectId } from '../lib/gyms';
 import type { GymBandGym } from '../components/GymBand';
+import { GymHeader } from '../components/GymHeader';
 import { MapTile, osmHref } from '../components/MapTile';
 import { type Gym, RatingRow, Stars, gymImage, ratingOf, reviewCountOf } from './Gyms';
 import { CommunitySurface } from './CommunityDetail';
-import { type BandPreview, ago, communityHref, statusOf, unwrapCommunity, useCommunityAtPlace } from './GymCommunity';
-import { Avatar, Badge, Button, Card, CardGrid, ConfirmDialog, EmptyState, ErrorState, PageHeader, Skeleton, SkeletonRow, SkeletonText, Textarea, useToast } from './ui';
-import { ExternalLink, MapPin, Plus, Star, Trash, Users } from './icons';
+import { type BandPreview, ShareButton, ago, communityHref, hoursLine, statusOf, unwrapCommunity, useCommunityAtPlace, usePlaceHours } from './GymCommunity';
+import { Avatar, Badge, Button, Card, CardGrid, ConfirmDialog, EmptyState, ErrorState, PageHeader, SkeletonRow, Textarea, cx, useToast } from './ui';
+import { Clock, ExternalLink, MapPin, Plus, Star, Trash, Users } from './icons';
 
 /* ------------------------------------------------------------------ types */
 
@@ -30,8 +31,8 @@ const coordsOf = (g?: Gym | null): { lat: number; lng: number } | undefined => {
   return typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined;
 };
 
-/** The band's gym from a directory row (`GET /gyms/:gymId`): name, address, a real rating, coordinates. */
-function bandGymOfDirectory(g: Gym): GymBandGym {
+/** The header's gym from a directory row (`GET /gyms/:gymId`): name, address, a real rating, coordinates. */
+export function bandGymOfDirectory(g: Gym): GymBandGym {
   const rating = ratingOf(g);
   return {
     id: g._id,
@@ -166,7 +167,7 @@ export function GymReviews({ gym }: { gym: Gym }) {
     <Card container>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="type-heading text-lg text-text-1">Ratings and reviews</h2>
+          <h2 className="t-section text-text-1">Ratings and reviews</h2>
           <div className="mt-1">{count > 0 ? <RatingRow gym={gym} size={16} /> : <p className="text-sm text-text-2">Train here? Your review helps the next person choose.</p>}</div>
         </div>
         {!writing && !own ? (
@@ -281,38 +282,35 @@ function DirectoryGymSurface({ gym }: { gym: Gym }) {
   const coords = coordsOf(gym);
   const address = (gym.address || gym.vicinity || '').trim();
   const name = gym.name || 'Gym';
+  const headerGym = bandGymOfDirectory(gym);
+  const hours = hoursLine(usePlaceHours(gym.placeId).data);
   const start = () => navigate('/communities', { state: { startCommunity: presetFromGym(gym) }, viewTransition: true });
   return (
     <div className="space-y-section">
-      <PageHeader
-        title={name}
-        back="/gyms"
-        hideSectionTabs
-        band={{
-          variant: 'full',
-          gym: bandGymOfDirectory(gym),
-          action: (
-            <Button variant="primary" size="lg" icon={<Users size={18} />} onClick={start}>
-              Start the community
-            </Button>
-          ),
-        }}
+      <PageHeader title={name} back="/gyms" hideSectionTabs />
+      {/* The same profile header as a community, without a strip: a directory gym has no feed, board or
+          members yet — starting the community is the one thing to do here, so it is the blue. */}
+      <GymHeader
+        variant="profile"
+        gym={headerGym}
+        action={
+          <Button variant="primary" icon={<Users size={18} />} onClick={start}>
+            Start the community
+          </Button>
+        }
+        secondary={<ShareButton path={`/gyms/${encodeURIComponent(gym._id)}`} title={name} />}
+        className={cx('-mx-gutter', headerGym.photoUrl && '-mt-4 lg:-mt-6')}
       />
       <CardGrid min="20rem" aria-label={`About ${name}`}>
         <Card container>
-          <h2 className="type-heading text-lg text-text-1">Nobody trains here on Vybe yet</h2>
+          <h2 className="t-section text-text-1">Nobody trains here on Vybe yet</h2>
           <p className="mt-1 text-sm text-text-2">
             Start the community at {name} and it becomes a place in the app: a feed, a check-in board and the people who train here. You are its first admin.
           </p>
-          <div className="mt-3">
-            <Button variant="secondary" size="sm" icon={<Plus size={16} />} onClick={start}>
-              Start the community at {name}
-            </Button>
-          </div>
         </Card>
-        {coords || address ? (
+        {coords || address || hours ? (
           <Card container>
-            <h2 className="type-heading text-lg text-text-1">Where</h2>
+            <h2 className="t-section text-text-1">Where</h2>
             <div className="mt-3 flex flex-wrap items-start gap-4">
               {coords ? (
                 <a
@@ -330,6 +328,12 @@ function DirectoryGymSurface({ gym }: { gym: Gym }) {
                   <p className="flex items-start gap-1.5 text-sm text-text-1">
                     <MapPin size={16} className="mt-0.5 shrink-0 text-text-3" />
                     <span>{address}</span>
+                  </p>
+                ) : null}
+                {hours ? (
+                  <p className="flex items-center gap-1.5 text-sm text-text-1">
+                    <Clock size={16} className="shrink-0 text-text-3" />
+                    <span>{hours}</span>
                   </p>
                 ) : null}
                 {gym.description ? <p className="prose-measure text-sm text-text-2">{gym.description}</p> : null}
@@ -393,12 +397,14 @@ export default function GymDetail() {
   const resolving = detail.isLoading || (notFound && isObjectId(gymId) && communityFallback.isPending) || (Boolean(gym?.placeId) && linked.isPending);
 
   if (resolving) {
+    // The header paints from the card's preview while the gym and its community resolve; without one it is a skeleton of the same geometry.
+    const previewGym: GymBandGym | null = preview ? { id: preview.id ?? gymId, name: preview.name, city: preview.city, photoUrl: preview.photoUrl } : null;
     return (
       <div className="space-y-section">
-        <PageHeader title={preview?.name || 'Gym'} back="/gyms" hideSectionTabs band={preview ? { variant: 'full', gym: { id: preview.id ?? gymId, name: preview.name, city: preview.city, photoUrl: preview.photoUrl } } : undefined} />
+        <PageHeader title={preview?.name || 'Gym'} back="/gyms" hideSectionTabs />
+        <GymHeader variant="profile" gym={previewGym} loading={!previewGym} banner={Boolean(preview?.photoUrl)} className={cx('-mx-gutter', preview?.photoUrl && '-mt-4 lg:-mt-6')} />
         <div className="space-y-4" aria-busy="true" aria-label="Loading gym">
-          <Skeleton className="h-8 w-56" />
-          <SkeletonText lines={2} />
+          <SkeletonRow />
           <SkeletonRow />
         </div>
       </div>

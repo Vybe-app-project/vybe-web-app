@@ -146,7 +146,7 @@ function ChallengeTile({ challenge }: { challenge: ChallengeResult }) {
 function SubHeading({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="mb-2 flex min-h-10 items-center justify-between gap-3">
-      <h2 className="type-heading text-md text-text-1">{children}</h2>
+      <h2 className="t-section text-text-1">{children}</h2>
       {action}
     </div>
   );
@@ -368,7 +368,7 @@ export default function Search() {
   return (
     <>
       <PageHeader title="Search" subtitle="People, posts, hashtags, workouts, meals and challenges across Vybe." />
-      <div className="w-full max-w-form space-y-section">
+      <div className="w-full max-w-feed space-y-section">
         <form onSubmit={onSubmit} role="search" className="relative">
           <Input
             id={INPUT_ID}
@@ -474,7 +474,7 @@ export default function Search() {
 
         {/* ---------- People tab: live typeahead ---------- */}
         {liveTyping ? (
-          <section aria-label={`People matching ${term.trim()}`} aria-live="polite" aria-busy={livePeople.isFetching || undefined} className="space-y-2">
+          <section aria-label={`People matching ${term.trim()}`} aria-live="polite" aria-busy={livePeople.isFetching || undefined}>
             <SubHeading>People</SubHeading>
             {livePeople.isPending && !livePeople.data ? (
               <>
@@ -524,7 +524,7 @@ export default function Search() {
                           setTerm(r.query);
                           runSearch(r.query, isSearchType(r.type ?? null) ? (r.type as SearchType) : 'all');
                         }}
-                        className="flex min-h-11 w-full items-center gap-3 rounded-sm px-3 py-2 text-left text-sm text-text-1 transition-colors dur-1 hover:bg-surface-2"
+                        className="pressable flex min-h-11 w-full items-center gap-3 rounded-sm px-3 py-2 text-left text-sm text-text-1"
                       >
                         <Clock size={18} className="shrink-0 text-text-3" />
                         <span className="truncate">{r.query}</span>
@@ -533,9 +533,7 @@ export default function Search() {
                   ))}
                 </ul>
               ) : (
-                <p className="rounded-md bg-surface-2 px-4 py-3 text-sm text-text-2">
-                  Searches you run will show up here so you can jump back in.
-                </p>
+                <p className="t-body text-text-2">Searches you run will show up here so you can jump back in.</p>
               )}
             </section>
 
@@ -557,9 +555,9 @@ export default function Search() {
                     <HashtagList hashtags={trending.data.hashtags.map((h) => ({ hashtag: h._id, count: h.count }))} />
                   ) : null}
                   {trendingUsers.length ? (
-                    <div className="space-y-2">
-                      <h3 className="type-label text-text-2">{popularHeading}</h3>
-                      <div className="space-y-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-text-2">{popularHeading}</h3>
+                      <div>
                         {trendingUsers.map((u) => (
                           <UserRow key={u._id} user={u} />
                         ))}
@@ -582,7 +580,7 @@ export default function Search() {
 
         {/* ---------- results ---------- */}
         {activeQuery && results.isLoading ? (
-          <div className="space-y-3" aria-busy="true" aria-label="Searching">
+          <div aria-busy="true" aria-label="Searching">
             <UserRowSkeleton />
             <UserRowSkeleton />
             <PostCardSkeleton />
@@ -618,7 +616,7 @@ export default function Search() {
             ) : null}
 
             {peopleShown.items.length ? (
-              <section aria-labelledby="res-people" className="space-y-2">
+              <section aria-labelledby="res-people">
                 <SubHeading action={peopleShown.more > 0 ? <SeeAll label="See all people" onClick={() => switchType('users')} /> : undefined}>
                   <span id="res-people">People</span>
                 </SubHeading>
@@ -668,13 +666,15 @@ export default function Search() {
             ) : null}
 
             {posts.length ? (
-              <section aria-labelledby="res-posts" className="space-y-4">
+              <section aria-labelledby="res-posts">
                 <SubHeading>
                   <span id="res-posts">Posts</span>
                 </SubHeading>
-                {posts.map((p) => (
-                  <PostCard key={p._id} post={p} invalidate={[['search', activeQuery, type], ['feed']]} />
-                ))}
+                <div>
+                  {posts.map((p) => (
+                    <PostCard key={p._id} post={p} invalidate={[['search', activeQuery, type], ['feed']]} />
+                  ))}
+                </div>
               </section>
             ) : null}
           </div>

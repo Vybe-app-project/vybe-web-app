@@ -8,8 +8,6 @@ import {
   Avatar,
   Badge,
   Button,
-  ButtonLink,
-  Card,
   ConfirmDialog,
   EmptyState,
   ErrorState,
@@ -18,14 +16,15 @@ import {
   PageHeader,
   SearchField,
   SegmentedControl,
-  SkeletonRow,
-  cx,
   useToast,
 } from './ui';
 import { Check, Compass, MessageCircle, User, UserPlus, Users, X } from './icons';
-import { PrivateMark, ROW_LINK, UserBadges } from './UserRow';
+import { PrivateMark, ROW_OVERLAY, UserBadges, UserRowSkeleton } from './UserRow';
 import PeopleSearch, { type Person } from './PeopleSearch';
 import { SuggestionList } from './SuggestionRow';
+
+/** The header's blue text button (the same treatment GymCommunity.tsx exports; repeated here so this route does not load that module). */
+const TEXT_ACTION = 'pressable -mr-2 inline-flex min-h-11 shrink-0 items-center rounded-sm px-2 text-sm font-semibold text-brand';
 
 type FriendRequest = {
   _id: string;
@@ -57,28 +56,29 @@ const ago = (iso?: string) => {
 
 /* ------------------------------------------------------------------ rows */
 
+/** A person with a request or a friendship attached: UserRow's geometry, the request's time in place of followers. */
 function PersonRow({ user, meta, actions }: { user?: PublicUser; meta?: string; actions?: ReactNode }) {
   if (!user) return null;
   const name = displayName(user);
   const href = `/u/${user._id}`;
   return (
-    <li className="flex min-h-16 items-center gap-3 px-3 py-2.5 transition-colors dur-1 hover:bg-surface-2 sm:px-4">
-      <Link to={href} viewTransition className="shrink-0 rounded-full" aria-label={`Open ${name}’s profile`}>
-        <Avatar src={user.avatar} name={name} size={44} />
-      </Link>
+    <li className="relative flex min-h-16 items-center gap-3 py-2">
+      <Link to={href} viewTransition className={ROW_OVERLAY} aria-label={`Open ${name}’s profile`} />
+      <Avatar src={user.avatar} name={name} size={44} seed={user._id} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-x-2">
-          <Link to={href} viewTransition className={ROW_LINK}>
-            {name}
-          </Link>
+          <span className="t-name truncate text-text-1">{name}</span>
           <UserBadges user={user} compact />
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 text-xs text-text-2">
-          <span className="truncate">@{user.username}</span>
+        <div className="t-meta flex flex-wrap items-center gap-x-3">
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <span className="truncate">@{user.username}</span>
+            <PrivateMark user={user} />
+          </span>
           {meta ? <span className="shrink-0 text-text-3">{meta}</span> : null}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
+      <div className="relative z-[2] flex shrink-0 items-center gap-1.5">{actions}</div>
     </li>
   );
 }
@@ -96,9 +96,9 @@ function ListShell({
 }) {
   if (query.isLoading) {
     return (
-      <div className="space-y-1 p-3" aria-busy="true">
+      <div aria-busy="true">
         {Array.from({ length: 5 }).map((_, i) => (
-          <SkeletonRow key={i} className="px-1" />
+          <UserRowSkeleton key={i} />
         ))}
       </div>
     );
@@ -107,7 +107,7 @@ function ListShell({
     return <ErrorState error={query.error} onRetry={() => query.refetch()} />;
   }
   if (count === 0) return <>{empty}</>;
-  return <ul className="divide-y divide-line">{children}</ul>;
+  return <ul>{children}</ul>;
 }
 
 /* ------------------------------------------------------------------ page */
@@ -285,16 +285,11 @@ export default function Friends() {
       <PageHeader
         title="Friends"
         subtitle="Your circle, plus the requests waiting on you."
-        band={{
-          context: friends.data?.length ? 'Your circle, plus the requests waiting on you' : 'Find the people you train with',
-          figure: friends.data?.length ?? null,
-          figureLabel: 'friends',
-          action: (
-            <ButtonLink to="/discover" variant="primary" size="lg" icon={<Compass size={18} />}>
-              Explore people
-            </ButtonLink>
-          ),
-        }}
+        actions={
+          <Link to="/discover" viewTransition className={TEXT_ACTION}>
+            Explore people
+          </Link>
+        }
         mobileActions={
           <IconButton to="/discover" label="Explore people">
             <Compass size={22} />
@@ -303,8 +298,7 @@ export default function Friends() {
       />
 
       {/* Add a friend: the shared people typeahead, results as you type. */}
-      <Card className="space-y-3">
-        <PeopleSearch
+      <PeopleSearch
           query={peopleQuery}
           onQueryChange={setPeopleQuery}
           label="Add a friend"
@@ -362,41 +356,36 @@ export default function Friends() {
             );
           }}
         />
-      </Card>
 
       {/* People to follow, with the reason next to every name (GET /searching/suggest). */}
-      <Card className="space-y-3">
-        <SuggestionList
-          limit={5}
-          heading="For you"
-          emptyState={
-            <EmptyState
-              family="social"
-              size="sm"
-              title="Follow people from your gym or contacts"
-              message="Suggestions appear here as people you may know join Vybe."
-              action={{ label: 'Explore people', to: '/discover', variant: 'secondary', icon: <Compass size={18} /> }}
-            />
-          }
-        />
-      </Card>
+      <SuggestionList
+        limit={5}
+        heading="For you"
+        emptyState={
+          <EmptyState
+            family="social"
+            size="sm"
+            title="Follow people from your gym or contacts"
+            message="Suggestions appear here as people you may know join Vybe."
+            action={{ label: 'Explore people', to: '/discover', variant: 'secondary', icon: <Compass size={18} /> }}
+          />
+        }
+      />
 
       <section className="space-y-4" aria-label="Friends and requests">
         <SegmentedControl aria-label="Friends lists" tabs={tabs} value={tab} onChange={setTab} size={compact ? 'sm' : 'md'} />
 
-        <Card padded={false} className={cx('overflow-hidden', 'anim-fade-in')} key={tab}>
+        <div className="anim-fade-in space-y-3" key={tab}>
           {tab === 'friends' && (
             <>
               {(friends.data?.length || 0) > 5 ? (
-                <div className="border-b border-line p-3 sm:p-4">
-                  <SearchField
-                    label="Filter friends"
-                    hideLabel
-                    placeholder="Filter by name"
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                  />
-                </div>
+                <SearchField
+                  label="Filter friends"
+                  hideLabel
+                  placeholder="Filter by name"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
               ) : null}
               <ListShell
                 query={friends}
@@ -557,7 +546,7 @@ export default function Friends() {
               ))}
             </ListShell>
           )}
-        </Card>
+        </div>
       </section>
 
       <ConfirmDialog
