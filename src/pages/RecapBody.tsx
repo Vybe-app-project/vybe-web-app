@@ -4,7 +4,6 @@ import { Avatar, Badge, Button, Callout, Card, Progress, Section, StatGrid, Stat
 import { Building, Lock, Trophy, Users } from './icons';
 import type { WorkoutSummaryUnit } from '../lib/workoutSummary';
 import {
-  LOCKED_SHARE_MESSAGE,
   MONDAY_FIRST_WEEKDAYS,
   activeDaysCopy,
   compareDeltas,
@@ -13,17 +12,27 @@ import {
   dayLabel,
   hasDeltas,
   lockedCopy,
+  lockedShareMessage,
+  lockedTitle,
   mondayFirstIndex,
+  monthBars,
   quietCopy,
   recapHeadline,
   recordLine,
   recordTypeLabel,
   weeksKeptCopy,
+  yearTiles,
   type RecapDeltas,
   type RecapKind,
   type RecapStat,
   type RecapView,
 } from '../lib/recapView';
+
+/** The delta for one stat key, or undefined when the API compared nothing for it. */
+function deltaOf(deltas: RecapDeltas, key: RecapStat['key']) {
+  const delta = key === 'sessions' ? deltas.sessions : key === 'time' ? deltas.time : key === 'volume' ? deltas.volume : undefined;
+  return delta ? { value: delta.value, direction: delta.direction, label: delta.label } : undefined;
+}
 
 /**
  * The headline tiles. The comparison with the member's own previous period
@@ -48,11 +57,7 @@ export function RecapHeadline({
   const gridId = useId();
   if (!stats.length) return null;
   const comparable = hasDeltas(deltas);
-  const deltaFor = (key: RecapStat['key']) => {
-    if (!compareOpen) return undefined;
-    const delta = key === 'sessions' ? deltas.sessions : key === 'time' ? deltas.time : key === 'volume' ? deltas.volume : undefined;
-    return delta ? { value: delta.value, direction: delta.direction, label: delta.label } : undefined;
-  };
+  const deltaFor = (key: RecapStat['key']) => (compareOpen ? deltaOf(deltas, key) : undefined);
   return (
     <div>
       <div id={gridId}>
@@ -74,6 +79,57 @@ export function RecapHeadline({
 }
 
 /**
+ * A Year in Vybe's twelve months: one column per month, every month present
+ * and zeros included, scaled against the busiest one. No y-axis, because the
+ * API sends no scale — each column says its own numbers aloud instead. A
+ * plain grid of divs; no chart library reaches this page.
+ */
+export function RecapYearMonths({ recap }: { recap: Pick<RecapView, 'data'> }) {
+  const bars = monthBars(recap.data.byMonth);
+  if (!bars.length) return null;
+  return (
+    <Card data-testid="recap-year-months">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="t-section text-text-1">Months</h2>
+        <span className="t-meta">{activeDaysCopy(recap.data.activeDays, recap.data.activeDayCount)}</span>
+      </div>
+      <ol aria-label="Sessions by month" className="grid grid-cols-12 items-end gap-1">
+        {bars.map((bar) => (
+          <li key={bar.month} className="flex min-w-0 flex-col items-center gap-1">
+            <span className="sr-only">{bar.description}</span>
+            <span aria-hidden="true" className="flex h-20 w-full items-end">
+              <span
+                data-testid="recap-year-bar"
+                data-sessions={bar.sessions}
+                className={cx('w-full rounded-[3px]', bar.sessions > 0 ? 'bg-text-1' : 'bg-surface-3')}
+                style={{ height: bar.sessions > 0 ? `${Math.max(8, Math.round(bar.ratio * 100))}%` : '2px' }}
+              />
+            </span>
+            <span aria-hidden="true" className="t-meta w-full truncate text-center text-2xs">
+              {bar.label}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </Card>
+  );
+}
+
+/** The year's four totals, each box keeping its geometry with the next action in the number's place. */
+export function RecapYearTotals({ recap, unit }: { recap: Pick<RecapView, 'data'>; unit: WorkoutSummaryUnit }) {
+  const tiles = yearTiles(recap.data, unit);
+  return (
+    <section aria-label="The year in numbers" data-testid="recap-year-totals">
+      <StatGrid columns={2}>
+        {tiles.map((tile) => (
+          <StatTile key={tile.key} label={tile.label} value={tile.value} size="hero" fallback={tile.fallback} />
+        ))}
+      </StatGrid>
+    </section>
+  );
+}
+
+/**
  * The body of one recap, exactly as the API describes it: headline numbers
  * (compared to the member's own previous period only behind "Compare"), the
  * days, the records, the most trained exercises, weeks kept, and the gyms and
@@ -90,19 +146,20 @@ export function RecapBody({ recap, unit }: { recap: RecapView; unit: WorkoutSumm
   const gyms = Array.isArray(data.gyms) && data.gyms.length ? data.gyms : null;
   const buddies = Array.isArray(data.buddies) && data.buddies.length ? data.buddies : null;
   const firstOffset = kind === 'month' && data.byDay.length ? mondayFirstIndex(data.byDay[0].date) : 0;
+  const comparable = hasDeltas(deltas);
 
   return (
     <div className="space-y-6" data-testid="recap-body" data-status={recap.status}>
       {recap.status === 'locked' ? (
-        <Callout tone="info" icon={<Lock size={20} className="text-info" />} title="This month is still locked">
-          <p>{lockedCopy(data.progress)}</p>
-          <p className="mt-1">{LOCKED_SHARE_MESSAGE}</p>
+        <Callout tone="info" icon={<Lock size={20} className="text-info" />} title={lockedTitle(kind)}>
+          <p>{lockedCopy(data.progress, kind)}</p>
+          <p className="mt-1">{lockedShareMessage(kind)}</p>
           {data.progress ? (
             <Progress
               className="mt-3"
               value={Math.min(data.progress.sessions, data.progress.needed)}
               max={data.progress.needed}
-              label="Sessions toward unlocking this month"
+              label={kind === 'year' ? 'Sessions toward unlocking this year' : 'Sessions toward unlocking this month'}
             />
           ) : null}
         </Callout>
@@ -110,7 +167,33 @@ export function RecapBody({ recap, unit }: { recap: RecapView; unit: WorkoutSumm
 
       {recap.status === 'quiet' ? <p className="text-sm text-text-2">{quietCopy(kind)}</p> : null}
 
-      <RecapHeadline stats={stats} deltas={deltas} kind={kind} compareOpen={compareOpen} onToggleCompare={() => setCompareOpen((open) => !open)} />
+      {kind === 'year' ? (
+        <>
+          <RecapYearTotals recap={recap} unit={unit} />
+          {comparable ? (
+            <div className="-mt-4 flex justify-end">
+              <Button variant="ghost" size="sm" aria-expanded={compareOpen} onClick={() => setCompareOpen((open) => !open)} data-testid="recap-compare-toggle">
+                {compareLabel(kind, compareOpen)}
+              </Button>
+            </div>
+          ) : null}
+          {compareOpen ? (
+            <StatGrid columns={stats.length >= 4 ? 4 : stats.length === 3 ? 3 : 2}>
+              {stats.map((stat) => (
+                <StatTile
+                  key={stat.key}
+                  label={stat.label}
+                  value={stat.value}
+                  delta={deltaOf(deltas, stat.key)}
+                />
+              ))}
+            </StatGrid>
+          ) : null}
+          <RecapYearMonths recap={recap} />
+        </>
+      ) : (
+        <RecapHeadline stats={stats} deltas={deltas} kind={kind} compareOpen={compareOpen} onToggleCompare={() => setCompareOpen((open) => !open)} />
+      )}
 
       {data.byDay.length ? (
         <Card>
@@ -155,7 +238,7 @@ export function RecapBody({ recap, unit }: { recap: RecapView; unit: WorkoutSumm
       ) : null}
 
       {data.prs.length ? (
-        <Section title="Records" description={kind === 'month' ? 'Bests you set this month.' : 'Bests you set this week.'}>
+        <Section title="Records" description={kind === 'year' ? 'Bests you set this year.' : kind === 'month' ? 'Bests you set this month.' : 'Bests you set this week.'}>
           <Card padded={false}>
             <ol aria-label="Records" className="divide-y divide-line">
               {data.prs.map((record, index) => (

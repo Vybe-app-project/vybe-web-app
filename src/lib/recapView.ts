@@ -37,7 +37,17 @@ export type RecapGym = { communityId: string; name: string; visits: number };
 
 export type RecapBuddy = { userId: string; username?: string; fullName?: string; avatar?: string; sessions: number };
 
-export type RecapPrevious = { sessions: number; minutes: number; volumeKg: number };
+export type RecapPrevious = {
+  sessions: number;
+  minutes: number;
+  volumeKg: number;
+  /** v2-be-h9-recaps-year; null on a recap generated before that package, never a zero. */
+  activeDays?: number | null;
+  prs?: number | null;
+};
+
+/** One of the twelve rows a year carries in place of days. */
+export type RecapMonth = { month: string; sessions: number; minutes: number };
 
 export type RecapProgress = { sessions: number; needed: number; unlocksOn: string | null };
 
@@ -47,7 +57,16 @@ export type RecapData = {
   /** Always kilograms. */
   volumeKg: number;
   activeDays: string[];
+  /**
+   * The same count for the recap's own period, every kind. A year lists no
+   * days (`activeDays: []`, capped at 31), so its count only lives here; a
+   * document written before v2-be-h9-recaps-year omits it and the list's
+   * length stands in.
+   */
+  activeDayCount?: number | null;
   byDay: RecapDay[];
+  /** Twelve rows on a year, zeros included; `[]` on a week or a month. */
+  byMonth?: RecapMonth[];
   prs: RecapRecord[];
   topExercises: RecapTopExercise[];
   weeksKept: RecapWeeksKept | null;
@@ -155,6 +174,7 @@ export const recapTitle = (kind: RecapKind): string => recapKindLabel(kind);
 /** The badge on a recap whose period is still running. */
 export function runningBadge(recap: Pick<RecapView, 'kind' | 'final'>): string | null {
   if (recap.final) return null;
+  if (recap.kind === 'year') return 'This year so far';
   return recap.kind === 'month' ? 'This month so far' : 'This week so far';
 }
 
@@ -223,13 +243,14 @@ export const hasDeltas = (deltas: RecapDeltas): boolean => Boolean(deltas.sessio
 /** The toggle that reveals the comparison; closed by default, like the mobile viewer. */
 export function compareLabel(kind: RecapKind, open: boolean): string {
   if (open) return 'Hide comparison';
+  if (kind === 'year') return 'Compare with last year';
   return kind === 'month' ? 'Compare with last month' : 'Compare with last week';
 }
 
 export function compareDeltas(data: RecapData, unit: WorkoutSummaryUnit, kind: RecapKind): RecapDeltas {
   const previous = data.previous;
   if (!previous) return {};
-  const label = kind === 'month' ? 'vs last month' : 'vs last week';
+  const label = kind === 'year' ? 'vs last year' : kind === 'month' ? 'vs last month' : 'vs last week';
   const deltas: RecapDeltas = {};
   const sessions = data.sessions - previous.sessions;
   deltas.sessions = { value: sessions, direction: direction(sessions), label };
@@ -242,6 +263,76 @@ export function compareDeltas(data: RecapData, unit: WorkoutSummaryUnit, kind: R
   return deltas;
 }
 
+/* ------------------------------------------------------------ the year */
+
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** "Jan" from '2026-01'; the key itself when it is not a month key. */
+export function monthLabel(monthKey: string): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey || '');
+  const index = match ? Number(match[2]) - 1 : -1;
+  return index >= 0 && index < 12 ? MONTHS_SHORT[index] : monthKey;
+}
+
+export type RecapMonthBar = {
+  month: string;
+  /** "Jan": the column's own letterform, never its accessible name. */
+  label: string;
+  sessions: number;
+  minutes: number;
+  /** 0..1 against the busiest month of the twelve; 0 for a month with no session. */
+  ratio: number;
+  /** "January: 4 sessions, 3 h 10 min" — the column's spoken name. */
+  description: string;
+};
+
+/**
+ * The twelve columns of a Year in Vybe. Every month the API sent keeps its
+ * place, zeros included -- a year's shape is the point, and a month with no
+ * session is a fact about the year rather than a hole in a metric. The API
+ * sends no scale, so the bars are relative to the busiest month and each one
+ * says its own numbers aloud.
+ */
+export function monthBars(byMonth: RecapMonth[] | null | undefined): RecapMonthBar[] {
+  const rows = Array.isArray(byMonth) ? byMonth : [];
+  const max = rows.reduce((top, row) => Math.max(top, Number(row.sessions) > 0 ? Number(row.sessions) : 0), 0);
+  return rows.map((row) => {
+    const month = String(row.month ?? '');
+    const sessions = Math.max(0, Number(row.sessions) || 0);
+    const minutes = Math.max(0, Number(row.minutes) || 0);
+    const match = /^(\d{4})-(\d{2})$/.exec(month);
+    const index = match ? Number(match[2]) - 1 : -1;
+    const name = index >= 0 && index < 12 ? MONTHS_LONG[index] : month;
+    const time = formatDuration(minutes);
+    return {
+      month,
+      label: monthLabel(month),
+      sessions,
+      minutes,
+      ratio: max > 0 ? sessions / max : 0,
+      description: sessions ? `${name}: ${count(sessions, 'session')}${time ? `, ${time}` : ''}` : `${name}: no sessions`,
+    };
+  });
+}
+
+export type RecapYearTile = { key: RecapStat['key']; label: string; value: string | null; fallback: string };
+
+/**
+ * The year's totals as four tiles that keep their boxes. Unlike the headline
+ * strip -- which omits a stat rather than print a zero -- a year's tiles hold
+ * their geometry and put the next action in the number's place, which is what
+ * `fallback` is for (docs/DESIGN.md, the zero rule).
+ */
+export function yearTiles(data: RecapData, unit: WorkoutSummaryUnit): RecapYearTile[] {
+  const volume = typeof data.volumeKg === 'number' && data.volumeKg > 0 ? formatSummaryVolume(data.volumeKg, unit) : null;
+  return [
+    { key: 'sessions', label: data.sessions === 1 ? 'Session' : 'Sessions', value: data.sessions > 0 ? whole(data.sessions) : null, fallback: 'Log a session' },
+    { key: 'time', label: 'Time trained', value: data.minutes > 0 ? formatDuration(data.minutes) : null, fallback: 'Log a session' },
+    { key: 'volume', label: 'Volume lifted', value: volume, fallback: 'Log some sets' },
+    { key: 'records', label: data.prs.length === 1 ? 'Record' : 'Records', value: data.prs.length > 0 ? whole(data.prs.length) : null, fallback: 'Beat a best' },
+  ];
+}
+
 /** The API's own sentence for a share attempted on a locked month. */
 export const LOCKED_SHARE_MESSAGE = 'This recap unlocks later in the month. Share it once it is ready.';
 
@@ -251,8 +342,9 @@ export const LOCKED_SHARE_MESSAGE = 'This recap unlocks later in the month. Shar
  * the calendar still holds the month. Nothing about the rule (the day, the
  * minimum) is hard-coded here.
  */
-export function lockedCopy(progress: RecapProgress | null | undefined): string {
-  if (!progress) return 'This recap unlocks later in the month.';
+export function lockedCopy(progress: RecapProgress | null | undefined, kind: RecapKind = 'month'): string {
+  const period = kind === 'year' ? 'year' : 'month';
+  if (!progress) return `This recap unlocks later in the ${period}.`;
   const short = progress.sessions < progress.needed;
   const soFar = short
     ? `${whole(progress.sessions)} of ${count(progress.needed, 'session')} so far.`
@@ -264,12 +356,23 @@ export function lockedCopy(progress: RecapProgress | null | undefined): string {
   }
   if (short) {
     const remaining = progress.needed - progress.sessions;
-    return `${soFar} Log ${count(remaining, 'more session')} to unlock this month.`;
+    return `${soFar} Log ${count(remaining, 'more session')} to unlock this ${period}.`;
   }
-  return `${soFar} This month unlocks shortly.`;
+  return `${soFar} This ${period} unlocks shortly.`;
+}
+
+/** The title over a locked recap's notice, in the noun of its own period. */
+export function lockedTitle(kind: RecapKind): string {
+  return kind === 'year' ? 'This year is still locked' : 'This month is still locked';
+}
+
+/** What a share attempt on a locked recap says, in the noun of its own period. */
+export function lockedShareMessage(kind: RecapKind): string {
+  return kind === 'year' ? 'This recap unlocks once the year closes. Share it once it is ready.' : LOCKED_SHARE_MESSAGE;
 }
 
 export function quietCopy(kind: RecapKind): string {
+  if (kind === 'year') return 'A quiet year. The next one is a fresh start.';
   return kind === 'month' ? 'A quiet month. The next one is a fresh start.' : 'A quiet week. The next one is a fresh start.';
 }
 
@@ -278,8 +381,14 @@ export function weeksKeptCopy(weeksKept: RecapWeeksKept): string {
   return `${count(weeksKept.count, 'week')} kept · ${weeksKept.targetDays}+ ${weeksKept.targetDays === 1 ? 'day' : 'days'} a week`;
 }
 
-export function activeDaysCopy(activeDays: string[]): string {
-  return count(activeDays.length, 'active day');
+/**
+ * "4 active days". A year lists no days, so the count comes from
+ * `data.activeDayCount`; the list's length stands in for a document written
+ * before that field existed.
+ */
+export function activeDaysCopy(activeDays: string[], activeDayCount?: number | null): string {
+  const n = typeof activeDayCount === 'number' && Number.isFinite(activeDayCount) ? activeDayCount : activeDays.length;
+  return count(n, 'active day');
 }
 
 /** "4 sessions · 3 h 12 min · 2 records" for a list row; "No sessions" for a quiet one. */
@@ -327,13 +436,14 @@ export function shareHiddenFields(includeWeights: boolean): HiddenField[] {
 
 /** What the card will carry, in the share dialog's own words; weeks kept only shows on a monthly card. */
 export function shareDescription(recap: Pick<RecapView, 'kind' | 'data'>): string {
-  const weeks = recap.kind === 'month' && !!recap.data.weeksKept && recap.data.weeksKept.count > 0;
+  const weeks = recap.kind !== 'week' && !!recap.data.weeksKept && recap.data.weeksKept.count > 0;
   const carries = `The card carries your sessions, time, records and most trained exercises${weeks ? ', plus weeks kept' : ''}.`;
   const volume = offersWeights(recap.data) ? ' Volume lifted only goes on when you include it.' : '';
   return `${carries}${volume} Gyms and buddies never appear on a card.`;
 }
 
 export function captionPlaceholder(kind: RecapKind): string {
+  if (kind === 'year') return 'Say something about the year';
   return kind === 'month' ? 'Say something about the month' : 'Say something about the week';
 }
 

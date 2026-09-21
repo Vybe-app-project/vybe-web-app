@@ -8,8 +8,12 @@ import { formatDuration, formatSummaryVolume, type WorkoutSummaryUnit } from './
  * hid weights (the server drops `volumeKg` then). Gyms and buddies never ride
  * on a card. The recap has no unit of its own, so volume prints in the
  * viewer's unit.
+ *
+ * `kind` gained `'year'` with v2-be-h9-recaps-year: buildPostRecapSummary
+ * passes the recap's own kind through, so a shared Year in Vybe card arrives
+ * here with the same fields a month does.
  */
-export type RecapKind = 'week' | 'month';
+export type RecapKind = 'week' | 'month' | 'year';
 
 export type RecapSummary = {
   recapId: string;
@@ -25,13 +29,16 @@ export type RecapSummary = {
   hiddenFields?: Array<'weights' | 'gyms' | 'buddies'>;
 };
 
+export const RECAP_KINDS: readonly RecapKind[] = ['week', 'month', 'year'];
+
 export function hasRecapSummary(value: unknown): value is RecapSummary {
   return !!value && typeof value === 'object'
     && typeof (value as RecapSummary).recapId === 'string'
-    && ((value as RecapSummary).kind === 'week' || (value as RecapSummary).kind === 'month');
+    && RECAP_KINDS.includes((value as RecapSummary).kind);
 }
 
 export function recapKindLabel(kind: RecapKind): string {
+  if (kind === 'year') return 'Year in Vybe';
   return kind === 'month' ? 'Monthly recap' : 'Weekly recap';
 }
 
@@ -50,7 +57,8 @@ export function recapStats(summary: RecapSummary, unit: WorkoutSummaryUnit): Rec
   if (summary.minutes > 0) stats.push({ key: 'time', label: 'trained', value: formatDuration(summary.minutes) });
   if (typeof summary.volumeKg === 'number' && summary.volumeKg > 0) stats.push({ key: 'volume', label: 'lifted', value: formatSummaryVolume(summary.volumeKg, unit) });
   if (typeof summary.prCount === 'number' && summary.prCount > 0) stats.push({ key: 'prs', label: summary.prCount === 1 ? 'PR' : 'PRs', value: whole(summary.prCount) });
-  if (summary.kind === 'month' && typeof summary.weeksKept === 'number' && summary.weeksKept > 0) {
+  // Weeks kept means something over a month or a year, not over one week.
+  if (summary.kind !== 'week' && typeof summary.weeksKept === 'number' && summary.weeksKept > 0) {
     stats.push({ key: 'weeks', label: summary.weeksKept === 1 ? 'week kept' : 'weeks kept', value: whole(summary.weeksKept) });
   }
   return stats;

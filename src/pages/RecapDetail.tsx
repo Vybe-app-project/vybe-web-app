@@ -26,13 +26,13 @@ import { RecapBody } from './RecapBody';
 import {
   INCLUDE_WEIGHTS_HELP,
   INCLUDE_WEIGHTS_LABEL,
-  LOCKED_SHARE_MESSAGE,
   canShare,
   captionPlaceholder,
   offersWeights,
   recapTitle,
   runningBadge,
   shareDescription,
+  lockedShareMessage,
   shareHiddenFields,
   sharePostBody,
   type RecapView,
@@ -199,6 +199,7 @@ export default function RecapDetail() {
   }
 
   const shareable = canShare(recap);
+  const lockedShare = lockedShareMessage(recap.kind);
   const running = runningBadge(recap);
   const subtitle = running ? `${recapTitle(recap.kind)} · ${running}` : recapTitle(recap.kind);
   const captionError = shareError && shareError.field === 'content' ? shareError.message : null;
@@ -216,14 +217,14 @@ export default function RecapDetail() {
             icon={<Share size={18} />}
             onClick={openShare}
             disabled={!shareable}
-            title={shareable ? undefined : LOCKED_SHARE_MESSAGE}
+            title={shareable ? undefined : lockedShare}
             data-testid="recap-share-button"
           >
             Share as a post
           </Button>
         }
         mobileActions={
-          <IconButton label="Share as a post" onClick={openShare} disabled={!shareable} title={shareable ? undefined : LOCKED_SHARE_MESSAGE}>
+          <IconButton label="Share as a post" onClick={openShare} disabled={!shareable} title={shareable ? undefined : lockedShare}>
             <Share size={20} />
           </IconButton>
         }

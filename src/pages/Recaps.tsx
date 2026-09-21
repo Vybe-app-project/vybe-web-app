@@ -12,6 +12,7 @@ import {
   dedupeHistory,
   historyRowLabel,
   lockedCopy,
+  lockedTitle,
   quietCopy,
   recapHeadline,
   recapTitle,
@@ -28,6 +29,12 @@ import {
  * closed periods newest first (GET /recaps, paginated). The last closed week
  * is both a current card and the first history row from Monday to Sunday
  * evening, so history is deduped against the cards.
+ *
+ * A Year in Vybe (`kind: 'year'`, v2-be-h9-recaps-year) arrives as a history
+ * row the moment the API lists one -- a ready closed year is a row, a locked
+ * year is not, exactly like a month -- so nothing here asks
+ * /recaps/current?kind=year and no locked year card sits on the page for
+ * eleven months of the year.
  */
 
 type ListPage = { recaps: RecapListRow[]; total: number; page: number; hasNextPage: boolean };
@@ -69,13 +76,13 @@ function CurrentCard({ recap, unit }: { recap: RecapView; unit: WorkoutSummaryUn
 
       {recap.status === 'locked' ? (
         <div className="mt-3">
-          <p className="text-sm text-text-2">{lockedCopy(recap.data.progress)}</p>
+          <p className="text-sm text-text-2">{lockedCopy(recap.data.progress, recap.kind)}</p>
           {recap.data.progress ? (
             <Progress
               className="mt-2"
               value={Math.min(recap.data.progress.sessions, recap.data.progress.needed)}
               max={recap.data.progress.needed}
-              label="Sessions toward unlocking this month"
+              label={recap.kind === 'year' ? 'Sessions toward unlocking this year' : 'Sessions toward unlocking this month'}
               size="sm"
             />
           ) : null}
@@ -160,7 +167,7 @@ export default function Recaps() {
 
   return (
     <>
-      <PageHeader title="Recaps" subtitle="Your week and your month, in your own numbers." />
+      <PageHeader title="Recaps" subtitle="Your week, your month and your year, in your own numbers." />
 
       {nothingYet ? (
         <EmptyState
@@ -206,7 +213,7 @@ export default function Recaps() {
               </Card>
             </Section>
           ) : rows.length || history.hasNextPage ? (
-            <Section title="History" description="Closed weeks and months, newest first.">
+            <Section title="History" description="Closed weeks, months and years, newest first.">
               <Card padded={false}>
                 <ul aria-label="Past recaps" className="divide-y divide-line">
                   {rows.map((row) => (
@@ -227,7 +234,7 @@ export default function Recaps() {
               ) : null}
             </Section>
           ) : cards.length ? (
-            <p className="text-sm text-text-2">Past recaps appear here once a week or month closes.</p>
+            <p className="text-sm text-text-2">Past recaps appear here once a week, a month or a year closes.</p>
           ) : null}
         </div>
       )}

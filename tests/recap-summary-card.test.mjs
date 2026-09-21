@@ -22,9 +22,18 @@ test('stats follow the viewer unit and skip hidden or empty numbers', () => {
   assert.deepEqual(lib.recapStats({ ...week, sessions: 0, minutes: 0, volumeKg: 0, prCount: 0 }, 'kg'), []);
   assert.equal(lib.recapKindLabel('week'), 'Weekly recap');
   assert.equal(lib.recapKindLabel('month'), 'Monthly recap');
+  // v2-be-h9-recaps-year: buildPostRecapSummary passes `kind: 'year'` through,
+  // so a shared Year in Vybe card is a card the web renders, not one it drops.
+  assert.equal(lib.recapKindLabel('year'), 'Year in Vybe');
   assert.equal(lib.hasRecapSummary(week), true);
-  assert.equal(lib.hasRecapSummary({ recapId: 'x', kind: 'year' }), false);
+  assert.equal(lib.hasRecapSummary({ recapId: 'x', kind: 'year' }), true);
+  assert.equal(lib.hasRecapSummary({ recapId: 'x', kind: 'decade' }), false);
+  assert.equal(lib.hasRecapSummary({ kind: 'year' }), false, 'a card without a recapId is not a card');
   assert.equal(lib.hasRecapSummary(null), false);
+  // Weeks kept means something over a month or a year, never over one week.
+  const year = { ...month, kind: 'year', periodKey: '2026', periodLabel: '2026', weeksKept: 41 };
+  assert.deepEqual(lib.recapStats(year, 'kg').map((s) => [s.key, s.value]), [['sessions', '15'], ['time', '15 h'], ['weeks', '41']]);
+  assert.ok(!lib.recapStats({ ...week, weeksKept: 4 }, 'kg').some((s) => s.key === 'weeks'));
 });
 
 test('the card renders the period, the numbers and the most trained exercises', async () => {
