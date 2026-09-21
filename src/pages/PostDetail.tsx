@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { commentTotal } from '../lib/feedLogic';
 import {
   approveComment,
   commentKeys,
@@ -69,6 +70,10 @@ const isGone = (error: unknown) => {
 };
 
 const COMMENTS_ANCHOR = 'comments';
+
+/** The viewer wrote the post: hide, unhide and the held queue are theirs. */
+const isPostAuthorOf = (post: Post | undefined, viewerId: string | undefined): boolean =>
+  !!viewerId && !!post?.author?._id && String(post.author._id) === String(viewerId);
 
 /* ------------------------------------------------------------------ */
 /* Comment row                                                         */
@@ -350,16 +355,10 @@ export function CommentRow({
 /* Held comments: the post author's queue                              */
 /* ------------------------------------------------------------------ */
 
-function HeldComments({ postId, isPostAuthor }: { postId: string; isPostAuthor: boolean }) {
+function HeldComments({ postId, rows }: { postId: string; rows: PostComment[] }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [deleting, setDeleting] = useState<PostComment | null>(null);
-
-  const held = useQuery({
-    queryKey: commentKeys.held(postId),
-    enabled: isPostAuthor,
-    queryFn: () => fetchHeldComments(postId),
-  });
 
   const approve = useMutation({
     mutationFn: (commentId: string) => approveComment(commentId),
@@ -386,9 +385,8 @@ function HeldComments({ postId, isPostAuthor }: { postId: string; isPostAuthor: 
     },
   });
 
-  const rows = held.data ?? [];
   // Nothing waiting is nothing to say: the section is absent, not empty.
-  if (!isPostAuthor || held.isPending || !rows.length) return null;
+  if (!rows.length) return null;
 
   return (
     <section className="rounded-md bg-surface-2 p-3" aria-label="Comments waiting on you">
@@ -551,13 +549,35 @@ export default function PostDetail() {
     if (commentsQuery.hasNextPage && !commentsQuery.isFetchingNextPage) commentsQuery.fetchNextPage();
   }, !!commentsQuery.hasNextPage);
 
+  /**
+   * The author's held queue is read here rather than inside the section, so
+   * the section and the thread land in the same frame. Drawn on its own it
+   * inserted a block above a list that had already painted — CLS 0.14 on a
+   * 390 px screen. The skeleton below holds until both have answered.
+   */
+  const held = useQuery({
+    queryKey: commentKeys.held(postId),
+    enabled: !!postId && !!postQuery.data && isPostAuthorOf(postQuery.data, me?._id),
+    queryFn: () => fetchHeldComments(postId),
+  });
+
   const comments = commentsQuery.data?.pages.flatMap((p) => p.comments || []) ?? [];
   const first = commentsQuery.data?.pages[0];
   /** The whole visible count, replies included, when the API sends it. */
   const total = first?.totalComments ?? first?.total ?? comments.length;
   const gone = postQuery.isError && isGone(postQuery.error);
   const post = !postQuery.isError ? postQuery.data : undefined;
-  const isPostAuthor = !!me && !!post?.author?._id && String(post.author._id) === String(me._id);
+  const isPostAuthor = isPostAuthorOf(post, me?._id);
+  /** True until the queue has answered for its owner; nobody else ever waits. */
+  const heldPending = isPostAuthor && held.isPending;
+  /**
+   * The thread's own geometry while it loads. `totalComments` counts replies
+   * too and arrives with the post, a beat before the list — so the region is
+   * reserved at roughly the height it will take rather than at three short
+   * rows that then grow into a full thread (CLS 0.14 on a 390 px screen).
+   */
+  const skeletonRows = Math.min(6, Math.max(1, commentTotal(post ?? {})));
+  const loadingComments = commentsQuery.isLoading || heldPending;
 
   // "View all N comments" links carry #comments. ScrollToTop resets on every
   // pathname change, so the anchor is honoured once the card is on the page.
@@ -704,17 +724,29 @@ export default function PostDetail() {
               </form>
             </div>
 
-            {/* The author's queue, above the thread it belongs to. */}
-            <div className="mt-4">
-              <HeldComments postId={postId} isPostAuthor={isPostAuthor} />
-            </div>
+            {/* The author's queue, above the thread it belongs to — and in the
+                same frame as it, never inserted over a list already drawn. */}
+            {!heldPending && (held.data?.length ?? 0) > 0 ? (
+              <div className="mt-4">
+                <HeldComments postId={postId} rows={held.data ?? []} />
+              </div>
+            ) : null}
 
-            <ul className="mt-2 divide-y divide-line" aria-label="Comments" aria-busy={commentsQuery.isLoading || undefined}>
-              {commentsQuery.isLoading
-                ? Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} className="py-3" />)
+            <ul
+              className="mt-2 divide-y divide-line"
+              aria-label="Comments"
+              aria-busy={loadingComments || undefined}
+              style={loadingComments ? { minHeight: skeletonRows * 76 } : undefined}
+            >
+              {/* As many rows as the post says it has, capped at three: the
+                  post payload resolves first and already knows the count, so
+                  a one-comment thread no longer paints three rows and then
+                  collapses to one. */}
+              {loadingComments
+                ? Array.from({ length: skeletonRows }).map((_, i) => <SkeletonRow key={i} className="py-3" />)
                 : null}
 
-              {comments.map((comment) => (
+              {loadingComments ? null : comments.map((comment) => (
                 <CommentRow
                   key={comment._id}
                   comment={comment}
@@ -742,7 +774,7 @@ export default function PostDetail() {
               />
             ) : null}
 
-            {!commentsQuery.isLoading && !commentsQuery.isError && comments.length === 0 ? (
+            {!loadingComments && !commentsQuery.isError && comments.length === 0 ? (
               <EmptyState
                 size="sm"
                 title="No comments yet"

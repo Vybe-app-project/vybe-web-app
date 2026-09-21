@@ -165,9 +165,19 @@ test('the detail page threads replies one level and offers Reply on a root only'
   // Who the reply is going to, and a way out.
   assert.match(detail, /Replying to <span className="font-semibold text-text-1">\{replyTo\.name\}<\/span>/);
   // The author's queue and the hide action.
-  assert.match(detail, /<HeldComments postId=\{postId\} isPostAuthor=\{isPostAuthor\} \/>/);
+  assert.match(detail, /<HeldComments postId=\{postId\} rows=\{held\.data \?\? \[\]\} \/>/);
   assert.match(detail, /label: hidden \? 'Unhide comment' : 'Hide comment',/);
-  assert.match(detail, /if \(!isPostAuthor \|\| held\.isPending \|\| !rows\.length\) return null;/, 'nothing waiting is nothing to say');
+  assert.match(detail, /if \(!rows\.length\) return null;/, 'nothing waiting is nothing to say');
+  // The queue and the thread land in the same frame: drawn on its own it
+  // inserted a block over a list already painted (CLS 0.14 at 390 px).
+  assert.match(detail, /const heldPending = isPostAuthor && held\.isPending;/);
+  assert.match(detail, /\? Array\.from\(\{ length: skeletonRows \}\)/);
+  // The skeleton is the post's own count, capped at three: a one-comment
+  // thread no longer paints three rows and then collapses to one.
+  assert.match(detail, /const skeletonRows = Math\.min\(6, Math\.max\(1, commentTotal\(post \?\? \{\}\)\)\);/);
+  assert.match(detail, /style=\{loadingComments \? \{ minHeight: skeletonRows \* 76 \} : undefined\}/, 'the thread is reserved at its own height, not at three short rows');
+  assert.match(detail, /\{loadingComments \? null : comments\.map\(/);
+  assert.match(detail, /const loadingComments = commentsQuery\.isLoading \|\| heldPending;/);
   // The report and delete menu the page already had is still there.
   assert.match(detail, /label: 'Report comment'/);
   assert.match(detail, /label: 'Delete comment'/);
