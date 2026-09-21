@@ -25,6 +25,17 @@ import {
   withUnit,
   type TimeBadge,
 } from '../lib/challengeFormat';
+// P8a: the v2 switch and the row/detail it turns on. The flag is read
+// through lib/challenges so this page keeps no capabilities import of its
+// own (tests/health-challenges-contract pins that seam).
+import {
+  useChallengesV2,
+  type ChallengeMetric,
+  type ChallengeProof,
+  type ChallengeStanding,
+} from '../lib/challenges';
+import { ChallengeRow, ChallengeRowList, ChallengeRowSkeleton } from './challenges/ChallengeRow';
+import ChallengeDetailV2 from './challenges/ChallengeDetailV2';
 import {
   Avatar,
   Badge,
@@ -115,6 +126,11 @@ type Participant = {
   progress?: number;
   lastUpdated?: string;
   completed?: boolean;
+  /** v2: absent on a v1 row (= 'active'). `accepted` is a pre-start seat. */
+  state?: 'accepted' | 'active' | 'removed' | 'left';
+  muted?: boolean;
+  standings?: boolean;
+  removed?: { at: string; by: string; reason: string };
 };
 
 type LeaderboardEntry = {
@@ -124,7 +140,7 @@ type LeaderboardEntry = {
   lastUpdated?: string;
 };
 
-export type Challenge = {
+export type Challenge = ChallengeStanding & {
   _id: string;
   title: string;
   description: string;
@@ -137,7 +153,8 @@ export type Challenge = {
   startDate: string;
   endDate: string;
   createdBy?: ChallengeUser | string | null;
-  ownership: 'user' | 'system';
+  /** `vybe` is the Vybe-run monthly challenge; it has no creator and leads the list. */
+  ownership: 'user' | 'system' | 'vybe';
   participants?: Participant[];
   maxParticipants?: number;
   isPublic?: boolean;
@@ -153,6 +170,27 @@ export type Challenge = {
     totalProgress?: number;
     averageProgress?: number;
     completionRate?: number;
+  };
+  /* ---- v2 (all optional; a v1 row carries none of them) ---------------- */
+  /** Set means v2: the board is computed from check-in rows, never from `leaderboard`. */
+  mode?: 'group_goal' | 'board' | 'head_to_head';
+  scoring?: { metric?: ChallengeMetric; dailyCap?: number | null; proof?: ChallengeProof };
+  /** The host; `createdBy` when unset. Transferable. */
+  host?: string | null;
+  community?: string | null;
+  visibility?: 'participants' | 'community' | 'followers';
+  timezone?: string;
+  joinRequests?: { user: ChallengeUser | string; requestedAt?: string }[];
+  invitedUsers?: string[];
+  endedEarlyAt?: string | null;
+  endedBy?: string | null;
+  completedAt?: string | null;
+  completedGoalAt?: string | null;
+  settings?: {
+    allowInvites?: boolean;
+    autoUpdate?: boolean;
+    notifications?: boolean;
+    joinPolicy?: 'open' | 'approval';
   };
 };
 
@@ -217,6 +255,21 @@ const unitsForType = (type: ChallengeType): GoalUnit[] =>
   TRACKED_GOAL_UNITS[type] ?? CREATABLE_UNITS;
 
 const isTracked = (c: Challenge) => Boolean(TRACKED_GOAL_UNITS[c.type]);
+
+/**
+ * P8a: whether the list may offer Join on this row without opening it. The
+ * server still has the last word (410 once the window closes, 409 when it
+ * fills, 403 for a removed member), so this is only about not offering an
+ * action that is certainly refused: already in it, closed by its owner, past
+ * its end (`daysLeft: null`), at capacity, or scored on body weight.
+ */
+const canJoinFromList = (c: Challenge): boolean => {
+  if (c.me?.joined === true) return false;
+  if (c.isActive === false || c.daysLeft === null) return false;
+  if (isWeightScored(c)) return false;
+  const seats = c.stats?.totalParticipants ?? c.participants?.length ?? 0;
+  return !(c.maxParticipants && seats >= c.maxParticipants);
+};
 
 const PAGE_LIMIT = 12;
 
@@ -1478,6 +1531,7 @@ export default function Challenges() {
   const me = useAuth((s) => s.user);
   const myId = me?._id ?? '';
 
+  const v2 = useChallengesV2();
   const [tab, setTab] = useState<TabKey>('browse');
   const [page, setPage] = useState(1);
   const [term, setTerm] = useState('');
@@ -1554,6 +1608,27 @@ export default function Challenges() {
       return data.challenges ?? [];
     },
     enabled: tab === 'created' && !!myId,
+  });
+
+  /**
+   * P8a: Join from the list, in one tap. The v2 join route is the same
+   * `POST /challenges/:id/join` the detail has always called (it is not
+   * flag-gated — only the fields around it are), and it answers `202
+   * { status: 'requested' }` under an approval policy, so the toast says
+   * which of the two happened rather than claiming a seat either way.
+   */
+  const joinFromList = useMutation({
+    mutationFn: async (challenge: Challenge) => {
+      const { data, status } = await api.post<{ status?: string }>(`/challenges/${challenge._id}/join`);
+      return { challenge, requested: status === 202 || data?.status === 'requested' };
+    },
+    onSuccess: ({ challenge, requested }) => {
+      toast.success(
+        requested ? `Asked to join “${challenge.title}”. The host decides.` : `You're in “${challenge.title}”.`,
+      );
+      qc.invalidateQueries({ queryKey: ['challenges'] });
+    },
+    onError: (e) => toast.error(challengeErrorMessage(e, 'Could not join the challenge')),
   });
 
   const remove = useMutation({
@@ -1642,6 +1717,21 @@ export default function Challenges() {
       items: createdList,
     };
   })();
+
+  /** Shared by both details: close and drop the deep-link parameter with it. */
+  const closeDetail = () => {
+    setDetailId(null);
+    if (searchParams.get('open') || searchParams.get('challenge')) {
+      setSearchParams(
+        (prev) => {
+          prev.delete('open');
+          prev.delete('challenge');
+          return prev;
+        },
+        { replace: true },
+      );
+    }
+  };
 
   const browseFiltersActive = Boolean(typeFilter || categoryFilter);
   const clearBrowseFilters = () => {
@@ -1830,7 +1920,11 @@ export default function Challenges() {
       ) : null}
 
       {activePane.loading ? (
-        <CardGridSkeleton />
+        v2.enabled ? (
+          <ChallengeRowSkeleton />
+        ) : (
+          <CardGridSkeleton />
+        )
       ) : activePane.error ? (
         <ErrorState
           error={activePane.error}
@@ -1845,6 +1939,23 @@ export default function Challenges() {
           action={emptyCopy.action}
           secondaryAction={emptyCopy.secondary}
         />
+      ) : v2.enabled ? (
+        /* P8a: rows carry the standing, the progress and the days left, and
+           Join is one tap on the row. The card grid below is the v1 view and
+           stays exactly as it was until the flag flips. */
+        <ChallengeRowList aria-label="Challenges">
+          {activePane.items.map((challenge) => (
+            <ChallengeRow
+              key={challenge._id}
+              challenge={challenge}
+              unit={unitOf(challenge)}
+              to={`/challenges?open=${challenge._id}`}
+              canJoin={canJoinFromList(challenge)}
+              joining={joinFromList.isPending && joinFromList.variables?._id === challenge._id}
+              onJoin={() => joinFromList.mutate(challenge)}
+            />
+          ))}
+        </ChallengeRowList>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {activePane.items.map((challenge) => (
@@ -1884,24 +1995,19 @@ export default function Challenges() {
       ) : null}
 
       <CreateChallengeModal open={createOpen} onClose={() => setCreateOpen(false)} />
-      <ChallengeDetailModal
-        challengeId={detailId}
-        onClose={() => {
-          setDetailId(null);
-          if (searchParams.get('open') || searchParams.get('challenge')) {
-            setSearchParams(
-              (prev) => {
-                prev.delete('open');
-                prev.delete('challenge');
-                return prev;
-              },
-              { replace: true },
-            );
-          }
-        }}
-        onEdit={(c) => setEditing(c)}
-        onDelete={(c) => setPendingDelete(c)}
-      />
+      {/* P8a: the v2 detail — Board with your row pinned, Stats, Activity,
+          Rules, and Manage for the host. The v1 modal below it is untouched
+          and is what everyone still sees until the flag flips. */}
+      {v2.enabled ? (
+        <ChallengeDetailV2 challengeId={detailId} onClose={closeDetail} />
+      ) : (
+        <ChallengeDetailModal
+          challengeId={detailId}
+          onClose={closeDetail}
+          onEdit={(c) => setEditing(c)}
+          onDelete={(c) => setPendingDelete(c)}
+        />
+      )}
       <EditChallengeModal challenge={editing} onClose={() => setEditing(null)} />
 
       <ConfirmDialog

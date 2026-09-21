@@ -33,10 +33,9 @@
  * tests/challenges-v2-contract.test.mjs pin each one against
  * contracts/backend-routes.json.
  */
-import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
 import { apiErrorDetails, parseApiError } from './apiError';
-import { useCapabilities } from './capabilities';
+import { useFeature, useFeatureGate } from './capabilities';
 
 /* ------------------------------------------------------------------ flags and absence */
 
@@ -82,13 +81,12 @@ export async function absentOnRefusal<T>(read: () => Promise<T>): Promise<T | nu
  * page holds the v1 view rather than flashing a v2 one that then vanishes.
  */
 export function useChallengesV2(): { enabled: boolean; invites: boolean; isPending: boolean } {
-  const capabilities = useCapabilities();
-  const features = capabilities.data?.features;
-  return {
-    enabled: features?.[CHALLENGES_V2_FLAG] === true,
-    invites: features?.[CHALLENGE_INVITES_FLAG] === true,
-    isPending: capabilities.isPending,
-  };
+  // Both read the one shared capabilities query, so two named flags cost one
+  // request (tests/client-policy pins that nothing outside the hook reads
+  // the raw map).
+  const gate = useFeatureGate(CHALLENGES_V2_FLAG);
+  const invites = useFeature(CHALLENGE_INVITES_FLAG);
+  return { enabled: gate.enabled, invites, isPending: gate.isPending };
 }
 
 /* ------------------------------------------------------------------ shapes */
@@ -282,18 +280,6 @@ export async function fetchChallengeStats(challengeId: string): Promise<Challeng
   });
 }
 
-/** Replies of one comment-free read: the board for one period, as a query. */
-export function useChallengeBoard(
-  challengeId: string | null,
-  { period = 'week', scope = 'challenge', enabled = true }: { period?: BoardPeriod; scope?: BoardScope; enabled?: boolean } = {},
-) {
-  return useQuery({
-    queryKey: challengeKeys.board(challengeId ?? '', period, scope, true),
-    enabled: !!challengeId && enabled,
-    queryFn: () => fetchChallengeBoard(challengeId as string, { period, scope, around: true }),
-  });
-}
-
 /* ------------------------------------------------------------------ writes */
 
 /** At most twenty ids per call (services/challengeHost.js INVITE_USER_IDS_MAX). */
@@ -347,6 +333,28 @@ export async function removeChallengeCheckIn(
   reason: string,
 ): Promise<void> {
   await api.post(`/challenges/${challengeId}/check-ins/${userId}/${localDay}/remove`, { reason });
+}
+
+/**
+ * The legacy leaderboard read as board rows, so one list component draws
+ * both shapes. It is the fallback for a v2 challenge whose `/board` the
+ * viewer may not read yet (a `participants`-visibility challenge answers
+ * 403 before you join, while `/leaderboard` still answers): a board you can
+ * look at before you commit is the difference between joining and not.
+ */
+export function legacyBoardEntries(
+  rows: readonly ChallengeLeaderboardRow[],
+  myId: string,
+): ChallengeBoardEntry[] {
+  return rows.map((row, index) => {
+    const user = typeof row.user === 'string' ? { _id: row.user } : row.user;
+    return {
+      rank: typeof row.rank === 'number' && row.rank > 0 ? row.rank : index + 1,
+      user,
+      score: Number(row.progress) || 0,
+      isMe: !!myId && user?._id === myId,
+    };
+  });
 }
 
 /* ------------------------------------------------------------------ the trust rule */
