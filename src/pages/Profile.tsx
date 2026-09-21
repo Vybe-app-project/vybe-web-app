@@ -34,6 +34,8 @@ import {
   StatStrip,
   Textarea,
   cx,
+  formatStat,
+  hasMetric,
   useToast,
 } from './ui';
 import { Award, Calendar, Camera, ChevronRight, MapPin, Settings as SettingsIcon, ShareUp, Users } from './icons';
@@ -48,8 +50,8 @@ export const PAGE = 'w-full space-y-section';
 /** Identity, stats and shortcuts left; the tabs and their content right, once there is room for both. */
 export const PROFILE_GRID = 'grid min-w-0 gap-section xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] xl:items-start [&>*]:min-w-0';
 
-/** Stat values step up to `--text-stat` once the strip has the room (a container query, not a viewport guess). */
-export const STAT_STRIP_CLASS = 'border-0 bg-transparent shadow-none divide-x-0 @md:[&_.type-stat]:text-stat';
+/** Instagram's profile stats: a 20 px number over its label, no box, no hero size — the big number belongs to Workouts and Progress. */
+export const STAT_STRIP_CLASS = 'border-0 bg-transparent shadow-none divide-x-0';
 
 const joinedLabel = (iso?: string) => {
   if (!iso) return null;
@@ -77,7 +79,7 @@ export function GymRow({ label, href }: { label: string | null; href: string | n
       <span className="truncate">{label}</span>
     </>
   );
-  const cls = 'mt-1 inline-flex min-h-8 max-w-full items-center gap-1.5 text-sm font-medium text-text-1';
+  const cls = 't-body mt-1 inline-flex min-h-8 max-w-full items-center gap-1.5 font-medium text-text-1';
   return href ? (
     <Link to={href} viewTransition className={cx(cls, 'rounded-xs hover:underline')}>
       {inner}
@@ -102,16 +104,20 @@ function ShortcutCard({
   hint,
   loading,
   badge,
+  empty = 'None yet',
 }: {
   to: string;
   icon: ReactNode;
   label: string;
   /** Visible label when the full one will not fit three-up on a phone; `label` stays the accessible name. */
   shortLabel?: string;
-  value?: string | number | null;
+  /** The count; `null` means the read failed (a dash, never a zero). */
+  value?: number | null;
   hint?: string;
   loading?: boolean;
   badge?: number;
+  /** In the number's place when the count is 0: the next step, never a zero. */
+  empty?: string;
 }) {
   return (
     <Card to={to} linkLabel={label} padded={false} className="relative flex min-h-28 flex-col p-3 sm:p-4">
@@ -125,11 +131,15 @@ function ShortcutCard({
         </span>
         <ChevronRight size={18} className="text-text-3" aria-hidden="true" />
       </div>
-      <div className="mt-3">
+      <div className="mt-3 min-h-6">
         {loading ? (
           <Skeleton className="h-6 w-12" />
+        ) : value === null ? (
+          <span className="type-stat block text-xl leading-none text-text-2">—</span>
+        ) : hasMetric(value) ? (
+          <span className="type-stat block text-xl leading-none text-text-1">{formatStat(value)}</span>
         ) : (
-          <span className="type-stat block text-xl leading-none text-text-1">{value ?? '—'}</span>
+          <span className="t-body block truncate font-semibold leading-6 text-text-1">{empty}</span>
         )}
       </div>
       <div className="mt-auto min-w-0 pt-1.5">
@@ -198,6 +208,7 @@ function ProfileShortcuts() {
         shortLabel="Badges"
         loading={achievements.isLoading}
         value={achievements.isError ? null : achievements.data?.earned}
+        empty="First one soon"
         hint={
           !achievements.data
             ? undefined
@@ -218,6 +229,7 @@ function ProfileShortcuts() {
         shortLabel="Photos"
         loading={photos.isLoading}
         value={photos.isError ? null : photos.data?.count}
+        empty="Add the first"
         hint={photos.isError ? undefined : photoHint}
       />
       <ShortcutCard
@@ -226,6 +238,7 @@ function ProfileShortcuts() {
         label="Friends"
         loading={friends.isLoading}
         value={friends.isError ? null : friends.data?.length}
+        empty="Find people"
         hint={pendingCount ? `${pendingCount} waiting` : 'Train together'}
         badge={pendingCount}
       />
@@ -233,24 +246,25 @@ function ProfileShortcuts() {
   );
 }
 
-/** The header skeleton: avatar left, three stats right, then two text lines. */
+/** The header skeleton in the header's exact geometry: the 88 px avatar, three stat cells, the name, handle and joined lines, the 44 px button row. */
 export function ProfileHeaderSkeleton() {
   return (
     <div aria-hidden="true">
       <div className="flex items-center gap-5 sm:gap-8">
-        <Skeleton className="h-20 w-20 shrink-0 rounded-full sm:h-24 sm:w-24" />
-        <div className="grid flex-1 grid-cols-3 gap-2">
+        <Skeleton className="h-22 w-22 shrink-0 rounded-full" />
+        <div className="grid min-h-16 flex-1 grid-cols-3 gap-2">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="flex flex-col items-center gap-1.5">
+            <div key={i} className="flex flex-col items-center justify-center gap-1.5">
               <Skeleton className="h-6 w-10" />
               <Skeleton className="h-3 w-14" />
             </div>
           ))}
         </div>
       </div>
-      <div className="mt-4 space-y-2">
+      <div className="mt-4 space-y-1.5">
         <Skeleton className="h-5 w-40" />
-        <Skeleton className="h-4 w-64 max-w-full" />
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="mt-2 h-3 w-36" />
       </div>
       <Skeleton className="mt-4 h-11 w-full rounded-sm" />
     </div>
@@ -265,8 +279,6 @@ export default function Profile() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [params, setParams] = useSearchParams();
   const gym = useViewerGym();
-  const rhythm = useMyAchievements(summarize);
-  const weeksKept = rhythm.data?.weeksKept?.progress ?? 0;
 
   const tabParam = params.get('tab');
   const tab: ProfileTabKey = isProfileTab(tabParam) ? tabParam : 'posts';
@@ -405,10 +417,9 @@ export default function Profile() {
   }
 
   /*
-   * The hub band: the member's gym as context and the weeks they have kept
-   * their rhythm as the one figure — omitted at zero, when the next step
-   * takes its place. No action on the band: the action colour is reserved
-   * for Follow on other people's profiles.
+   * The shell draws the title; there is no band. The gym is the row under the
+   * handle, and the action colour is reserved for Follow on other people's
+   * profiles — your own header is tonal.
    */
   const header = (
     <PageHeader
@@ -419,17 +430,6 @@ export default function Profile() {
           Settings
         </ButtonLink>
       }
-      band={{
-        variant: 'hub',
-        context: gym ? 'Training at {gym}' : undefined,
-        figure: weeksKept,
-        figureLabel: weeksKept === 1 ? 'week kept' : 'weeks kept',
-        children: !weeksKept && rhythm.isSuccess ? (
-          <Link to="/workouts" viewTransition className="inline-flex min-h-11 items-center text-sm font-semibold text-band-ink hover:underline">
-            Log a session this week to start your rhythm
-          </Link>
-        ) : undefined,
-      }}
     />
   );
 
@@ -465,6 +465,7 @@ export default function Profile() {
   const joined = joinedLabel(me.createdAt);
   const gymRow = ownGym(gym);
   const gymLabel = gymRow.label ?? homeGymLabel(me, gym);
+  const posts = postCount(me);
 
   return (
     <div className={PAGE}>
@@ -503,22 +504,23 @@ export default function Profile() {
                 aria-label="Profile stats"
                 className={cx('flex-1', STAT_STRIP_CLASS)}
                 items={[
-                  { label: 'posts', value: postCount(me), onClick: () => setTab('posts') },
-                  { label: 'followers', value: followerCount(me), to: '/profile/followers' },
-                  { label: 'following', value: followingCount(me), to: '/profile/following' },
+                  // Never a zero: an empty count gives its cell to the next step.
+                  hasMetric(posts) ? { label: 'posts', value: posts, onClick: () => setTab('posts') } : { label: 'posts', value: posts, fallback: 'Share one', to: '/?compose=1' },
+                  { label: 'followers', value: followerCount(me), to: '/profile/followers', fallback: 'None yet' },
+                  { label: 'following', value: followingCount(me), to: '/profile/following', fallback: 'None yet' },
                 ]}
               />
             </div>
 
             <div className="mt-4 min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <h2 className="text-md font-semibold text-text-1">{displayName(me)}</h2>
+                <h2 className="t-name text-text-1">{displayName(me)}</h2>
                 <UserBadges user={me} />
               </div>
-              <p className="truncate text-sm text-text-2" title={`@${me.username}`}>@{me.username}</p>
+              <p className="t-body truncate text-text-2" title={`@${me.username}`}>@{me.username}</p>
               <GymRow label={gymLabel} href={gymRow.href} />
-              {me.bio ? <p className="prose-measure mt-2 whitespace-pre-wrap text-sm leading-relaxed text-text-1">{me.bio}</p> : null}
-              <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-text-3">
+              {me.bio ? <p className="t-body prose-measure mt-2 whitespace-pre-wrap text-text-1">{me.bio}</p> : null}
+              <p className="t-meta mt-2 inline-flex items-center gap-1.5">
                 <Calendar size={14} aria-hidden="true" />
                 {joined ? `Joined ${joined}` : 'Joined recently'}
               </p>
