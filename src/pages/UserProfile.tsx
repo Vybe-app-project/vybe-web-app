@@ -324,16 +324,17 @@ export default function UserProfile() {
                 aria-label="Profile stats"
                 className={cx('flex-1', STAT_STRIP_CLASS)}
                 items={[
-                  { label: 'posts', value: postCount(user), onClick: canViewContent ? () => setTab('posts') : undefined },
-                  { label: 'followers', value: followerCount(user), to: canViewContent ? `/u/${user._id}/followers` : undefined },
-                  { label: 'following', value: followingCount(user), to: canViewContent ? `/u/${user._id}/following` : undefined },
+                  // Never a zero: an empty count reads "None yet" in its cell.
+                  { label: 'posts', value: postCount(user), onClick: canViewContent ? () => setTab('posts') : undefined, fallback: 'None yet' },
+                  { label: 'followers', value: followerCount(user), to: canViewContent ? `/u/${user._id}/followers` : undefined, fallback: 'None yet' },
+                  { label: 'following', value: followingCount(user), to: canViewContent ? `/u/${user._id}/following` : undefined, fallback: 'None yet' },
                 ]}
               />
             </div>
 
             <div className="mt-4 min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <h2 className="text-md font-semibold text-text-1">{name}</h2>
+                <h2 className="t-name text-text-1">{name}</h2>
                 <UserBadges user={user} />
                 {isPrivate ? (
                   <Badge>
@@ -342,9 +343,9 @@ export default function UserProfile() {
                   </Badge>
                 ) : null}
               </div>
-              <p className="truncate text-sm text-text-2" title={`@${user.username}`}>@{user.username}</p>
+              <p className="t-body truncate text-text-2" title={`@${user.username}`}>@{user.username}</p>
               <GymRow label={gymLabel} href={gymHref} />
-              {user.bio ? <p className="prose-measure mt-2 whitespace-pre-wrap text-sm leading-relaxed text-text-1">{user.bio}</p> : null}
+              {user.bio ? <p className="t-body prose-measure mt-2 whitespace-pre-wrap text-text-1">{user.bio}</p> : null}
               {user.fields?.length ? (
                 <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Coaching specialties">
                   {user.fields.map((f) => (
@@ -354,7 +355,7 @@ export default function UserProfile() {
                   ))}
                 </div>
               ) : null}
-              <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-text-3">
+              <p className="t-meta mt-2 inline-flex items-center gap-1.5">
                 <Calendar size={14} aria-hidden="true" />
                 {joined ? `Joined ${joined}` : 'Joined recently'}
               </p>

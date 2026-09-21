@@ -1012,7 +1012,7 @@ function Bubble({
 }) {
   return (
     <div className="snap-item relative flex w-19 shrink-0 flex-col items-center">
-      <button type="button" onClick={onClick} aria-label={label} className="flex w-full flex-col items-center gap-2 rounded-sm py-1">
+      <button type="button" onClick={onClick} aria-label={label} className="pressable flex w-full flex-col items-center gap-2 rounded-sm py-1">
         {avatar}
         <span className={cx('w-full truncate text-center text-xs', emphasised ? 'font-semibold text-text-1' : 'font-medium text-text-2')}>{caption}</span>
       </button>
@@ -1023,14 +1023,27 @@ function Bubble({
 
 /* ------------------------------------------------------------------ tray */
 
+/** A bubble's footprint while the tray loads: the 68 px disc and the caption line, 100 px tall like the real one. */
+function BubbleSkeleton() {
+  return (
+    <div className="flex w-19 shrink-0 flex-col items-center gap-2 py-1" aria-hidden="true">
+      <Skeleton className="h-17 w-17 rounded-full" />
+      <Skeleton className="h-4 w-12" />
+    </div>
+  );
+}
+
 /**
- * The stories row. `home` sits at the top of Home's first surface (the Feed
- * page docks the composer under it) under a section label — "At <gym>" when
- * the viewer has a gym, "Stories" otherwise — and stays hidden until there is
- * something to show; `page` (the Stories screen) always renders and owns the
- * loading, error and empty states.
+ * The stories row. `home` sits at the top of Home under the gym header (the
+ * Feed page docks the composer beneath it) and is never empty: the viewer's
+ * own bubble leads — the add action until they post — skeleton bubbles hold
+ * the others' places while the tray loads, and a failed read leaves just the
+ * own bubble rather than a hole. `page` (the Stories screen) owns the loading,
+ * error and empty states in full. `label` names the region for assistive
+ * tech ("At <gym>"): Instagram draws no heading over its rail, and on Home the
+ * gym header right above already says the name.
  */
-export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'page'; /** Home's section label; defaults to "Stories". */ label?: string }) {
+export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'page'; /** Home's region label; defaults to "Stories". */ label?: string }) {
   const me = useAuth((s) => s.user);
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -1046,14 +1059,9 @@ export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'pag
 
   const groups = useMemo(() => tray.data || [], [tray.data]);
   const { own, others } = useMemo(() => splitOwnGroup(groups, me?._id), [groups, me?._id]);
-  const unseenGroups = useMemo(() => others.filter((g) => groupHasUnseen(g, me?._id)).length, [others, me?._id]);
   const meAsAuthor = asStoryAuthor(me);
   const openComposer = () => setComposerOpen(true);
-
-  if (variant === 'home') {
-    if (tray.isLoading || tray.isError) return null;
-    if (!own && others.length === 0) return null;
-  }
+  const home = variant === 'home';
 
   const ownBubble = meAsAuthor ? (
     <Bubble
@@ -1081,27 +1089,30 @@ export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'pag
     </Bubble>
   ) : null;
 
+  /* The rail scrolls out to the viewport edge on phones and sits in the column from md. */
   const row = (
-    <div className={cx('snap-row no-scrollbar flex gap-3 overflow-x-auto py-2', variant === 'page' ? '-mx-gutter px-gutter scroll-pl-gutter' : '')}>
+    <div className="snap-row no-scrollbar -mx-gutter flex gap-3 overflow-x-auto px-gutter py-2 scroll-pl-gutter md:mx-0 md:px-0 md:scroll-pl-0">
       {ownBubble}
-      {others.map((g, i) => {
-        const unseen = groupHasUnseen(g, me?._id);
-        return (
-          <Bubble
-            key={g.author._id}
-            onClick={() => setViewer({ groups: others, start: i })}
-            label={`${unseen ? 'New stories' : 'Stories'} from ${authorName(g.author)}`}
-            caption={authorName(g.author)}
-            emphasised={unseen}
-            avatar={
-              <StoryRing unseen={unseen}>
-                <Avatar src={g.author.avatar} name={authorName(g.author)} size={60} seed={g.author._id} />
-              </StoryRing>
-            }
-          />
-        );
-      })}
-      {variant === 'page' && others.length === 0 && !own ? (
+      {tray.isLoading
+        ? Array.from({ length: home ? 5 : 6 }).map((_, i) => <BubbleSkeleton key={i} />)
+        : others.map((g, i) => {
+            const unseen = groupHasUnseen(g, me?._id);
+            return (
+              <Bubble
+                key={g.author._id}
+                onClick={() => setViewer({ groups: others, start: i })}
+                label={`${unseen ? 'New stories' : 'Stories'} from ${authorName(g.author)}`}
+                caption={authorName(g.author)}
+                emphasised={unseen}
+                avatar={
+                  <StoryRing unseen={unseen}>
+                    <Avatar src={g.author.avatar} name={authorName(g.author)} size={60} seed={g.author._id} />
+                  </StoryRing>
+                }
+              />
+            );
+          })}
+      {variant === 'page' && !tray.isLoading && others.length === 0 && !own ? (
         <div className="flex-1">
           <EmptyState
             size="sm"
@@ -1115,31 +1126,8 @@ export function StoryTray({ variant = 'page', label }: { variant?: 'home' | 'pag
   );
 
   return (
-    <section aria-label={variant === 'home' ? 'Stories' : 'Recent stories'}>
-      {variant === 'page' && tray.isLoading ? (
-        <div className="flex gap-4 overflow-hidden py-2" aria-busy="true">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex w-19 shrink-0 flex-col items-center gap-2">
-              <Skeleton className="h-16 w-16 rounded-full" />
-              <Skeleton className="h-3 w-12" />
-            </div>
-          ))}
-        </div>
-      ) : variant === 'page' && tray.isError ? (
-        <ErrorState error={tray.error} title="Couldn’t load stories" onRetry={() => tray.refetch()} />
-      ) : variant === 'home' ? (
-        <div>
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="type-heading text-lg text-text-1">{label?.trim() || 'Stories'}</h2>
-            {unseenGroups > 0 ? (
-              <span className="tabular shrink-0 text-sm text-text-2">{unseenGroups === 1 ? '1 new' : `${unseenGroups} new`}</span>
-            ) : null}
-          </div>
-          {row}
-        </div>
-      ) : (
-        row
-      )}
+    <section aria-label={home ? label?.trim() || 'Stories' : 'Recent stories'}>
+      {variant === 'page' && tray.isError ? <ErrorState error={tray.error} title="Couldn’t load stories" onRetry={() => tray.refetch()} /> : row}
 
       {viewer && viewer.groups.length > 0 ? (
         <StoryViewer groups={viewer.groups} startGroup={viewer.start} startStory={viewer.startStory} onClose={() => setViewer(null)} />

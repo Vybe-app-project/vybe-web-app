@@ -19,8 +19,9 @@
  * this card and no flagged route is called; the only switch is the optional
  * kill switch `features.getStartedCard === false` (absent = on; the flag is
  * not seeded, so useFeature would read it as off for ever). Until
- * /capabilities has answered the switch is undecided and nothing renders,
- * so a switched-off card never flashes its skeleton on a cold load.
+ * /capabilities has answered the switch is undecided: no read starts, and the
+ * card's frame renders in its loading state (the day line is already known),
+ * so it never pops into the page a beat after everything else.
  */
 import { useEffect, useId, useMemo, useRef, useState, type ComponentType, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
@@ -99,10 +100,11 @@ export type FirstWeekCardViewProps = {
   onRetry?: () => void;
   /** True while a retry's reads are in flight: the Retry button shows busy and ignores a second press. */
   isRetrying?: boolean;
+  className?: string;
 };
 
 const ROW_CLASS =
-  'flex w-full min-h-11 items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
+  'pressable flex w-full min-h-11 items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors dur-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 
 function RowBody({ row }: { row: FirstWeekRow }) {
   const Icon = ROW_ICONS[row.key];
@@ -119,8 +121,8 @@ function RowBody({ row }: { row: FirstWeekRow }) {
         <Icon size={18} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-text-1">{copy.title}</span>
-        <span className="block text-xs text-text-2">{copy.body}</span>
+        <span className="t-body block font-semibold text-text-1">{copy.title}</span>
+        <span className="t-meta block">{copy.body}</span>
       </span>
       {row.isToday ? (
         <Badge tone="brand" data-testid="first-week-today-tag">
@@ -143,24 +145,25 @@ export function FirstWeekCardView({
   onOpenStarter,
   onRetry,
   isRetrying = false,
+  className,
 }: FirstWeekCardViewProps) {
   const titleId = useId();
   return (
-    <Card container data-testid="first-week-card" role="region" aria-labelledby={titleId}>
+    <Card container data-testid="first-week-card" role="region" aria-labelledby={titleId} className={className}>
       <div className="flex items-start gap-3">
         <div aria-hidden="true" className="shrink-0">
           <Ring value={progress.done} max={progress.total} size={48} stroke={5} color="brand" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 id={titleId} className="type-heading text-lg text-text-1">
+          <h2 id={titleId} className="t-section text-text-1">
             {strings.card.title}
           </h2>
           {dayLine ? (
-            <p data-testid="first-week-day-line" className="text-xs text-text-2">
+            <p data-testid="first-week-day-line" className="t-meta">
               {dayLine}
             </p>
           ) : null}
-          <p className="text-xs text-text-3">{strings.card.progress(progress.done, progress.total)}</p>
+          <p className="t-meta">{strings.card.progress(progress.done, progress.total)}</p>
         </div>
         <IconButton label={strings.dismiss.label} size={40} onClick={onDismiss} data-testid="first-week-dismiss">
           <X size={18} />
@@ -175,11 +178,11 @@ export function FirstWeekCardView({
         </div>
       ) : null}
 
-      {state === 'offline' ? <p className="mt-3 text-sm text-text-2">{strings.states.offline}</p> : null}
+      {state === 'offline' ? <p className="t-body mt-3 text-text-2">{strings.states.offline}</p> : null}
 
       {state === 'error' ? (
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <p className="text-sm text-text-2">{strings.states.error}</p>
+          <p className="t-body text-text-2">{strings.states.error}</p>
           <Button variant="secondary" size="sm" aria-label={strings.states.retryLabel} loading={isRetrying} onClick={onRetry}>
             {strings.states.retry}
           </Button>
@@ -208,7 +211,7 @@ export function FirstWeekCardView({
             })}
           </ul>
           {doneTitles.length ? (
-            <p className="mt-3 flex items-center gap-2 text-xs text-text-3" data-testid="first-week-done-line">
+            <p className="t-meta mt-3 flex items-center gap-2" data-testid="first-week-done-line">
               <CheckCircle size={16} aria-hidden="true" className="shrink-0 text-brand" />
               <span>{strings.card.doneLine(doneTitles)}</span>
             </p>
@@ -330,7 +333,7 @@ function focusAfter(root: Element | null): void {
   (next ?? document.getElementById('main'))?.focus();
 }
 
-export default function FirstWeekCard() {
+export default function FirstWeekCard({ className }: { className?: string } = {}) {
   const user = useAuth((s) => s.user);
   const refreshUser = useAuth((s) => s.refreshUser);
   const online = useOnline();
@@ -346,15 +349,18 @@ export default function FirstWeekCard() {
   const storage = useMemo(browserStorage, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const dismissedAt = useMemo(() => readDismissedAt(storage, userId), [storage, userId, dismissVersion]);
-  // Pending counts as off: nothing renders until the switch has answered
-  // (Achievements gates on the same query the same way). The shell caches the
-  // answer for five minutes, so after the first paint this costs nothing.
-  const featureOff = capabilities.isPending || capabilities.data?.features?.getStartedCard === false;
+  // The kill switch (absent = on). While the switch is still undecided no read
+  // starts, but the card's frame is drawn in its loading state below — with
+  // `steps` null the decision shows and the view reads 'loading' — so the
+  // frame is reserved on the first paint instead of popping in once
+  // /capabilities answers. The shell caches that answer for five minutes.
+  const featurePending = capabilities.isPending;
+  const featureOff = capabilities.data?.features?.getStartedCard === false;
   const now = Date.now();
 
-  // Decide before reading anything: a day-9 account, a dismissed card, an
-  // undecided switch or the kill switch make no request at all.
-  const pre = decideCard({ userId, createdAt, now, dismissedAt, steps: null, featureOff });
+  // Decide before reading anything: a day-9 account, a dismissed card or the
+  // kill switch make no request at all; an undecided switch makes none yet.
+  const pre = decideCard({ userId, createdAt, now, dismissedAt, steps: null, featureOff: featurePending || featureOff });
   const enabled = pre.show;
 
   // A follow made this session is not in the cached user; refresh once on mount (throttled inside auth.ts).
@@ -501,6 +507,7 @@ export default function FirstWeekCard() {
         onOpenStarter={() => setStarterOpen(true)}
         onRetry={retry}
         isRetrying={isRetrying}
+        className={className}
       />
       <Modal open={starterOpen} onClose={() => setStarterOpen(false)} title={strings.starter.sheetTitle} size="sm">
         <StarterSessionChoices template={template} onClose={() => setStarterOpen(false)} />

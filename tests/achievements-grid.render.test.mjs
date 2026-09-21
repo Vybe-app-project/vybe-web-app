@@ -105,6 +105,16 @@ test('the grid groups by category in display order with per-group earned counts 
   assert.equal(social[0].name, 'ten-likes-received');
 });
 
+test('the grid honours the catalogue’s own badge art: a named icon colour tints the tile, an unnamed one keeps the rarity tile', () => {
+  const tinted = rows.find((r) => r.iconColor);
+  assert.ok(tinted, 'the seed carries one catalogue colour');
+  const html = render([tinted], false);
+  assert.match(html, new RegExp(`color-mix\\(in oklab, ${tinted.iconColor} 22%, var\\(--surface-1\\)\\)`), 'the tile is tinted from the catalogue colour');
+  assert.match(html, new RegExp(`color-mix\\(in oklab, ${tinted.iconColor} 65%, var\\(--text-1\\)\\)`), 'the glyph is the colour mixed toward the text colour');
+  // Every production row names a colour; strip it to see the rarity tile take over.
+  assert.doesNotMatch(render([{ ...tinted, iconColor: undefined }], false), /color-mix/, 'no colour named: the rarity tile');
+});
+
 test('nothing renders as NaN or undefined', () => {
   for (const html of [render(rows, false), render(rows, true), render([{ ...fourWeeks, progress: undefined, required: undefined, progressPercentage: undefined }], false)]) {
     assert.ok(!html.includes('NaN'));

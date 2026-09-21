@@ -11,7 +11,7 @@ import {
   useInfiniteScroll,
   type PublicUser,
 } from '../lib/hooks';
-import { Button, ButtonLink, EmptyState, ErrorState, PageHeader, SearchField, Spinner, Tabs } from './ui';
+import { Button, ButtonLink, EmptyState, ErrorState, PageHeader, SearchField, SegmentedControl, Spinner } from './ui';
 import { Compass, Lock, UserPlus, Users } from './icons';
 import UserRow, { UserRowSkeleton } from './UserRow';
 
@@ -147,7 +147,8 @@ export default function Connections() {
       />
 
       <section className="space-y-4" aria-label={`${name}’s connections`}>
-        <Tabs aria-label="Connections" tabs={tabs} value={kind} />
+        {/* The shell's section tabs are the only underline tabs; a page switch is the sliding segmented control. */}
+        <SegmentedControl aria-label="Connections" tabs={tabs} value={kind} />
 
         {locked ? (
           <EmptyState
@@ -185,7 +186,7 @@ export default function Connections() {
               empty
             ) : (
               <>
-                <p className="text-xs text-text-3">
+                <p className="t-meta">
                   {typeof total === 'number'
                     ? `${total.toLocaleString()} ${searchKey ? 'match' : 'account'}${total === 1 ? '' : searchKey ? 'es' : 's'}`
                     : null}

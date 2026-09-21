@@ -181,7 +181,8 @@ test('the page gates Claim on the capabilities answer and the auto-award flag', 
   // Controls that remove themselves hand focus on first: Got it to the selected
   // view tab, Claim to the card's details target or the dialog's Close.
   assert.match(page, /focusViews\(\);\s*ack\.mutate\(\{ ids: newRows\.map/);
-  assert.match(page, /<div id=\{VIEWS_ID\}>\s*<Tabs/);
+  // The page switch is the sliding segmented control; the shell's section tabs are the only underline tabs (Instagram rebuild, Q2).
+  assert.match(page, /<div id=\{VIEWS_ID\}>\s*<SegmentedControl/);
   assert.match(page, /detail && detail\._id === achievement\._id \? DETAIL_CLOSE_ID : detailsButtonId\(achievement\._id\)/);
   assert.match(page, /<Button id=\{DETAIL_CLOSE_ID\} variant="secondary" onClick=\{onClose\}>/);
   // The card carries the rule and the labels that must not change.

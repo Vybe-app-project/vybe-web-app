@@ -10,12 +10,11 @@ import {
   EmptyState,
   ErrorState,
   Skeleton,
-  SkeletonCard,
   cx,
   humanize,
 } from './ui';
 import { Bookmark, Dumbbell, Flame, Heart, Plate, Timer, Utensils, Image as ImageIcon } from './icons';
-import PostCard from './PostCard';
+import PostCard, { PostCardSkeleton } from './PostCard';
 
 export type ProfileTabKey = 'posts' | 'workouts' | 'meals' | 'saved';
 
@@ -101,9 +100,9 @@ export function ProfilePosts({ userId, isOwn = false, name }: PanelProps) {
 
   if (isLoading)
     return (
-      <div className="space-y-4" aria-busy="true" aria-label="Loading posts">
-        <SkeletonCard />
-        <SkeletonCard media={false} />
+      <div aria-busy="true" aria-label="Loading posts">
+        <PostCardSkeleton />
+        <PostCardSkeleton media={false} />
       </div>
     );
 
@@ -137,7 +136,7 @@ export function ProfilePosts({ userId, isOwn = false, name }: PanelProps) {
   return (
     <div>
       {data.map((post) => (
-        <PostCard key={post._id} post={post} invalidate={[['user-posts', userId], ['feed']]} surface="item" />
+        <PostCard key={post._id} post={post} invalidate={[['user-posts', userId], ['feed']]} />
       ))}
     </div>
   );
@@ -161,9 +160,9 @@ export function ProfileSaved() {
 
   if (isLoading)
     return (
-      <div className="space-y-4" aria-busy="true" aria-label="Loading saved posts">
-        <SkeletonCard />
-        <SkeletonCard media={false} />
+      <div aria-busy="true" aria-label="Loading saved posts">
+        <PostCardSkeleton />
+        <PostCardSkeleton media={false} />
       </div>
     );
 
@@ -190,7 +189,7 @@ export function ProfileSaved() {
   return (
     <div aria-label="Saved posts">
       {data.map((post) => (
-        <PostCard key={post._id} post={post} invalidate={[['bookmarks'], ['feed']]} surface="item" />
+        <PostCard key={post._id} post={post} invalidate={[['bookmarks'], ['feed']]} />
       ))}
     </div>
   );
@@ -254,14 +253,14 @@ function TileSkeleton({ count = 4 }: { count?: number }) {
   return (
     <CardGrid min="18rem" className="gap-3" aria-busy="true">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="card flex gap-3 p-3">
+        <Card key={i} padded={false} className="flex gap-3 p-3">
           <Skeleton className="h-16 w-16 shrink-0 rounded-md" />
           <div className="flex-1 space-y-2 py-1">
             <Skeleton className="h-4 w-2/3" />
             <Skeleton className="h-3 w-1/3" />
             <Skeleton className="h-3 w-1/2" />
           </div>
-        </div>
+        </Card>
       ))}
     </CardGrid>
   );

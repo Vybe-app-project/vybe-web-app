@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { commentTotal, likeTotal, tokenizeContent } from '../lib/feedLogic';
-import { communityPath, isObjectId } from '../lib/gyms';
+import { communityPath } from '../lib/gyms';
+import { useHomeGym, type HomeGymState } from '../lib/homeGym';
 import {
   compactNumber,
   displayName,
@@ -24,6 +25,7 @@ import {
   IconButton,
   Input,
   Menu,
+  Skeleton,
   SkeletonCard,
   cx,
   useFocusTrap,
@@ -61,11 +63,11 @@ import { RecapSummaryCard, hasRecapSummary } from './RecapSummaryCard';
 /* ------------------------------------------------------------------ */
 
 /**
- * `GET /users/me` carries `homeGym` as either a bare community id or an
- * OpenStreetMap place (`{ osmId, name }`); the key is absent when never set.
- * A place names itself; a community needs the details call, read under the
- * same key the gym page uses (`['community', id]`) so the two share one cache
- * entry and the shell's own read is never duplicated.
+ * The viewer's gym as a post needs it: an id, whether it is a community or a
+ * bare OpenStreetMap place, and a name. Read from the shell's one home-gym
+ * query (`useHomeGym`, the same cache the compact header on Home draws from),
+ * so no card ever makes its own request for the same gym. Null until that
+ * query has answered, and whenever the account has no gym.
  */
 export type ViewerGym = {
   id: string;
@@ -90,26 +92,15 @@ const communityIdOf = (home: HomeGymField): string => {
   return c && typeof c === 'object' && typeof c._id === 'string' ? c._id : '';
 };
 
-export function useViewerGym(): ViewerGym | null {
-  const home = useAuth((s) => homeGymOf(s.user));
-  const communityId = communityIdOf(home);
-  const detail = useQuery({
-    queryKey: ['community', communityId],
-    enabled: isObjectId(communityId),
-    staleTime: 5 * 60_000,
-    retry: false,
-    queryFn: async () => {
-      const { data } = await api.get(`/gyms/community/${communityId}`);
-      return (data?.data || data?.gymCommunity || data) as { _id?: string; name?: string };
-    },
-  });
-  if (communityId) {
-    const populated = home?.community && typeof home.community === 'object' ? home.community.name : undefined;
-    return { id: communityId, kind: 'community', name: (detail.data?.name || populated || '').trim() };
-  }
-  const place = home?.place;
-  if (place?.osmId && place.name?.trim()) return { id: place.osmId, kind: 'place', name: place.name.trim() };
+/** `useHomeGym`'s answer as a ViewerGym: the community when there is one, the pinned place otherwise. */
+export function viewerGymOf(home: HomeGymState): ViewerGym | null {
+  if (home.community?._id) return { id: String(home.community._id), kind: 'community', name: (home.community.name || '').trim() };
+  if (home.source === 'place' && home.gym?.id) return { id: home.gym.id, kind: 'place', name: home.gym.name.trim() };
   return null;
+}
+
+export function useViewerGym(): ViewerGym | null {
+  return viewerGymOf(useHomeGym());
 }
 
 /** Where a gym row links: the community page, or nowhere for a bare place. */
@@ -302,7 +293,7 @@ export function PostMediaGrid({
   className?: string;
   expanded?: boolean;
   onOpen?: (index: number) => void;
-  /** Feed items: edge to edge on phones (to the gutter), square corners at the viewport edge, a reserved ratio. */
+  /** Feed items: edge to edge below `md` (out to the viewport), square corners, the column's width above. */
   bleed?: boolean;
 }) {
   const medias = post.medias || [];
@@ -316,7 +307,7 @@ export function PostMediaGrid({
     <div
       className={cx(
         'grid gap-0.5 overflow-hidden bg-surface-2',
-        bleed ? '-mx-gutter rounded-none sm:mx-0 sm:rounded-md' : 'rounded-md',
+        bleed ? '-mx-gutter rounded-none md:mx-0' : 'rounded-md',
         count === 1 ? 'grid-cols-1' : 'grid-cols-2',
         className,
       )}
@@ -340,10 +331,7 @@ export function PostMediaGrid({
               alt={alt}
               loading="lazy"
               decoding="async"
-              className={cx(
-                'w-full',
-                count === 1 && !ratio ? (bleed ? 'h-full object-contain' : 'h-auto max-h-[36rem] object-cover') : 'h-full object-cover',
-              )}
+              className="h-full w-full object-cover"
             />
           );
 
@@ -354,8 +342,8 @@ export function PostMediaGrid({
               'relative min-w-0 bg-surface-2',
               tall && 'row-span-2 h-full',
               count > 1 && !tall && 'aspect-square',
-              // A single photo of unknown size reserves 4:5 so the feed never shifts as it decodes.
-              count === 1 && !ratio && bleed && 'aspect-[4/5]',
+              // A single photo of unknown size reserves a square (Instagram's classic frame) so the feed never shifts as it decodes.
+              count === 1 && !ratio && 'aspect-square',
             )}
             style={count === 1 && ratio ? { aspectRatio: ratio } : undefined}
           >
@@ -603,8 +591,17 @@ export function PostContent({
       setOverflows(el.scrollHeight > el.clientHeight + 1);
     };
     measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    // Re-measure whenever the paragraph's box changes: a viewport resize, the
+    // webfont landing, or a `content-visibility: auto` item scrolling into
+    // view — skipped content has no layout (0 × 0), so a mount-only measure
+    // would hide "See more" on every post below the fold.
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [clamp, expanded, body]);
 
   const inline = new Set((body.match(HASHTAG_RE) || []).map((t) => t.slice(1).toLowerCase()));
@@ -619,7 +616,7 @@ export function PostContent({
     <div className={className}>
       <p
         ref={ref}
-        className={cx('prose-measure whitespace-pre-wrap break-words text-sm leading-relaxed text-text-1', clamped && 'line-clamp-6')}
+        className={cx('t-body prose-measure whitespace-pre-wrap break-words text-text-1', clamped && 'line-clamp-6')}
       >
         {lead ? <>{lead} </> : null}
         {tokens.map((t, i) =>
@@ -653,7 +650,7 @@ export function PostContent({
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="relative z-[2] mt-1 min-h-8 rounded-xs text-sm font-semibold text-text-2 hover:text-text-1 hover:underline"
+          className="t-body relative z-[2] min-h-8 rounded-xs text-text-2 hover:text-text-1 hover:underline"
         >
           {expanded ? 'See less' : 'See more'}
         </button>
@@ -696,7 +693,7 @@ function ActionButton({
       aria-label={typeof count === 'number' ? `${label} (${count})` : label}
       title={label}
       className={cx(
-        'relative z-[2] inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-sm px-2 text-sm font-semibold transition-colors dur-1',
+        'pressable relative z-[2] inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-sm px-2 text-sm font-semibold transition-colors dur-1',
         active ? activeClass : 'text-text-1 hover:text-text-2',
         'disabled:opacity-100',
         className,
@@ -732,11 +729,13 @@ export type PostCardProps = {
   onDeleted?: () => void;
   footer?: ReactNode;
   /**
-   * `item` (feeds, profile lists): a full-width post under a hairline, media
-   * bleeding to the gutter on phones — nothing boxed on a white page.
-   * `card` (the detail page): the tonal card.
+   * `item` (the default: feeds, profiles, search, communities): a full-width
+   * post under a hairline, media bled to the gutter on phones — nothing boxed
+   * on a white page. `card` (the detail page alone): the bordered card.
    */
   surface?: 'card' | 'item';
+  /** Extra classes on the root — the feed passes `cv-auto` to items below the fold. */
+  className?: string;
 };
 
 function authorHandle(author?: PublicUser | null): string {
@@ -753,7 +752,8 @@ export default function PostCard({
   onComment,
   onDeleted,
   footer,
-  surface = 'card',
+  surface = 'item',
+  className,
 }: PostCardProps) {
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
@@ -981,12 +981,18 @@ export default function PostCard({
 
   const detailHref = `/p/${post._id}`;
   const item = surface === 'item';
-  const avatarEl = <Avatar src={author?.avatar} name={name} size={32} seed={authorId} />;
+  const hasMedia = (post.medias?.length ?? 0) > 0;
+  const hasSummary = hasWorkoutSummary(post.workoutSummary) || hasRecapSummary(post.recapSummary);
+  // Instagram's caption — bold username, then the words — only makes sense
+  // under a picture. A post that is only words reads header → text → icon
+  // row, and never repeats the name the header just gave.
+  const textOnly = !hasMedia && !hasSummary;
+  const avatarEl = <Avatar src={author?.avatar} name={name} size={36} seed={authorId} />;
   const username = author?.username || name;
   /* One row: bold username, badges, the shared gym, then the time — the Instagram header. */
   const identity = (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
-      <span className="truncate font-semibold text-text-1">{username}</span>
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+      <span className="t-name truncate text-text-1">{username}</span>
       {author?.isIdentityVerified ? <BadgeCheck size={16} className="shrink-0 text-brand" aria-label="Verified" role="img" /> : null}
       {author?.isCoach || author?.isTrainer ? (
         <Badge tone="brand" size="sm">
@@ -994,14 +1000,14 @@ export default function PostCard({
         </Badge>
       ) : null}
       {gymLine ? (
-        <span className="inline-flex min-w-0 items-center gap-1 text-text-2">
-          <span aria-hidden="true" className="text-text-3">·</span>
-          <MapPin size={13} className="shrink-0 text-text-3" aria-hidden="true" />
+        <span className="t-meta inline-flex min-w-0 items-center gap-1">
+          <span aria-hidden="true">·</span>
+          <MapPin size={12} className="shrink-0" aria-hidden="true" />
           <span className="truncate">{gymLine}</span>
         </span>
       ) : null}
-      <span aria-hidden="true" className="text-text-3">·</span>
-      <time dateTime={post.createdAt} className="tabular text-text-3">
+      <span aria-hidden="true" className="t-meta">·</span>
+      <time dateTime={post.createdAt} className="t-meta tabular">
         {timeAgo(post.createdAt)}
       </time>
     </span>
@@ -1009,62 +1015,72 @@ export default function PostCard({
   // Screen readers read the two lines as one run ("Vybe Test User@vybetester"); a separator fixes the name.
   const identityLabel = author?.username && author.username !== name ? `${name}, @${author.username}` : name;
   const usernameLead = authorHref ? (
-    <Link to={authorHref} viewTransition className="relative z-[2] font-semibold text-text-1 hover:underline">
+    <Link to={authorHref} viewTransition className="t-name relative z-[2] text-text-1 hover:underline">
       {username}
     </Link>
   ) : (
-    <span className="font-semibold text-text-1">{username}</span>
+    <span className="t-name text-text-1">{username}</span>
   );
 
-  const body = (
-    <>
-      {/* header */}
-      <div className="flex items-center gap-3">
-        {authorHref ? (
-          <Link to={authorHref} viewTransition aria-label={name} className="relative z-[2] -m-0.5 shrink-0 rounded-full p-0.5">
-            {avatarEl}
-          </Link>
-        ) : (
-          <span className="shrink-0">{avatarEl}</span>
-        )}
-
-        {authorHref ? (
-          <Link
-            to={authorHref}
-            viewTransition
-            aria-label={identityLabel}
-            className="relative z-[2] flex min-h-11 min-w-0 flex-1 items-center rounded-xs [&:hover_span:first-child_span:first-child]:underline"
-          >
-            {identity}
-          </Link>
-        ) : (
-          <div className="flex min-h-11 min-w-0 flex-1 items-center">{identity}</div>
-        )}
-
-        <div className="relative z-[2] -mr-2 shrink-0">
-          <Menu items={menuItems} label={`More options for ${name}’s post`} />
-        </div>
-      </div>
-
-      {post.community?._id ? (
-        <Link
-          to={`/communities?community=${encodeURIComponent(post.community._id)}`}
-          viewTransition
-          className="relative z-[2] mt-1 inline-flex max-w-full items-center gap-1.5 rounded-xs text-xs font-semibold text-brand-text underline-offset-2 hover:underline"
-          aria-label={`Posted in ${post.community.name || 'a community'} — open community`}
-        >
-          <Users size={14} className="shrink-0" />
-          <span className="truncate">in {post.community.name || 'a community'}</span>
+  /* header row: 36 px avatar · username · gym · time · ⋯ — 56 px tall on the feed, so the avatar sits 10 px under the hairline above */
+  const header = (
+    <div className={cx('flex items-center gap-3', item ? 'h-14' : 'min-h-11')}>
+      {authorHref ? (
+        <Link to={authorHref} viewTransition aria-label={name} className="relative z-[2] -m-0.5 shrink-0 rounded-full p-0.5">
+          {avatarEl}
         </Link>
-      ) : null}
+      ) : (
+        <span className="shrink-0">{avatarEl}</span>
+      )}
 
-      {/* media, then a shared workout or recap, then the icon row, counts and caption */}
-      <PostMediaGrid post={post} className="mt-3" expanded={expandMedia} onOpen={setLightbox} bleed={item} />
+      {authorHref ? (
+        <Link
+          to={authorHref}
+          viewTransition
+          aria-label={identityLabel}
+          className="relative z-[2] flex min-h-11 min-w-0 flex-1 items-center rounded-xs [&:hover_span:first-child_span:first-child]:underline"
+        >
+          {identity}
+        </Link>
+      ) : (
+        <div className="flex min-h-11 min-w-0 flex-1 items-center">{identity}</div>
+      )}
+
+      <div className="relative z-[2] -mr-2 shrink-0">
+        <Menu items={menuItems} label={`More options for ${name}’s post`} size={40} />
+      </div>
+    </div>
+  );
+
+  const communityLine = post.community?._id ? (
+    <Link
+      to={`/communities?community=${encodeURIComponent(post.community._id)}`}
+      viewTransition
+      className={cx(
+        't-meta relative z-[2] inline-flex max-w-full items-center gap-1.5 rounded-xs font-semibold text-brand-text underline-offset-2 hover:underline',
+        item ? '-mt-2 mb-2' : 'mt-1',
+      )}
+      aria-label={`Posted in ${post.community.name || 'a community'} — open community`}
+    >
+      <Users size={14} className="shrink-0" />
+      <span className="truncate">in {post.community.name || 'a community'}</span>
+    </Link>
+  ) : null;
+
+  /* media (edge to edge on phones), then a shared workout or recap, then the icon row, counts and caption */
+  const media = <PostMediaGrid post={post} className={item ? undefined : 'mt-3'} expanded={expandMedia} onOpen={setLightbox} bleed={item} />;
+  const summaries = (
+    <>
       {hasWorkoutSummary(post.workoutSummary) ? <WorkoutSummaryCard summary={post.workoutSummary} className="mt-3" /> : null}
       {hasRecapSummary(post.recapSummary) ? <RecapSummaryCard summary={post.recapSummary} className="mt-3" to={isOwn ? `/recaps/${post.recapSummary.recapId}` : null} /> : null}
+    </>
+  );
+  const caption = <PostContent text={post.content} hashtags={post.hashtags} className={textOnly ? (item ? undefined : 'mt-2') : 'mt-1'} clamp={!expandMedia} lead={textOnly ? undefined : usernameLead} />;
 
-      {/* icon row: like · comment · share, save on the right */}
-      <div className="-mx-2 mt-1 flex items-center">
+  /* icon row: like · comment · share, save on the right — 24 px glyphs in 44 px targets, the first flush with the gutter */
+  const actions = (
+    <>
+      <div className="-mx-2 flex h-11 items-center">
         <ActionButton
           label={liked ? 'Unlike' : 'Like'}
           pressed={liked}
@@ -1102,18 +1118,37 @@ export default function PostCard({
       </div>
 
       {likes > 0 ? (
-        <p className="tabular text-sm font-semibold text-text-1" aria-live="polite">
+        <p className="t-name tabular text-text-1" aria-live="polite">
           <span key={likes} className="motion-count inline-block">
             {compactNumber(likes)}
           </span>{' '}
           {likes === 1 ? 'like' : 'likes'}
         </p>
       ) : null}
+    </>
+  );
 
-      <PostContent text={post.content} hashtags={post.hashtags} className="mt-1" clamp={!expandMedia} lead={usernameLead} />
+  const body = (
+    <>
+      {header}
+      {communityLine}
+
+      {textOnly ? (
+        <>
+          {caption}
+          {actions}
+        </>
+      ) : (
+        <>
+          {media}
+          {summaries}
+          {actions}
+          {caption}
+        </>
+      )}
 
       {linkToDetail && commentCount > 0 && freshComments.length === 0 ? (
-        <Link to={`${detailHref}#comments`} viewTransition className="relative z-[2] mt-1 inline-block text-sm text-text-2 hover:underline">
+        <Link to={`${detailHref}#comments`} viewTransition className="t-body relative z-[2] mt-1 inline-block text-text-2 hover:underline">
           View all {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
         </Link>
       ) : null}
@@ -1207,7 +1242,7 @@ export default function PostCard({
 
   if (item) {
     return (
-      <article aria-label={`Post by ${name}`} className="relative border-b border-line pb-4 pt-3 first:pt-0 last:border-b-0">
+      <article aria-label={`Post by ${name}`} className={cx('feed-rule relative pb-3', className)}>
         {linkToDetail ? (
           <Link
             to={detailHref}
@@ -1228,7 +1263,7 @@ export default function PostCard({
       to={linkToDetail ? detailHref : undefined}
       linkLabel={linkToDetail ? `Open post by ${name}` : undefined}
       interactive={linkToDetail}
-      className="overflow-hidden"
+      className={cx('overflow-hidden', className)}
     >
       {body}
     </Card>
@@ -1239,6 +1274,44 @@ export default function PostCard({
 /* Loading skeleton                                                    */
 /* ------------------------------------------------------------------ */
 
-export function PostCardSkeleton({ media = true }: { media?: boolean }) {
-  return <SkeletonCard media={media} />;
+/**
+ * The feed's loading rows, in `PostCard`'s exact `item` geometry: the 56 px
+ * header, a square bled to the gutter (or three lines of text), the 44 px icon
+ * row, the likes line and two caption lines, under the same hairline — so the
+ * swap to content moves nothing. `card` keeps the boxed skeleton for the
+ * detail page.
+ */
+export function PostCardSkeleton({ media = true, surface = 'item', className }: { media?: boolean; surface?: 'item' | 'card'; className?: string }) {
+  if (surface === 'card') return <SkeletonCard media={media} className={className} />;
+  return (
+    <div className={cx('feed-rule pb-3', className)} aria-hidden="true">
+      <div className="flex h-14 items-center gap-3">
+        <Skeleton className="h-9 w-9 shrink-0 rounded-full" />
+        <Skeleton className="h-4 w-40 max-w-full" />
+        <Skeleton className="ml-auto h-5 w-5 rounded-full" />
+      </div>
+      {media ? (
+        <Skeleton className="-mx-gutter aspect-square rounded-none md:mx-0" />
+      ) : (
+        <div className="space-y-2 py-0.5">
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-11/12" />
+          <Skeleton className="h-3.5 w-3/5" />
+        </div>
+      )}
+      <div className="flex h-11 items-center gap-5 px-0.5">
+        <Skeleton className="h-6 w-6 rounded-full" />
+        <Skeleton className="h-6 w-6 rounded-full" />
+        <Skeleton className="h-6 w-6 rounded-full" />
+        <Skeleton className="ml-auto h-6 w-6 rounded-full" />
+      </div>
+      <Skeleton className="h-3.5 w-16" />
+      {media ? (
+        <div className="mt-2 space-y-2">
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-2/3" />
+        </div>
+      ) : null}
+    </div>
+  );
 }
