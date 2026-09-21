@@ -982,6 +982,7 @@ export function CommunitySurface({
                   fallbackLine={membership.isMember ? trainingTodayLine(todayLabel) : null}
                   member={membership.isMember}
                   openNow={hoursLine(hours.data)}
+                  openNowPending={hours.isPending && hours.fetchStatus !== 'idle'}
                   checkIn={membership.isMember && !isHome ? { pending: checkIn.isPending, run: () => checkIn.mutate() } : undefined}
                 />
                 <WeekCard name={name} week={activeThisWeek} board={membership.isMember ? leaderboard : null} />
@@ -1266,17 +1267,21 @@ export function FacesLine({ count, members, suffix }: { count: number; members: 
 export function Faces({ members, label, more = 0 }: { members: PublicActor[]; label: string; more?: number }) {
   if (!members.length) return null;
   const rest = Number.isFinite(more) && more > 0 ? Math.round(more) : 0;
+  // One row that scrolls, never a wrapping grid: the server sends between one
+  // and twelve faces, and a wrapping row made the card 120 px taller when it
+  // sent twelve — a shift of 0.27 on a phone, measured. One row is the same
+  // height whatever arrives, so the skeleton is honestly its final geometry.
   return (
-    <ul className="flex flex-wrap items-center gap-2" aria-label={label}>
+    <ul className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={label}>
       {members.slice(0, 12).map((m) => (
-        <li key={m._id}>
+        <li key={m._id} className="shrink-0">
           <Link to={`/u/${m._id}`} viewTransition aria-label={nameOf(m)} title={nameOf(m)} className="pressable block rounded-full">
             <Avatar src={m.avatar} name={nameOf(m)} size={40} seed={m._id} />
           </Link>
         </li>
       ))}
       {rest > 0 ? (
-        <li className="t-meta grid h-10 place-items-center rounded-full bg-surface-2 px-3">
+        <li className="t-meta grid h-10 shrink-0 place-items-center whitespace-nowrap rounded-full bg-surface-2 px-3">
           and {rest === 1 ? '1 other' : `${formatStat(rest)} others`}
         </li>
       ) : null}
@@ -1285,13 +1290,50 @@ export function Faces({ members, label, more = 0 }: { members: PublicActor[]; la
 }
 
 /** The figure's geometry while it loads: one sentence, one row of faces. */
+/**
+ * The figure's geometry while it loads: the sentence, which wraps to two
+ * lines on a phone once it names people, and the one row of faces. Both are
+ * the size the resolved card is, so nothing under it moves when it lands.
+ */
 function FigureSkeleton() {
   return (
     <div className="mt-2 space-y-3" aria-busy="true">
-      <Skeleton className="h-4 w-56 max-w-full" />
+      <div className="space-y-1.5">
+        <Skeleton className="h-4 w-full max-w-72" />
+        <Skeleton className="h-4 w-32" />
+      </div>
       <div className="flex gap-2">
         {[0, 1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-10 w-10 rounded-full" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * How many check-in board rows the week card draws, and reserves. The API
+ * sends up to eight; the card shows five, and its skeleton draws five, so a
+ * board that lands does not push the cards under it down the page.
+ */
+const BOARD_ROWS = 5;
+
+/**
+ * The board's own geometry while it loads: the tally line, the Regulars
+ * heading and BOARD_ROWS rows of 52 px, which is what the list draws.
+ */
+function BoardSkeleton() {
+  return (
+    <div className="mt-3" aria-busy="true">
+      <Skeleton className="h-3 w-44 max-w-full" />
+      <Skeleton className="mt-3 h-4 w-20" />
+      <div className="mt-1">
+        {Array.from({ length: BOARD_ROWS }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 py-2">
+            <Skeleton className="h-9 w-9 shrink-0 rounded-full" />
+            <Skeleton className="h-3.5 flex-1" />
+            <Skeleton className="h-3 w-16 shrink-0" />
+          </div>
         ))}
       </div>
     </div>
@@ -1313,6 +1355,7 @@ export function TodayCard({
   fallbackLine,
   member,
   openNow,
+  openNowPending = false,
   checkIn,
 }: {
   name: string;
@@ -1321,6 +1364,8 @@ export function TodayCard({
   member: boolean;
   /** "Open now · closes 22:00" from the place's hours; null when the provider has none. */
   openNow?: string | null;
+  /** The hours are still on their way: hold the line's row so its arrival shifts nothing. */
+  openNowPending?: boolean;
   checkIn?: { pending: boolean; run: () => void };
 }) {
   const figure = today.data ?? null;
@@ -1328,10 +1373,17 @@ export function TodayCard({
   return (
     <Card container>
       <h2 className="t-section text-text-1">Today</h2>
-      {openNow ? (
-        <p className="mt-1 flex items-center gap-1.5 text-sm text-text-1">
+      {/* The hours are their own request, so the line's row is reserved while
+          it is in flight: everything under it would otherwise jump when the
+          provider answers. */}
+      {openNowPending ? (
+        <div className="mt-1 flex h-5 items-center" aria-busy="true">
+          <Skeleton className="h-3.5 w-40 max-w-full" />
+        </div>
+      ) : openNow ? (
+        <p className="mt-1 flex h-5 items-center gap-1.5 text-sm text-text-1">
           <Clock size={16} className="shrink-0 text-text-3" />
-          <span>{openNow}</span>
+          <span className="truncate">{openNow}</span>
         </p>
       ) : null}
       {isFetchingFigure(today) ? (
@@ -1373,13 +1425,21 @@ function WeekCard({ name, week, board }: { name: string; week: UseQueryResult<Ac
   const count = figure?.count ?? 0;
   const data = board?.data;
   const mySessions = typeof data?.me?.sessions === 'number' && data.me.sessions > 0 ? data.me.sessions : 0;
-  const entries = (data?.entries || []).filter((e) => e.user?._id).slice(0, 8);
+  const entries = (data?.entries || []).filter((e) => e.user?._id).slice(0, BOARD_ROWS);
   const range = rangeLabel(data?.range);
+  // Two requests draw this card — the week's figure and the check-in board —
+  // so it waits for both and paints once. Painting the figure first and the
+  // board a moment later grew the card by 150 px and pushed the two cards
+  // under it down the page (a 0.15 shift on a phone, measured).
+  const settling = isFetchingFigure(week) || Boolean(board && board.isLoading);
   return (
     <Card container>
       <h2 className="t-section text-text-1">This week</h2>
-      {isFetchingFigure(week) ? (
-        <FigureSkeleton />
+      {settling ? (
+        <>
+          <FigureSkeleton />
+          {board ? <BoardSkeleton /> : null}
+        </>
       ) : (
         <div className="mt-2 space-y-3">
           {count > 0 && figure ? (
@@ -1393,12 +1453,7 @@ function WeekCard({ name, week, board }: { name: string; week: UseQueryResult<Ac
           )}
           {count > 0 && figure ? <Faces members={figure.members} label="Active this week" more={figure.sample ? count - figure.members.length : 0} /> : null}
           {board ? (
-            board.isLoading ? (
-              <div className="space-y-2" aria-busy="true">
-                <SkeletonRow />
-                <SkeletonRow />
-              </div>
-            ) : board.isError ? (
+            board.isError ? (
               <ErrorState error={board.error} onRetry={() => board.refetch()} className="py-4" />
             ) : (
               <>

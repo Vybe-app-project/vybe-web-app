@@ -248,6 +248,24 @@ test('the gym page keeps one blue, one h1 and the zero rule', () => {
   }
 });
 
+test('what the 390 px drive measured stays fixed: the Today tab holds its geometry', () => {
+  // The open-now line is its own request; its row is reserved while it is in
+  // flight, or the faces and the check-in under it jump when it lands.
+  assert.match(detail, /openNowPending=\{hours\.isPending && hours\.fetchStatus !== 'idle'\}/);
+  assert.match(detail, /\{openNowPending \? \(/);
+  // Twelve faces in a wrapping row made the card 120 px taller (a 0.27 shift,
+  // measured): one row that scrolls is the same height whatever arrives.
+  assert.match(detail, /flex items-center gap-2 overflow-x-auto/);
+  assert.doesNotMatch(detail, /flex flex-wrap items-center gap-2" aria-label=\{label\}/);
+  // The week card is two requests deep and paints once, with both skeletons.
+  assert.match(detail, /const settling = isFetchingFigure\(week\) \|\| Boolean\(board && board\.isLoading\);/);
+  assert.match(detail, /\{settling \? \(\s*<>\s*<FigureSkeleton \/>\s*\{board \? <BoardSkeleton \/> : null\}/);
+  // The board's skeleton draws the same number of rows the list does.
+  assert.match(detail, /const BOARD_ROWS = 5;/);
+  assert.match(detail, /\.slice\(0, BOARD_ROWS\)/);
+  assert.match(detail, /Array\.from\(\{ length: BOARD_ROWS \}\)/);
+});
+
 test('the empty states say what to do, and never a zero', () => {
   // Events: the members' state and the admins' ask.
   assert.match(detail, /title=\{canModerate \? 'Plan the first session' : 'No sessions planned yet'\}/);
