@@ -27,6 +27,7 @@ import PostCard, { PostCardSkeleton } from './PostCard';
 import UserRow, { UserRowSkeleton } from './UserRow';
 import { dedupeRecentSearches, type RecentSearchLike } from '../lib/searchHistory';
 import { usePeopleSearch } from './PeopleSearch';
+import { SuggestionList } from './SuggestionRow';
 import { MealTile, WorkoutTile, type MealItem, type WorkoutItem } from './ProfileTabs';
 
 /** Every bucket the API's unified search returns. */
@@ -491,9 +492,14 @@ export default function Search() {
           </section>
         ) : null}
 
-        {/* ---------- landing state: recent + trending ---------- */}
+        {/* ---------- landing state: people, recent + trending ---------- */}
         {!activeQuery && !liveTyping ? (
           <div className="space-y-8">
+            {/* Three people to follow, each with the server's reason and its
+                30-day session count (GET /users/suggestions). An empty box is
+                the best place to say who is worth following and why. */}
+            <SuggestionList limit={3} heading="For you" />
+
             <section aria-labelledby="recent-heading">
               <SubHeading
                 action={

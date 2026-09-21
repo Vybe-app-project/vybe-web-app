@@ -22,9 +22,12 @@ import UserRow, { FollowButton, UserRowSkeleton } from './UserRow';
 
 /**
  * People to follow with the reason next to every name (Wave F,
- * design-first-week-and-people.md §3.2). Fed by GET /searching/suggest, which
- * is not behind the invites flag, so the chips and "Not interested" work on
- * every host. Shared by Discover › People (empty query) and Friends › For you.
+ * design-first-week-and-people.md §3.2). Fed by GET /users/suggestions, the
+ * people-graph route: it sends `reason` as { code, label } and
+ * `activity: { sessions30d }`, and it never suggests an abandoned account.
+ * Not behind the invites flag, so the chips and "Not interested" work on
+ * every host. Shared by Discover › People (empty query), Search's empty box
+ * and Friends › For you.
  */
 
 /** Every suggestion list shares this prefix so one dismissal updates all of them. */
@@ -77,8 +80,11 @@ export function useSuggestions(limit: number) {
     queryKey: suggestionsKey(limit),
     staleTime: 60_000,
     queryFn: async () => {
-      // Never a search term from these lists: it disables the cold-start fill.
-      const { data } = await api.get('/searching/suggest', { params: { limit } });
+      // The people-graph route: the same rows, with `reason` as
+      // { code, label } and `activity: { sessions30d }`, and the activity
+      // gate always on so an abandoned account is never suggested. Never a
+      // search term from these lists: it disables the cold-start fill.
+      const { data } = await api.get('/users/suggestions', { params: { limit } });
       return parseSuggestions(data);
     },
   });

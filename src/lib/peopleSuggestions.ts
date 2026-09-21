@@ -12,10 +12,32 @@ import type { PublicUser } from './hooks';
 export const SUGGESTION_REASONS = ['invited-by', 'mutual', 'follows-you', 'same-gym', 'new-here', 'contacts'] as const;
 export type SuggestionReason = (typeof SUGGESTION_REASONS)[number];
 
+/**
+ * `GET /users/suggestions` (the people graph) sends the same row as
+ * `/searching/suggest` with one substitution: `reason` is the object
+ * `{ code, label }` instead of the legacy string, and each row carries
+ * `activity: { sessions30d }`. The codes are `invited_you`, `mutual_follow`,
+ * `follows_you`, `same_gym`, `trains_like_you`, `recently_active`
+ * (`services/peopleSuggestions.js` PEOPLE_GRAPH_CODES; `contact` is
+ * reserved and never emitted). `reason` is null when no code applies.
+ */
+export const REASON_CODES = ['invited_you', 'mutual_follow', 'follows_you', 'same_gym', 'trains_like_you', 'recently_active'] as const;
+export type ReasonCode = (typeof REASON_CODES)[number];
+
+export type ReasonDetail = { code?: ReasonCode | string; label?: string };
+
+/**
+ * Completed sessions in the trailing 30 days. It is genuinely 0 on rows that
+ * earned their place another way — an invite, or a shared gym — so it is a
+ * number to omit, never one to print.
+ */
+export type SuggestionActivity = { sessions30d?: number };
+
 export type PeopleSuggestion = PublicUser & {
-  reason?: SuggestionReason | string;
+  reason?: SuggestionReason | ReasonDetail | string | null;
   reasons?: Array<SuggestionReason | string>;
   reasonText?: string;
+  activity?: SuggestionActivity | null;
   /** Present (true) only on a same-gym row with a members-visible check-in this local week. */
   activeThisWeek?: boolean;
   gymName?: string;
@@ -24,6 +46,38 @@ export type PeopleSuggestion = PublicUser & {
   mutualCount?: number;
   mutualNames?: string[];
 };
+
+const reasonDetailOf = (row: Partial<PeopleSuggestion> | null | undefined): ReasonDetail | null => {
+  const reason = row?.reason;
+  return reason && typeof reason === 'object' && !Array.isArray(reason) ? (reason as ReasonDetail) : null;
+};
+
+/** The people-graph code, or null on the legacy string shape. */
+export function reasonCodeOf(row: Partial<PeopleSuggestion> | null | undefined): string | null {
+  const code = reasonDetailOf(row)?.code;
+  return typeof code === 'string' && code ? code : null;
+}
+
+/** The server's sentence: `reason.label` where there is one, else `reasonText`. */
+export function reasonLabelOf(row: Partial<PeopleSuggestion> | null | undefined): string | null {
+  const label = reasonDetailOf(row)?.label;
+  if (typeof label === 'string' && label.trim()) return label.trim();
+  const text = typeof row?.reasonText === 'string' ? row.reasonText.trim() : '';
+  return text || null;
+}
+
+/**
+ * "12 sessions this month", or nothing. The zero rule applies to a
+ * suggestion like anywhere else: a row whose 30-day count is 0 — an invite
+ * or a gym-mate whose last logged session is older than the window — says
+ * only why it is there, never "0 sessions".
+ */
+export function sessionsLabel(activity: SuggestionActivity | null | undefined): string | null {
+  const count = activity?.sessions30d;
+  if (typeof count !== 'number' || !Number.isFinite(count) || count <= 0) return null;
+  const whole = Math.round(count);
+  return `${whole} ${whole === 1 ? 'session' : 'sessions'} this month`;
+}
 
 /** The rows of a GET /searching/suggest body; anything that is not a list of accounts reads as none. */
 export function parseSuggestions(body: unknown): PeopleSuggestion[] {
@@ -41,7 +95,7 @@ export const THERE_THIS_WEEK_SUFFIX = ' · there this week';
 export const THERE_THIS_WEEK = `Trains at your gym${THERE_THIS_WEEK_SUFFIX}`;
 
 export type ReasonChip = {
-  key: 'invited-by' | 'reason' | 'active-this-week';
+  key: 'invited-by' | 'reason' | 'active-this-week' | 'sessions';
   text: string;
   /** The one accent on the row besides Follow (spec §3.2: the mint-outlined "Invited you"). */
   accent: boolean;
@@ -56,6 +110,8 @@ export type ReasonChip = {
  *    primary text does not already end with that suffix (the live API appends
  *    it itself; an older API that omits it still gets the chip, and a current
  *    one never says it twice).
+ * 4. "12 sessions this month" from `activity.sessions30d`, and only when the
+ *    count is above zero.
  *
  * A row with no reason yields no chips: a reason is never invented.
  */
@@ -63,13 +119,15 @@ export function reasonChips(row: Partial<PeopleSuggestion> | null | undefined): 
   if (!row || typeof row !== 'object') return [];
   const chips: ReasonChip[] = [];
   const reasons = Array.isArray(row.reasons) ? row.reasons : [];
-  const invited = row.reason === 'invited-by' || reasons.includes('invited-by');
+  const invited = row.reason === 'invited-by' || reasonCodeOf(row) === 'invited_you' || reasons.includes('invited-by');
   if (invited) chips.push({ key: 'invited-by', text: INVITED_YOU, accent: true });
-  const text = typeof row.reasonText === 'string' ? row.reasonText.trim() : '';
+  const text = reasonLabelOf(row) ?? '';
   if (text && !(invited && text === INVITED_YOU)) chips.push({ key: 'reason', text, accent: false });
   if (row.activeThisWeek === true && !text.endsWith(THERE_THIS_WEEK_SUFFIX)) {
     chips.push({ key: 'active-this-week', text: THERE_THIS_WEEK, accent: false });
   }
+  const sessions = sessionsLabel(row.activity);
+  if (sessions) chips.push({ key: 'sessions', text: sessions, accent: false });
   return chips;
 }
 

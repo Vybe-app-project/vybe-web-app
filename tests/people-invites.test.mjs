@@ -451,7 +451,8 @@ test('the suggestion rows: Discover and Friends render the list, the row posts t
 
   const row = read('src/pages/SuggestionRow.tsx');
   assert.match(row, /import UserRow, \{ FollowButton, UserRowSkeleton \} from '\.\/UserRow';/);
-  assert.match(row, /api\.get\('\/searching\/suggest', \{ params: \{ limit \} \}\)/);
+  // The people-graph route: reason as { code, label } and activity.sessions30d.
+  assert.match(row, /api\.get\('\/users\/suggestions', \{ params: \{ limit \} \}\)/);
   assert.doesNotMatch(row, /searchKey/, 'never a searchKey from the lists: it disables the cold-start fill');
   assert.match(row, /const id = String\(row\._id\);/);
   assert.match(row, /api\.post\(`\/searching\/exclude\/\$\{id\}`\)/);
@@ -566,7 +567,7 @@ test('the invite surfaces hide behind features.invites, treat 404 FEATURE_DISABL
   const pinned = new Set(snapshot.routes.map((route) => `${route.method} ${route.path}`));
   for (const route of [
     'GET /api/invites/me', 'PATCH /api/invites/me', 'POST /api/invites', 'POST /api/invites/:code/redeem', 'DELETE /api/invites/:code',
-    'GET /api/public/invites/:code', 'GET /api/searching/suggest', 'POST /api/searching/exclude/:targetId',
+    'GET /api/public/invites/:code', 'GET /api/searching/suggest', 'GET /api/users/suggestions', 'POST /api/searching/exclude/:targetId',
   ]) {
     assert.ok(pinned.has(route), `contracts/backend-routes.json must pin ${route}`);
   }
