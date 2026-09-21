@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Button, IconButton, Input, Menu, cx, formatStat, hasMetric, type MenuItem } from '../../../components/ui';
-import { Check, ChevronDown, ChevronUp, Clock, Plus, Timer, Trash } from '../../../components/icons';
+import { Check, CheckCircle, ChevronDown, ChevronUp, Clock, Minus, Plus, Timer } from '../../../components/icons';
 import {
   REST_PRESETS,
   bestSetOf,
@@ -35,10 +35,22 @@ export type SessionMetric = { key: string; label: string; value: string | null }
  */
 export function SessionMetrics({ items, 'aria-label': ariaLabel = 'This session' }: { items: SessionMetric[]; 'aria-label'?: string }) {
   return (
-    <ul aria-label={ariaLabel} className="card grid min-h-[76px] divide-x divide-line" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+    <ul
+      aria-label={ariaLabel}
+      data-testid="session-metrics"
+      className="card grid min-h-[76px] divide-x divide-line"
+      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+    >
       {items.map((item) => (
         <li key={item.key} className="flex min-w-0 flex-col items-center justify-center gap-1 px-1 py-2 text-center">
-          <span className={cx('t-metric block max-w-full truncate', item.value === null && 'text-text-3')}>{item.value ?? '—'}</span>
+          {/* A number that is not there takes StatStrip's treatment, not the
+              hero size: an em dash at 30 px reads as a redaction. The cell
+              keeps its height either way, so nothing below it moves. */}
+          {item.value === null ? (
+            <span className="t-meta block max-w-full truncate text-text-3">—</span>
+          ) : (
+            <span className="t-metric block max-w-full truncate">{item.value}</span>
+          )}
           <span className="type-label block max-w-full truncate text-text-2">{item.label}</span>
         </li>
       ))}
@@ -49,7 +61,9 @@ export function SessionMetrics({ items, 'aria-label': ariaLabel = 'This session'
 /** The three numbers the header strip and the recap both quote. */
 export function sessionMetrics(input: { elapsedMs: number; volumeKg: number; setCount: number; unit: WeightUnit }): SessionMetric[] {
   return [
-    { key: 'duration', label: 'duration', value: input.elapsedMs > 0 ? formatElapsed(input.elapsedMs) : null },
+    // Under a second there is no duration to report: "0:00" is a zero, and
+    // the register has no zeros. The cell keeps its height either way.
+    { key: 'duration', label: 'duration', value: input.elapsedMs >= 1000 ? formatElapsed(input.elapsedMs) : null },
     { key: 'volume', label: `${input.unit} lifted`, value: hasMetric(input.volumeKg) ? formatVolume(input.volumeKg, input.unit).replace(` ${input.unit}`, '') : null },
     { key: 'sets', label: input.setCount === 1 ? 'set' : 'sets', value: hasMetric(input.setCount) ? formatStat(input.setCount) : null },
   ];
@@ -57,8 +71,13 @@ export function sessionMetrics(input: { elapsedMs: number; volumeKg: number; set
 
 /* ------------------------------------------------------------- the set table */
 
-/** Column widths shared by the header and every row, so the table lines up. */
-const SET_GRID = 'grid grid-cols-[1.75rem_minmax(3.5rem,1fr)_minmax(0,1fr)_minmax(0,1fr)_2.75rem] items-center gap-2';
+/**
+ * Column widths shared by the header and every row, so the table lines up.
+ * The last column is 44 px in pixels, not rem: the ✓ is `w-11` off the 4 px
+ * spacing scale (44 px), while 2.75rem on this 15 px root is 41 px — three
+ * pixels the button spilled over the reps field at 390 px.
+ */
+const SET_GRID = 'grid grid-cols-[28px_minmax(3.5rem,1fr)_minmax(0,1fr)_minmax(0,1fr)_44px] items-center gap-2';
 
 export function SetTableHeader({ unit }: { unit: WeightUnit }) {
   return (
@@ -85,7 +104,6 @@ export function SetRow({
   exerciseName,
   onField,
   onToggle,
-  onRemove,
 }: {
   index: number;
   set: SessionSet;
@@ -93,7 +111,6 @@ export function SetRow({
   exerciseName: string;
   onField: (field: 'weight' | 'reps', text: string) => void;
   onToggle: () => void;
-  onRemove?: () => void;
 }) {
   const ghost = formatGhost(set.previous, unit);
   const previousWeight = set.previous && set.previous.weight > 0 ? String(set.previous.weight) : '';
@@ -131,25 +148,18 @@ export function SetRow({
         value={set.reps === null ? '' : String(set.reps)}
         onChange={(e) => onField('reps', e.target.value)}
       />
-      <div className="flex items-center justify-end">
-        <button
-          type="button"
-          aria-pressed={set.completed}
-          aria-label={`Mark ${name} done`}
-          onClick={onToggle}
-          className={cx(
-            'pressable inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-sm transition-colors dur-1',
-            set.completed ? 'text-text-1' : 'border border-control bg-surface-2 text-text-3 hover:text-text-1',
-          )}
-        >
-          <Check size={20} strokeWidth={set.completed ? 3 : 2} />
-        </button>
-        {onRemove ? (
-          <IconButton label={`Remove ${name}`} size={40} variant="ghost" className="-mr-2 hidden @sm:inline-flex" onClick={onRemove}>
-            <Trash size={16} />
-          </IconButton>
-        ) : null}
-      </div>
+      <button
+        type="button"
+        aria-pressed={set.completed}
+        aria-label={`Mark ${name} done`}
+        onClick={onToggle}
+        className={cx(
+          'pressable inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-sm transition-colors dur-1',
+          set.completed ? 'text-text-1' : 'border border-control bg-surface-2 text-text-3 hover:text-text-1',
+        )}
+      >
+        {set.completed ? <CheckCircle size={22} /> : <Check size={20} />}
+      </button>
     </li>
   );
 }
@@ -193,7 +203,7 @@ export function ExerciseCard({
   onField,
   onToggleSet,
   onAddSet,
-  onRemoveSet,
+  onRemoveLastSet,
   onRest,
   onCollapse,
   menu,
@@ -203,7 +213,8 @@ export function ExerciseCard({
   onField: (setId: string, field: 'weight' | 'reps', text: string) => void;
   onToggleSet: (setId: string) => void;
   onAddSet: () => void;
-  onRemoveSet: (setId: string) => void;
+  /** The exact inverse of "Add set", which always appends: nobody loses the wrong row. */
+  onRemoveLastSet: () => void;
   onRest: (seconds: number) => void;
   onCollapse: () => void;
   menu?: MenuItem[];
@@ -248,14 +259,20 @@ export function ExerciseCard({
                 exerciseName={exercise.name}
                 onField={(field, text) => onField(set.id, field, text)}
                 onToggle={() => onToggleSet(set.id)}
-                onRemove={exercise.sets.length > 1 ? () => onRemoveSet(set.id) : undefined}
               />
             ))}
           </ul>
           {exercise.sets.length === 0 ? <p className="t-body text-text-2">No sets. Add one, or remove the exercise.</p> : null}
-          <Button type="button" variant="quiet" size="sm" icon={<Plus size={16} />} onClick={onAddSet}>
-            Add set
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button type="button" variant="quiet" size="sm" icon={<Plus size={16} />} onClick={onAddSet}>
+              Add set
+            </Button>
+            {exercise.sets.length > 1 ? (
+              <Button type="button" variant="quiet" size="sm" icon={<Minus size={16} />} aria-label={`Remove the last set of ${exercise.name}`} onClick={onRemoveLastSet}>
+                Remove set
+              </Button>
+            ) : null}
+          </div>
         </div>
       )}
     </section>
@@ -285,7 +302,7 @@ export function RestDock({
   onSkip: () => void;
 }) {
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-gutter pb-nav lg:pb-4">
+    <div data-testid="rest-dock" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-gutter pb-nav lg:pb-4">
       <div className="pointer-events-auto mx-auto flex max-w-form items-center gap-2 rounded-lg border border-line bg-surface-1 p-2 shadow-1">
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-text-2" aria-hidden="true">
           <Clock size={18} />
@@ -340,29 +357,33 @@ export function AddExerciseForm({
 }) {
   return (
     <form
-      className="flex items-end gap-2"
+      className="space-y-1"
       onSubmit={(e) => {
         e.preventDefault();
         onAdd();
       }}
     >
-      <Input
-        ref={inputRef}
-        label="Add an exercise"
-        hideLabel
-        containerClassName="flex-1"
-        placeholder="Add an exercise, e.g. back squat"
-        autoComplete="off"
-        enterKeyHint="done"
-        autoFocus={autoFocus}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <Button type="submit" variant="secondary" icon={<Plus size={18} />} disabled={!value.trim()}>
-        Add
-      </Button>
+      <div className="flex items-end gap-2">
+        <Input
+          ref={inputRef}
+          label="Add an exercise"
+          hideLabel
+          containerClassName="flex-1"
+          placeholder="e.g. back squat"
+          autoComplete="off"
+          enterKeyHint="done"
+          autoFocus={autoFocus}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <Button type="submit" variant="secondary" icon={<Plus size={18} />} disabled={!value.trim()}>
+          Add
+        </Button>
+      </div>
+      {/* The picker on its own quiet line: on a 390 px phone it and Add
+          together left the field about 100 px wide. */}
       {onPickExercise ? (
-        <Button type="button" variant="quiet" onClick={onPickExercise}>
+        <Button type="button" variant="quiet" size="sm" onClick={onPickExercise}>
           Choose from library
         </Button>
       ) : null}

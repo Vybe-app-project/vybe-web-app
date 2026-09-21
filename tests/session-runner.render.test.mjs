@@ -78,6 +78,7 @@ test('a set row shows the PREVIOUS ghost and carries it as the placeholder of bo
   // The ✓ is a 44 px toggle that says whether it is pressed.
   assert.match(html, /aria-pressed="false"[^>]*aria-label="Mark set 2 of Bench press done"/);
   assert.ok(html.includes('h-11 w-11'), 'the check target is 44 px');
+  assert.ok(html.includes('44px]'), 'and its column is 44 px, not 2.75rem on a 15 px root');
   assert.ok(!html.includes('value="0"'), 'an untouched field is blank, never a zero');
 });
 
@@ -115,7 +116,7 @@ test('an open card shows the rest chip, the table and Add set', () => {
       onField: noop,
       onToggleSet: noop,
       onAddSet: noop,
-      onRemoveSet: noop,
+      onRemoveLastSet: noop,
       onRest: noop,
       onCollapse: noop,
     }),
@@ -124,7 +125,10 @@ test('an open card shows the rest chip, the table and Add set', () => {
   assert.ok(html.includes('Add set'));
   assert.equal(count(html, 'aria-pressed='), 2, 'one ✓ per set');
   assert.match(html, /aria-label="Hide the sets of Bench press"/);
-  assert.ok(html.includes('Remove set 1 of Bench press'), 'a card with more than one set can drop one');
+  // Removing a set is the inverse of adding one — the last row, never an
+  // arbitrary one — so the row keeps a single 44 px target.
+  assert.match(html, /aria-label="Remove the last set of Bench press"/);
+  assert.equal(count(html, 'Remove set'), 1);
   assert.ok(!html.includes('btn-primary'), 'no filled brand inside a card — Finish is the screen s one');
 });
 
@@ -136,7 +140,7 @@ test('a finished card folds to one line with its set count and best set', () => 
       onField: noop,
       onToggleSet: noop,
       onAddSet: noop,
-      onRemoveSet: noop,
+      onRemoveLastSet: noop,
       onRest: noop,
       onCollapse: noop,
     }),
@@ -182,7 +186,8 @@ test('the metric row never prints a zero and keeps one height whatever the numbe
   assert.equal(count(html, '—'), 3, 'a missing number is an em dash, not a 0');
   assert.ok(!/>0</.test(html));
   assert.ok(html.includes('min-h-[76px]'), 'the strip is one fixed height, so nothing below it moves');
-  assert.equal(count(html, 't-metric'), 3);
+  assert.equal(count(html, 't-metric'), 0, 'an em dash takes the meta treatment; 30 px of dash reads as a redaction');
+  assert.equal(count(render(h(parts.SessionMetrics, { items: full })), 't-metric'), 3);
 });
 
 /* --------------------------------------------------------------- the recap */
@@ -225,7 +230,7 @@ test('a recap with nothing in it renders the strip and no exercise list', () => 
 
 test('the add field is the fallback for a movement the library does not have, and the picker is beside it', () => {
   const plain = render(h(parts.AddExerciseForm, { value: '', onChange: noop, onAdd: noop }));
-  assert.match(plain, /aria-label="Add an exercise"|Add an exercise/);
+  assert.match(plain, /sr-only">Add an exercise<\/label>/, 'the field is labelled, not placeholder-only');
   assert.ok(plain.includes('disabled'), 'Add is inert until something is typed');
   assert.ok(!plain.includes('Choose from library'), 'no picker, no button');
   const withPicker = render(h(parts.AddExerciseForm, { value: 'Back squat', onChange: noop, onAdd: noop, onPickExercise: noop }));
@@ -315,6 +320,14 @@ test('every Start on the Train hub opens the runner; the post-hoc form stays rea
   assert.match(hub, /label: 'Start a session', to: TRAIN\.liveSession\(\)/);
   assert.match(hub, /to=\{TRAIN\.newSession\(\)\} state=\{sheetState\} variant="quiet">\s*Log a past session/);
   assert.match(hub, /<SessionResumeBar \/>/);
+  // A sheet background would make the shell keep the hub on screen while the
+  // URL said /workouts/session: RouteSheet renders only SHEET_ROUTES over a
+  // background, and the runner is deliberately not one. So no link into the
+  // runner carries `state`.
+  const rows = read('src/pages/workouts/rows.tsx');
+  assert.match(rows, /<Link to=\{startTo\} viewTransition aria-label=\{`Start \$\{title\}`\}/);
+  assert.ok(!/to=\{cta\.to\} state=/.test(hub), 'the hub CTA opens the runner as a page');
+  assert.ok(!/TRAIN\.liveSession\([^)]*\)\} state=/.test(hub), 'no live-session link carries a sheet background');
   assert.ok(!/TRAIN\.newSession\(\{ from: /.test(hub), 'the hub no longer seeds the post-hoc form from a workout');
   assert.match(read('src/pages/WorkoutHistory.tsx'), /<SessionResumeBar \/>/);
   assert.match(read('src/pages/WorkoutHistory.tsx'), /to=\{TRAIN\.newSession\(\)\}/);

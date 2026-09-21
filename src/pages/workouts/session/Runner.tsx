@@ -247,7 +247,10 @@ export default function Runner() {
                   onField={(setId, field, text) => store().setField(setId, field, text)}
                   onToggleSet={(setId) => store().toggleSet(setId)}
                   onAddSet={() => store().addSet(exercise.key)}
-                  onRemoveSet={(setId) => store().removeSet(exercise.key, setId)}
+                  onRemoveLastSet={() => {
+                    const last = exercise.sets[exercise.sets.length - 1];
+                    if (last) store().removeSet(exercise.key, last.id);
+                  }}
                   onRest={(seconds) => store().setRest(exercise.key, seconds)}
                   onCollapse={() => store().toggleCollapsed(exercise.key)}
                   menu={[{ label: 'Remove exercise', icon: <Trash size={18} />, onSelect: () => store().removeExercise(exercise.key), danger: true }]}
