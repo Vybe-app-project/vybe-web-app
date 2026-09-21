@@ -479,10 +479,11 @@ function SearchBox({ className }: { className?: string }) {
 }
 
 /**
- * The create action. Compact (phone header) is a plus in the blue disc — the
- * one blue on the phone shell; the brand mark it used to show sat where apps
- * put the avatar and read as a logo, not "add". The desktop button is the
- * sidebar's primary, always present, and keeps its label from xl.
+ * The create action. Compact (phone header) is Instagram's outline plus on the
+ * bar's leading edge — where Instagram (2026) and the Vybe mobile app both put
+ * create — not a filled disc: the disc made the corner the loudest thing on the
+ * screen. The desktop button is the sidebar's primary, always present, and
+ * keeps its label from xl.
  */
 function LogButton({ className, compact = false }: { className?: string; compact?: boolean }) {
   const setOpen = useLogSheet((s) => s.setOpen);
@@ -492,11 +493,9 @@ function LogButton({ className, compact = false }: { className?: string; compact
         type="button"
         aria-label="Log something"
         onClick={() => setOpen(true)}
-        className={cx('inline-flex h-11 w-11 items-center justify-center', className)}
+        className={cx('pressable inline-flex h-11 w-11 items-center justify-center rounded-sm text-text-1', className)}
       >
-        <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand text-on-brand transition-transform dur-1 active:scale-95">
-          <Plus size={22} />
-        </span>
+        <Plus size={26} />
       </button>
     );
   }
@@ -748,33 +747,46 @@ function AppHeader({
   return (
     <header className="vt-header safe-top sticky top-0 z-40 border-b border-line bg-surface-1">
       <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center px-2 text-text-1 lg:flex lg:h-14 lg:px-gutter">
-        <div className="flex min-w-0 items-center justify-start">
+        {/* Leading edge: Back when the route has one; otherwise create (+) on Home, root and hub pages, and Search on Home.
+            This is the Instagram 2026 / Vybe mobile arrangement: the trailing corner keeps at most two icons. */}
+        <div className="flex min-w-0 items-center justify-start gap-1">
           {showBack ? (
             <IconButton label="Back" onClick={goBack} className="text-text-1">
               <ArrowLeft size={24} />
             </IconButton>
-          ) : null}
-          {isHome ? (
-            <Link to="/" viewTransition aria-label="Vybe home" {...homeNav} className="pressable inline-flex h-11 items-center rounded-sm px-2 lg:hidden">
-              <Brand size="sm" />
-            </Link>
-          ) : null}
+          ) : (
+            <div className="flex items-center gap-1 lg:hidden">
+              {isHome || meta.root || meta.hub ? <LogButton compact /> : null}
+              {isHome ? (
+                <IconButton to="/search" label="Search" className="text-text-1" linkProps={searchNav}>
+                  <SearchIcon size={24} />
+                </IconButton>
+              ) : null}
+            </div>
+          )}
         </div>
-        {/* On phone Home the wordmark is the visual title; the page still needs its level-one heading, read but not seen. */}
-        <div className={cx('min-w-0 px-2 text-center lg:flex-1 lg:text-left', isHome && 'max-lg:sr-only')}>
-          <h1 className={cx('truncate text-text-1', subtitle ? 't-section' : 't-title', titleNode ? 'flex items-center justify-center lg:justify-start' : undefined)}>
-            {titleNode ?? title}
+        {/* On phone Home the wordmark IS the level-one heading (Brand reads "Vybe"); from lg the sidebar carries the brand
+            and the heading is the route title. */}
+        <div className={cx('min-w-0 px-2 text-center lg:flex-1 lg:text-left')}>
+          <h1 className={cx('truncate text-text-1', subtitle ? 't-section' : 't-title', titleNode ? 'flex items-center justify-center lg:justify-start' : undefined, isHome && 'max-lg:flex max-lg:items-center max-lg:justify-center')}>
+            {isHome ? (
+              <>
+                <Link to="/" viewTransition aria-label="Vybe home" {...homeNav} className="pressable inline-flex h-11 items-center rounded-sm px-2 lg:hidden">
+                  <Brand size="sm" />
+                </Link>
+                <span className="max-lg:sr-only">{titleNode ?? title}</span>
+              </>
+            ) : (
+              titleNode ?? title
+            )}
           </h1>
           {subtitle ? <p className="t-meta truncate">{subtitle}</p> : null}
         </div>
         <div className="flex min-w-0 items-center justify-end gap-1">
           {actions}
-          <div className="flex items-center lg:hidden">
+          <div className="flex items-center gap-1 lg:hidden">
             {isHome ? (
               <>
-                <IconButton to="/search" label="Search" className="text-text-1" linkProps={searchNav}>
-                  <SearchIcon size={24} />
-                </IconButton>
                 <IconButton to="/messages" label="Messages" badge={chats} className="text-text-1" linkProps={messagesNav}>
                   <Inbox size={24} />
                 </IconButton>
@@ -784,7 +796,6 @@ function AppHeader({
               </>
             ) : null}
             {meta.pattern === '/profile' ? <Menu label="More" items={profileMenu} /> : null}
-            {isHome || meta.root || meta.hub ? <LogButton compact /> : null}
           </div>
           <div className="hidden items-center gap-2 lg:flex">
             <SearchBox className="w-56 xl:w-72" />

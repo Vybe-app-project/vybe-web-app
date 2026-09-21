@@ -289,7 +289,7 @@ test('Notifications has one Mark-all-read control per viewport and PageHeader ho
   assert.match(layout, /const actions = wide \? desktopActions : mobileActions === undefined \? desktopActions : mobileActions;/);
 });
 
-test('page-level "+" actions use the quiet icon button; the Log circle is the only primary in the bar and shows a plus', () => {
+test('page-level "+" actions use the quiet icon button; the phone create button is Instagram\'s outline plus on the leading edge', () => {
   for (const file of ['Health', 'Challenges', 'ProgressPhotos', 'Water', 'Meals', 'WorkoutHistory', 'Stories']) {
     const src = read(`src/pages/${file}.tsx`);
     const mobile = src.slice(src.indexOf('mobileActions='), src.indexOf('mobileActions=') + 400);
@@ -298,7 +298,9 @@ test('page-level "+" actions use the quiet icon button; the Log circle is the on
   }
   const logButton = layout.slice(layout.indexOf('function LogButton('), layout.indexOf('function LogSheet('));
   assert.match(logButton, /aria-label="Log something"/, 'the live suites click this label');
-  assert.match(logButton, /<Plus size=\{22\} \/>/);
+  assert.match(logButton, /<Plus size=\{26\} \/>/);
+  // Instagram's create is an outline glyph on the leading edge, not a filled disc in the corner.
+  assert.doesNotMatch(logButton.slice(0, logButton.indexOf('return (\n    <Button')), /bg-brand|rounded-full/, 'the compact create button is not a filled disc');
   assert.doesNotMatch(logButton, /<BrandMark/, 'the brand mark read as a logo/avatar, not a create action');
   assert.match(logButton, /<span className="hidden xl:inline">Log<\/span>/, 'the desktop button keeps its text');
 });
@@ -458,11 +460,11 @@ test('touch targets reach 44 px: chips, 40 px icon buttons, theme segments, smal
 /* ------------------------------------------------------------ headings and landmarks */
 
 test('phone Home has a level-one heading; empty states and card headers default to h2; section tabs are a landmark', () => {
-  // Instagram shell (Q1): the shell header draws the ONE <h1> for both breakpoints; on phone Home the wordmark is the
-  // visual title and the heading is read, not seen. PageHeader draws nothing.
+  // Instagram shell: the shell header draws the ONE <h1> for both breakpoints; on phone Home the wordmark lives INSIDE
+  // that heading (Brand reads "Vybe") and the route title is read, not seen. PageHeader draws nothing.
   assert.equal((layout.match(/<h1[\s>]/g) || []).length, 1, 'exactly one h1 in the shell');
   assert.doesNotMatch(read('src/components/PageChrome.tsx'), /<h1/, 'PageHeader publishes only');
-  assert.match(layout, /isHome && 'max-lg:sr-only'/);
+  assert.match(layout, /<span className="max-lg:sr-only">\{titleNode \?\? title\}<\/span>/);
   assert.match(layout, /\{titleNode \?\? title\}/);
   // /challenges: the card titles sit directly under the page h1, so they are h2 (axe heading-order).
   const challenges = read('src/pages/Challenges.tsx');
@@ -598,6 +600,12 @@ test('the shell header is route-keyed and fixed-height, pages publish in a layou
   assert.match(layout, /const DEFAULT_RAIL = <DefaultRail \/>;/);
   // No band anywhere in the shell.
   assert.doesNotMatch(layout, /ShellBand|GymBand|useBandCollapse|--band|SidebarGym|DesktopTopBar|MobileTopBar|noGymAction|mintLog|useHomeGym|hideTopBar/);
+  // Instagram 2026 order on phones: create then Search lead, Messages then Notifications trail, nothing else in the corner.
+  const lead = header.slice(header.indexOf('justify-start gap-1'), header.indexOf('<h1 className={cx('));
+  assert.match(lead, /<LogButton compact \/>[\s\S]*label="Search"/, 'create sits before Search on the leading edge');
+  const trail = header.slice(header.indexOf('justify-end gap-1'));
+  assert.match(trail, /label="Messages"[\s\S]*label="Notifications"/);
+  assert.doesNotMatch(trail.slice(0, trail.indexOf('hidden items-center gap-2 lg:flex')), /label="Search"|<LogButton/, 'the phone trailing corner carries two icons at most');
 });
 
 test('the shell holds still through a route change: named view-transition parts, sticky offsets that match the header, one wordmark, 48 px tabs', () => {
@@ -614,6 +622,10 @@ test('the shell holds still through a route change: named view-transition parts,
   assert.match(css, /--container-sidebar: 16\.2667rem;/, '244 px at the 15 px root');
   assert.match(layout, /<Button variant="primary" block onClick=\{\(\) => setOpen\(true\)\} icon=\{<Plus size=\{20\} \/>\}/, 'the sidebar Log button is the one blue on the desktop shell');
   assert.match(layout, /className="pressable inline-flex h-11 items-center rounded-sm px-2 lg:hidden">\s*<Brand size="sm" \/>/, 'the phone wordmark hides from lg, where the sidebar carries it');
+  // The phone wordmark is inside the one <h1>: Home keeps a level-one heading without a second visible title.
+  const h1 = layout.slice(layout.indexOf('<h1 className={cx('), layout.indexOf('</h1>'));
+  assert.match(h1, /aria-label="Vybe home"/, 'the Home wordmark is the heading, not a separate row');
+  assert.match(h1, /<span className="max-lg:sr-only">\{titleNode \?\? title\}<\/span>/);
   // Bottom tabs: 48 px, pressable, the 11 px labels kept, a red dot (never a count) on Home only, opaque like Instagram's.
   assert.match(layout, /<ul className="mx-auto flex h-12 max-w-lg items-stretch justify-around">/);
   assert.match(layout, /'pressable relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0\.5 rounded-sm'/);
