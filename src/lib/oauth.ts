@@ -180,6 +180,35 @@ export function rememberOAuth(storage: StorageLike | null | undefined, pending: 
   }
 }
 
+/**
+ * Whether the buttons were there last time.
+ *
+ * The capability query cannot answer on the first frame, so a build that
+ * carries client ids has to decide whether to hold their space while it
+ * waits. Holding it is right when they will appear and wrong when they will
+ * not, and only the last answer knows which. One boolean, on a signed-out
+ * page: never data, only geometry.
+ */
+export const OAUTH_SEEN_KEY = 'vybe.oauthSeen';
+
+export function rememberProviderAnswer(storage: StorageLike | null | undefined, any: boolean): void {
+  try {
+    storage?.setItem(OAUTH_SEEN_KEY, any ? '1' : '0');
+  } catch {
+    // Without storage the first paint simply reserves; see below.
+  }
+}
+
+/** true / false as last seen, null when this browser has never asked. */
+export function lastProviderAnswer(storage: StorageLike | null | undefined): boolean | null {
+  try {
+    const raw = storage?.getItem(OAUTH_SEEN_KEY);
+    return raw === '1' ? true : raw === '0' ? false : null;
+  } catch {
+    return null;
+  }
+}
+
 export function forgetOAuth(storage: StorageLike | null | undefined): void {
   try {
     storage?.removeItem(OAUTH_STATE_KEY);

@@ -440,13 +440,18 @@ function CoachingSection() {
     },
   });
 
-  const status: TrainerApplicationStatus = application.data?.application.status ?? 'none';
-  const seedKey = application.data ? `${status}:${application.data.application.submittedAt ?? ''}` : null;
+  // `application` is optional on the wire (an account that has never applied
+  // answers without it). Optional-chaining only the envelope crashed the
+  // whole Settings screen into its error boundary the moment a server
+  // answered `{}`; every read below chains through the record itself.
+  const applicationRecord = application.data?.application;
+  const status: TrainerApplicationStatus = applicationRecord?.status ?? 'none';
+  const seedKey = application.data ? `${status}:${applicationRecord?.submittedAt ?? ''}` : null;
   useEffect(() => {
     if (!application.data || hydratedFor === seedKey) return;
-    setFields(application.data.application.fields ?? []);
-    setSummary(application.data.application.experienceSummary ?? '');
-    setLinks((application.data.application.credentialUrls ?? []).join('\n'));
+    setFields(applicationRecord?.fields ?? []);
+    setSummary(applicationRecord?.experienceSummary ?? '');
+    setLinks((applicationRecord?.credentialUrls ?? []).join('\n'));
     setHydratedFor(seedKey);
   }, [application.data, hydratedFor, seedKey]);
 
@@ -512,7 +517,7 @@ function CoachingSection() {
   const copy = statusCopy(status);
   const showForm = status === 'none' || status === 'rejected' || editing;
   const summaryLength = summary.trim().length;
-  const decisionNote = application.data?.application.decisionNote;
+  const decisionNote = applicationRecord?.decisionNote;
 
   return (
     <SettingsCard id="coaching" title="Coaching" description="Coach on Vybe: a badge on your profile and a place in the coach directory.">
@@ -538,11 +543,11 @@ function CoachingSection() {
           {status === 'rejected' && decisionNote ? <span className="mt-1 block font-medium text-text-1">Reviewer note: {decisionNote}</span> : null}
         </Callout>
 
-        {status === 'approved' && application.data?.application.fields.length ? (
+        {status === 'approved' && applicationRecord?.fields?.length ? (
           <div>
             <p className="type-label mb-1.5 text-text-2">Your specialties</p>
             <ul className="flex flex-wrap gap-1.5" aria-label="Coaching specialties">
-              {application.data.application.fields.map((f) => (
+              {applicationRecord.fields.map((f) => (
                 <li key={f}>
                   <Badge tone="info">{TRAINER_FIELDS.find((t) => t.value === f)?.label ?? f}</Badge>
                 </li>

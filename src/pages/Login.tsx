@@ -15,9 +15,11 @@ import {
 import { clearDraftEmail, readDraftEmail, writeDraftEmail } from '../lib/authDrafts';
 import {
   OAUTH_LABELS,
+  lastProviderAnswer,
   oauthApiErrorCopy,
   oauthSignInRequest,
   rememberOAuth,
+  rememberProviderAnswer,
   readOAuthReturn,
   startOAuth,
   usableClientId,
@@ -25,7 +27,7 @@ import {
 } from '../lib/oauth';
 import { signupLocale } from '../lib/signupLocale';
 import { isEmail } from '../lib/hooks';
-import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, Spinner, cx, useDocumentTitle } from './ui';
+import { Brand, BrandMark, Button, Callout, Checkbox, IconButton, Input, Skeleton, Spinner, cx, useDocumentTitle } from './ui';
 import { Dumbbell, Eye, EyeOff, Users, Zap } from './icons';
 import { PendingDeletionInterstitial, SignInLifecycleNotice } from './settings/SignInLifecycleNotice';
 
@@ -232,6 +234,8 @@ const PROVIDER_MARKS: Record<OAuthProvider, (props: { size?: number }) => ReactN
   apple: AppleMark,
 };
 
+const DIVIDER_CLASS = 'flex items-center gap-3 text-2xs uppercase tracking-wide text-text-3';
+
 /** Apple leads on Apple hardware, which is where people expect it first. */
 function providerOrder(): OAuthProvider[] {
   const platform = typeof navigator === 'undefined' ? '' : `${navigator.platform || ''} ${navigator.userAgent || ''}`;
@@ -257,14 +261,49 @@ export function ProviderSignIn({
   disabled?: boolean;
   onError: (message: string) => void;
 }) {
-  const { google, apple } = useOAuthProviders();
+  const { google, apple, isLoading } = useOAuthProviders();
+  // What this browser saw last time, read once: it decides whether the space
+  // is worth holding while the capability query is still out.
+  const [seenBefore] = useState(() => lastProviderAnswer(localStorage));
   const ids: Record<OAuthProvider, string | null> = {
     google: usableClientId(OAUTH_ENV.VITE_GOOGLE_CLIENT_ID),
     apple: usableClientId(OAUTH_ENV.VITE_APPLE_SERVICES_ID),
   };
   const enabled: Record<OAuthProvider, boolean> = { google, apple };
-  const providers = providerOrder().filter((p) => enabled[p] && ids[p]);
-  if (providers.length === 0) return null;
+  // What this build could offer, and what the server says it may.
+  const configured = providerOrder().filter((p) => ids[p]);
+  const providers = configured.filter((p) => enabled[p]);
+  const anyProvider = providers.length > 0;
+
+  // Remember the answer for the first frame of the next cold load.
+  useEffect(() => {
+    if (!isLoading) rememberProviderAnswer(localStorage, anyProvider);
+  }, [isLoading, anyProvider]);
+
+  if (providers.length === 0) {
+    // A build with no client ids reserves nothing and can never shift: that
+    // is the deployed case today. A build that carries one holds the exact
+    // geometry of its buttons while the capability query is still out, so
+    // the email form does not jump down when the answer lands (this cost
+    // CLS 0.11 on a phone before the block was reserved) -- unless this
+    // browser has already been told the providers are off, in which case
+    // reserving would be the shift.
+    if (!isLoading || configured.length === 0 || seenBefore === false) return null;
+    return (
+      <div className="mb-5 space-y-3" aria-hidden="true">
+        <div className="grid gap-2">
+          {configured.map((p) => (
+            <Skeleton key={p} className="h-[52px] w-full rounded-sm" />
+          ))}
+        </div>
+        <p className={DIVIDER_CLASS}>
+          <span aria-hidden="true" className="h-px flex-1 bg-line" />
+          or
+          <span aria-hidden="true" className="h-px flex-1 bg-line" />
+        </p>
+      </div>
+    );
+  }
 
   const begin = (provider: OAuthProvider) => {
     const started = startOAuth({ provider, clientId: ids[provider], origin: window.location.origin, returnTo });
@@ -297,7 +336,7 @@ export function ProviderSignIn({
           );
         })}
       </div>
-      <p className="flex items-center gap-3 text-2xs uppercase tracking-wide text-text-3">
+      <p className={DIVIDER_CLASS}>
         <span aria-hidden="true" className="h-px flex-1 bg-line" />
         or
         <span aria-hidden="true" className="h-px flex-1 bg-line" />

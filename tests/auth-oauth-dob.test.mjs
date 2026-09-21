@@ -142,11 +142,17 @@ test('the API refusals read as something a person can act on', () => {
 test('both buttons are gated on the server capability AND a configured client id, and the routes are literals', () => {
   const login = read('src/pages/Login.tsx');
   assert.match(login, /import \{ useOAuthProviders \} from '\.\.\/lib\/capabilities'/);
-  assert.match(login, /const \{ google, apple \} = useOAuthProviders\(\);/);
+  assert.match(login, /const \{ google, apple, isLoading \} = useOAuthProviders\(\);/);
   assert.match(login, /VITE_GOOGLE_CLIENT_ID: import\.meta\.env\.VITE_GOOGLE_CLIENT_ID/);
   assert.match(login, /VITE_APPLE_SERVICES_ID: import\.meta\.env\.VITE_APPLE_SERVICES_ID/);
-  assert.match(login, /const providers = providerOrder\(\)\.filter\(\(p\) => enabled\[p\] && ids\[p\]\);/);
-  assert.match(login, /if \(providers\.length === 0\) return null;/, 'nothing is drawn while the capability is false');
+  assert.match(login, /const configured = providerOrder\(\)\.filter\(\(p\) => ids\[p\]\);/);
+  assert.match(login, /const providers = configured\.filter\(\(p\) => enabled\[p\]\);/);
+  // A build with no client id draws nothing and reserves nothing, which is
+  // the deployed case; a build that has one holds the buttons' exact height
+  // while the capability query is out, so the form never jumps.
+  assert.match(login, /if \(!isLoading \|\| configured\.length === 0 \|\| seenBefore === false\) return null;/);
+  assert.match(login, /rememberProviderAnswer\(localStorage, anyProvider\)/, 'the last answer decides the next cold load\u2019s first frame');
+  assert.match(login, /<Skeleton key=\{p\} className="h-\[52px\] w-full rounded-sm" \/>/);
   // Written out so scripts/audit-api-contracts.cjs can resolve them.
   assert.match(login, /api\.post\('\/auth\/google\/mobile', body\)/);
   assert.match(login, /api\.post\('\/auth\/apple\/mobile', body\)/);
