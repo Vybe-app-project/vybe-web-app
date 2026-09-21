@@ -63,7 +63,14 @@ test('the detail page handles bad ids, the comments anchor, deletion and count s
   assert.match(detail, /navigate\('\/', \{ replace: true \}\);/, 'deleting from the detail page leaves it');
   assert.match(detail, /const post = !postQuery\.isError \? postQuery\.data : undefined;/, 'no stale card under the gone state');
   assert.match(detail, /qc\.setQueryData<Post>\(\['post', postId\]/, 'the cached post keeps its comment list in step');
-  assert.match(detail, /params: \{ page: pageParam, limit: 20, sort \}/);
+  // P8a: the list read moved behind lib/comments (one place for the literal
+  // path, `held=1`, the replies route and the idempotent like), and it is the
+  // threaded contract now — each row carries `replies` and `replyCount`.
+  assert.match(detail, /fetchComments\(postId, \{ page: pageParam as number, limit: 20, sort \}\)/);
+  assert.match(
+    read('src/lib/comments.ts'),
+    /api\.get<CommentsPage>\(`\/posts\/post\/\$\{postId\}\/comments\/all\/fetch\/filter`, \{\s*params: \{ page, limit, sort \},/,
+  );
   assert.match(detail, /expandMedia/);
   assert.match(detail, /enterKeyHint="send"/);
   assert.match(detail, /<h2 className="type-heading text-lg text-text-1">Comments<\/h2>/, 'the live suite finds the Comments heading');

@@ -63,12 +63,36 @@ export type PostMedia = {
   height?: number;
 };
 
+/**
+ * A comment as `services/comments.js presentComment` sends it. The id key is
+ * `_id`, the author key is `user`, and everything below `user` is what Wave
+ * C's comments-as-a-resource added: one level of replies (`parentId`, plus
+ * `replies` — the first two, oldest first — and `replyCount` on a parent),
+ * server-side like counts, and the moderation state.
+ *
+ * `status` is what the **viewer** may know: a comment held by the hidden
+ * words filter or hidden by the post author reads as `visible` to its own
+ * author, so nobody is told their comment was quietly held.
+ */
 export type PostComment = {
   _id: string;
   text: string;
   createdAt: string;
   likes?: string[];
   user?: PublicUser | null;
+  /** Null on a top-level comment; the root comment's id on a reply. */
+  parentId?: string | null;
+  likeCount?: number;
+  isLiked?: boolean;
+  /** Always 0 on a reply: replies go one level deep. */
+  replyCount?: number;
+  /** The first two replies, oldest first, on a top-level row. */
+  replies?: PostComment[];
+  status?: 'visible' | 'held' | 'hidden';
+  hiddenByAuthor?: boolean;
+  /** Only sent to the comment's author and the post's author. */
+  heldBy?: 'approval' | 'hidden_words' | 'restrict' | 'filter' | null;
+  mentions?: { _id: string; username?: string; fullName?: string }[];
 };
 
 export type Post = {
