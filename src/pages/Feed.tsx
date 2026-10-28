@@ -93,10 +93,14 @@ function Composer({
   const [medias, setMedias] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const uploadEpoch = useRef(0);
+  useEffect(() => () => { uploadEpoch.current += 1; }, []);
 
   const dirty = content.trim().length > 0 || medias.length > 0;
 
   const reset = useCallback(() => {
+    uploadEpoch.current += 1;
+    setUploading(false);
     setContent('');
     setMedias((prev) => {
       prev.forEach((m) => URL.revokeObjectURL(m.preview));
@@ -131,6 +135,7 @@ function Composer({
    * the browser so the card shows a picture before play.
    */
   async function addFiles(files: FileList | File[] | null) {
+    const epoch = uploadEpoch.current;
     if (!files || !files.length) return;
     const list = Array.from(files);
     const room = MAX_POST_MEDIA - medias.length;
@@ -157,6 +162,7 @@ function Composer({
         }
         if (isVideo) {
           const [uploaded, poster] = await Promise.all([uploadPresigned(file, contentType, 'media'), captureVideoPoster(file)]);
+          if (epoch !== uploadEpoch.current) return;
           let thumbnail: string | undefined;
           if (poster) {
             try {
@@ -165,16 +171,19 @@ function Composer({
               // No poster is fine; the card falls back to the browser's first frame.
             }
           }
+          if (epoch !== uploadEpoch.current) return;
           setMedias((prev) => [...prev, { type: 'video', key: uploaded.key, url: uploaded.key, size: file.size, thumbnail, preview: URL.createObjectURL(file) }]);
         } else {
           const uploaded = await uploadImage(file, 'posts');
+          if (epoch !== uploadEpoch.current) return;
           setMedias((prev) => [...prev, { ...uploaded, preview: URL.createObjectURL(file) }]);
         }
       }
     } catch (e) {
+      if (epoch !== uploadEpoch.current) return;
       toast.error(e, 'Upload failed.');
     } finally {
-      setUploading(false);
+      if (epoch === uploadEpoch.current) setUploading(false);
       if (photoRef.current) photoRef.current.value = '';
       if (videoRef.current) videoRef.current.value = '';
     }

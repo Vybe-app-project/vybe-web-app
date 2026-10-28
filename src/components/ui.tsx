@@ -686,7 +686,7 @@ export function Button({
           <Spinner size={18} />
         </span>
       ) : null}
-      <span className={cx('inline-flex items-center gap-2', loading && 'invisible')}>
+      <span className={cx('inline-flex items-center gap-2', loading && 'opacity-0')}>
         {icon}
         {children}
         {iconRight}
@@ -800,7 +800,7 @@ export function CountBadge({ value, className, max = 99 }: { value: number | str
   return (
     <span
       className={cx(
-        'tabular inline-flex min-w-4.5 items-center justify-center rounded-full bg-danger px-1 text-2xs font-bold leading-4.5 text-on-brand ring-2 ring-bg',
+        'tabular inline-flex min-w-4.5 items-center justify-center rounded-full bg-danger px-1 text-2xs font-bold leading-4.5 text-on-count-badge ring-2 ring-bg',
         className,
       )}
     >
@@ -2084,6 +2084,7 @@ export function Menu({
   const activate = (it: MenuItem) => {
     if (it.disabled) return;
     setOpen(false);
+    wrapRef.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
     if (it.to) navigate(it.to, { viewTransition: true });
     else if (it.href) window.open(it.href, '_blank', 'noopener');
     it.onSelect?.();
@@ -2125,13 +2126,13 @@ export function Menu({
         break;
       case 'Escape':
       case 'Tab':
-        e.preventDefault();
+        if (e.key === 'Escape') e.preventDefault();
         // Escape belongs to the menu while it is open: the Modal listens for
         // it on window, and without this a member menu inside a community
         // sheet took the whole sheet down with it.
         e.stopPropagation();
         setOpen(false);
-        wrapRef.current?.querySelector<HTMLElement>('button')?.focus();
+        wrapRef.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
         break;
     }
   };
