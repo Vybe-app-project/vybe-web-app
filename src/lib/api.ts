@@ -35,6 +35,24 @@ const ADMIN_TOKEN_KEY = 'vybe.adminToken';
 // A minimal copy of the signed-in user (id, username, name, avatar) kept
 // beside the token so the shell can paint offline. Never anything sensitive.
 const USER_SNAPSHOT_KEY = 'vybe.user';
+let userSessionEpoch = 0;
+let boundUserCredential: string | null = null;
+export const captureUserSession = () => userSessionEpoch;
+const bindUserCredential = (credential: string | null) => {
+  if (credential === boundUserCredential) return;
+  boundUserCredential = credential;
+  userSessionEpoch += 1;
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new Event('vybe:session-change'));
+  }
+};
+
+declare module 'axios' {
+  interface InternalAxiosRequestConfig {
+    vybeCredential?: string | null;
+    vybeSessionEpoch?: number;
+  }
+}
 const SIGN_OUT_REASON_KEY = 'vybe.signOutReason';
 
 // Consumer sessions live in localStorage so the installed PWA survives a
@@ -72,17 +90,20 @@ const readStorage = (storage: Storage, key: string): string | null => {
 };
 
 export const tokenStore = {
-  get: () => readStorage(localStorage, TOKEN_KEY) ?? readStorage(sessionStorage, TOKEN_KEY),
+  get: () => readStorage(sessionStorage, TOKEN_KEY) ?? readStorage(localStorage, TOKEN_KEY),
   /** Exactly one store holds the token, so switching persistence cannot leave a copy behind. */
   set: (t: string, persistence: SessionPersistence = 'local') => {
     const [target, other] = persistence === 'session' ? [sessionStorage, localStorage] : [localStorage, sessionStorage];
+    safe(() => localStorage.removeItem(USER_SNAPSHOT_KEY), undefined);
     target.setItem(TOKEN_KEY, t);
     other.removeItem(TOKEN_KEY);
+    bindUserCredential(t);
   },
   clear: () => {
     localStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
     safe(() => localStorage.removeItem(USER_SNAPSHOT_KEY), undefined);
+    bindUserCredential(null);
   },
   /** Which store currently holds the session, for anything that re-issues it. */
   persistence: (): SessionPersistence | null =>
@@ -94,6 +115,9 @@ export const tokenStore = {
     safe(() => {
       const raw = localStorage.getItem(USER_SNAPSHOT_KEY);
       const parsed = raw ? (JSON.parse(raw) as Partial<UserSnapshot>) : null;
+      const token = tokenStore.get();
+      const claims = token ? JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) : null;
+      if (!claims || String(claims.id ?? claims.sub ?? '') !== parsed?._id) return null;
       return parsed && typeof parsed._id === 'string' && typeof parsed.username === 'string' ? (parsed as UserSnapshot) : null;
     }, null),
   setUser: (u: { _id: string; username: string; fullName?: string; avatar?: string }) =>
@@ -106,6 +130,18 @@ export const tokenStore = {
       undefined,
     ),
 };
+
+boundUserCredential = safe(() => tokenStore.get(), null);
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', event => {
+    if (event.key !== TOKEN_KEY && event.key !== null) return;
+    if (readStorage(sessionStorage, TOKEN_KEY)) return; // this tab chose its own session
+    const credential = tokenStore.get();
+    if (credential === boundUserCredential) return;
+    bindUserCredential(credential);
+    location.reload(); // disposes old private UI, caches and websocket state
+  });
+}
 
 /**
  * Why the last session ended, for the sign-in page to explain. Set right
@@ -204,14 +240,25 @@ function onUnauthorized(kind: 'user' | 'admin') {
 export function installClientInterceptors(instance: AxiosInstance, kind: 'user' | 'admin' | null): void {
   instance.interceptors.request.use((config) => {
     const t = kind === 'admin' ? tokenStore.getAdmin() : kind === 'user' ? tokenStore.get() : null;
+    if (kind === 'user' && t !== boundUserCredential) throw new axios.CanceledError('The account session changed.');
+    config.vybeCredential = t;
+    config.vybeSessionEpoch = kind === 'user' ? userSessionEpoch : undefined;
     if (t) config.headers.Authorization = `Bearer ${t}`;
     if (!config.headers.has('X-Vybe-Client')) config.headers.set('X-Vybe-Client', CLIENT_HEADER_VALUE);
     config.headers['X-Platform'] = 'web';
     return config;
   });
   instance.interceptors.response.use(
-    (r) => r,
+    (r) => {
+      const current = kind === 'admin' ? tokenStore.getAdmin() : kind === 'user' ? tokenStore.get() : null;
+      if (kind && (r.config.vybeCredential !== current || (kind === 'user' && r.config.vybeSessionEpoch !== userSessionEpoch))) {
+        return Promise.reject(new axios.CanceledError('The account session changed.'));
+      }
+      return r;
+    },
     (err: AxiosError) => {
+      const current = kind === 'admin' ? tokenStore.getAdmin() : kind === 'user' ? tokenStore.get() : null;
+      if (kind && err.config && (err.config.vybeCredential !== current || (kind === 'user' && err.config.vybeSessionEpoch !== userSessionEpoch))) return Promise.reject(err);
       const status = err.response?.status;
       if (status === 426 && isUpdateRequiredResponse(status, err.response?.data)) {
         useClientPolicy.getState().noteUpdateRequired(err.response?.data);
