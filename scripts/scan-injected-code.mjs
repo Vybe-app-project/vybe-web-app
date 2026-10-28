@@ -136,6 +136,7 @@ const MAGIC = {
   ],
   '.otf': [[0x4f, 0x54, 0x54, 0x4f], [0x00, 0x01, 0x00, 0x00]],
   '.eot': null, // EOT has no reliable leading magic; ASCII check still applies.
+  '.lkf': [], // Not a supported font format; used to conceal executable loaders.
   '.png': [[0x89, 0x50, 0x4e, 0x47]],
   '.jpg': [[0xff, 0xd8, 0xff]],
   '.jpeg': [[0xff, 0xd8, 0xff]],
@@ -187,14 +188,17 @@ function checkMagic(buf, ext) {
   return expected.some((sig) => sig.every((b, i) => buf[i] === b));
 }
 
-function scanFile(abs) {
+function scanFile(abs, supplied) {
   const out = [];
   let buf;
   try {
-    const st = statSync(abs);
-    if (!st.isFile() || st.size === 0) return out;
-    if (st.size > MAX_BYTES) return out;
-    buf = readFileSync(abs);
+    if (supplied) buf = supplied;
+    else {
+      const st = statSync(abs);
+      if (!st.isFile() || st.size === 0) return out;
+      if (st.size > MAX_BYTES) return out;
+      buf = readFileSync(abs);
+    }
   } catch {
     return out;
   }
@@ -227,7 +231,8 @@ function scanFile(abs) {
     return out;
   }
   // Only inspect as text when it plausibly is text.
-  if (!BINARY_EXT.has(ext) && !TEXT_EXT.has(ext) && ext !== '') return out;
+  // Renaming JavaScript to an unknown asset extension must not hide it.
+  if (!BINARY_EXT.has(ext) && !TEXT_EXT.has(ext) && ext !== '' && buf.includes(0)) return out;
 
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -297,15 +302,14 @@ function walk(dir, acc = []) {
 
 function stagedFiles() {
   try {
-    return execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
+    return execFileSync('git', ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'], {
       encoding: 'utf8',
     })
-      .split('\n')
-      .map((s) => s.trim())
+      .split('\0')
       .filter(Boolean)
       .map((f) => resolve(ROOT, f));
   } catch {
-    return [];
+    throw new Error('Cannot enumerate staged files; refusing to skip the security gate.');
   }
 }
 
@@ -335,7 +339,9 @@ targets = targets.filter((t) => resolve(t) !== selfPath);
 
 let flagged = 0;
 for (const f of targets) {
-  const findings = scanFile(f);
+  const staged = args.includes('--staged')
+    ? execFileSync('git', ['show', `:${relative(ROOT, f)}`], {maxBuffer: 64 * 1024 * 1024}) : undefined;
+  const findings = scanFile(f, staged);
   if (findings.length) {
     flagged++;
     console.error(`\n✗ ${relative(ROOT, f) || f}`);

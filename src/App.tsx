@@ -550,6 +550,12 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const sessionQueries = useQueryClient();
+  useEffect(() => {
+    const reset = () => { void sessionQueries.cancelQueries(); sessionQueries.clear(); };
+    window.addEventListener('vybe:session-change', reset);
+    return () => window.removeEventListener('vybe:session-change', reset);
+  }, [sessionQueries]);
   const bootstrap = useAuth((s) => s.bootstrap);
   const sessionStale = useAuth((s) => s.sessionStale);
   useEffect(() => { void bootstrap(); }, [bootstrap]);
