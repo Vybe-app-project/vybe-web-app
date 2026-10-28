@@ -1383,6 +1383,11 @@ function Bubble({
         </span>
       </div>
 
+      {menuItems.length && touch ? (
+        <IconButton label="Message options" size={40} onClick={() => setSheet(true)} className="mb-5 shrink-0">
+          <MoreHorizontal size={20} />
+        </IconButton>
+      ) : null}
       {menuItems.length && !touch ? (
         <Menu
           label="Message options"
@@ -2075,6 +2080,7 @@ function Thread({
     mutationFn: async (item: OutboxItem) => {
       const payload: Record<string, unknown> = room && (isGroup || !peer?._id) ? { chatRoomId: room._id } : { receiverIds: [peer?._id] };
       if (item.text) payload.text = item.text;
+      payload.clientRequestId = item.tempId;
       if (item.media.length) payload.media = item.media.map((m) => ({ uri: m.key, type: m.type }));
       // One card per message: the API takes a single { type, id }.
       if (item.attachment) Object.assign(payload, attachmentBody(item.attachment.type, item.attachment.id));

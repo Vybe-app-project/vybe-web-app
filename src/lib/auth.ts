@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { AxiosError } from 'axios';
-import { api, tokenStore, adminApi, revokeSession, signOutReason } from './api';
+import { api, tokenStore, adminApi, revokeSession, signOutReason, captureUserSession } from './api';
 import { forgetPushTokenOnSignOut } from './firebase';
 import { disposeSocket } from './socket';
 import type { AccountFields, HomeGymRef } from './accountTypes';
@@ -127,14 +127,17 @@ export const useAuth = create<AuthState>((set, get) => ({
   clearPendingDeletion: () => set({ pendingDeletion: null }),
 
   bootstrap: async () => {
+    const scope = captureUserSession();
     if (!tokenStore.get()) return set({ user: null, loading: false, sessionStale: false });
     try {
       const { data } = await api.get('/users/me');
+      if (scope !== captureUserSession()) return;
       lastUserRefreshAt = Date.now();
       const user = (data.user || data) as User;
       rememberSnapshot(user);
       set({ user, loading: false, sessionStale: false });
     } catch (error) {
+      if (scope !== captureUserSession()) return;
       // Only an answer from the API can end the session. A 401 has already
       // been handled by the interceptor (token cleared, hand-off to /login
       // with the path preserved); a 403 means unverified or suspended.
@@ -156,19 +159,21 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   refreshUser: async ({ force = false } = {}) => {
+    const scope = captureUserSession();
     if (!tokenStore.get() || !get().user) return;
     if (userRefreshInFlight) return userRefreshInFlight;
     if (!force && Date.now() - lastUserRefreshAt < USER_REFRESH_THROTTLE_MS) return;
     userRefreshInFlight = (async () => {
       try {
         const { data } = await api.get('/users/me');
+        if (scope !== captureUserSession()) return;
         lastUserRefreshAt = Date.now();
         set({ user: data.user || data });
       } catch {
         // A 401 is handled by the API interceptor; anything else keeps the
         // current copy, which is still the best information we have.
       } finally {
-        userRefreshInFlight = null;
+        if (scope === captureUserSession()) userRefreshInFlight = null;
       }
     })();
     return userRefreshInFlight;
@@ -312,6 +317,15 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ admin: null, adminLoading: false });
   },
 }));
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('vybe:session-change', () => {
+    disposeSocket();
+    userRefreshInFlight = null;
+    lastUserRefreshAt = 0;
+    useAuth.setState({user: null, sessionStale: false, pendingDeletion: null});
+  });
+}
 
 /** How long a tab may sit hidden before its session user counts as stale. */
 export const SESSION_STALE_AFTER_MS = 10 * 60 * 1000;
