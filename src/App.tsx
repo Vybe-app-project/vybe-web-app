@@ -107,6 +107,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
 const AdminPosts = lazy(() => import('./pages/admin/AdminPosts'));
 const AdminReports = lazy(() => import('./pages/admin/AdminReports'));
+const AdminModeration = lazy(() => import('./pages/admin/AdminModeration'));
 const AdminSupport = lazy(() => import('./pages/admin/AdminSupport'));
 const AdminTrainers = lazy(() => import('./pages/admin/AdminTrainers'));
 const AdminAdmins = lazy(() => import('./pages/admin/AdminAdmins'));
@@ -427,6 +428,7 @@ const ROUTE_TREE = (
       <Route path="users" element={<AdminUsers />} />
       <Route path="posts" element={<AdminPosts />} />
       <Route path="reports" element={<AdminReports />} />
+      <Route path="moderation" element={<AdminModeration />} />
       <Route path="support" element={<AdminSupport />} />
       <Route path="trainers" element={<AdminTrainers />} />
       {/* Premade workout / plan catalog: list, then one editor route per kind ("new" or an id). */}

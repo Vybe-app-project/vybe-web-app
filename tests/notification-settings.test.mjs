@@ -80,16 +80,16 @@ const LEGACY_TITLES = {
   friendRequests: 'Friend requests',
 };
 
-test('the 18 push switches match the API in order and in default', () => {
+test('the push switches match the API in order and in default', () => {
   const live = backendDefaults();
   const expected = live ? live.defaults : STATIC_BACKEND_DEFAULTS;
   assert.deepEqual([...lib.NOTIFICATION_SETTING_KEYS], Object.keys(expected), live ? `keys drifted from ${live.source}` : 'keys drifted from the static list');
   assert.deepEqual(lib.DEFAULT_NOTIFICATION_SETTINGS, expected, 'defaults must mirror the backend');
-  assert.equal(lib.NOTIFICATION_SETTING_KEYS.length, 18);
-  // Only these three start off.
+  assert.equal(lib.NOTIFICATION_SETTING_KEYS.length, 21);
+  // These start off. Friend activity waits for a per-friend opt-in.
   assert.deepEqual(
     Object.entries(lib.DEFAULT_NOTIFICATION_SETTINGS).filter(([, v]) => v === false).map(([k]) => k),
-    ['pauseAll', 'messagesFromOthers', 'hydration'],
+    ['pauseAll', 'messagesFromOthers', 'hydration', 'friendActivity'],
   );
   // hooks.ts keeps every historical export name pointing at the same values.
   assert.equal(hooks.NOTIFICATION_SETTING_KEYS, lib.NOTIFICATION_SETTING_KEYS);

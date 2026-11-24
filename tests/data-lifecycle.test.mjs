@@ -478,7 +478,7 @@ test('the re-auth dialog renders closed for every method combination, the state 
 
 test('export rows: a ready job offers a labelled Download and its expiry; a failed job explains without the code', async () => {
   const { ExportJobRow } = await import('../src/pages/settings/DataExport.tsx');
-  const ready = job({ downloadCount: 2 });
+  const ready = job({ downloadCount: 2, expiresAt: '2027-09-26T10:01:00.000Z' });
   const html = mount(h('ul', null, h(ExportJobRow, { job: ready, onDownload() {}, onRemove() {} })));
   assert.match(html, /Ready/);
   assert.match(html, /aria-label="Download the copy requested Sep 19, 2026"/);

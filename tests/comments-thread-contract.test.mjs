@@ -143,7 +143,7 @@ test('a held row says why, in words its author can act on', () => {
   assert.equal(lib.heldReasonLabel(comment({ status: 'held', heldBy: 'approval' })), 'Waiting on you');
   assert.equal(lib.heldReasonLabel(comment({ status: 'held', heldBy: 'hidden_words' })), 'Matched a hidden word');
   assert.equal(lib.heldReasonLabel(comment({ status: 'held', heldBy: 'restrict' })), 'From someone you restricted');
-  assert.equal(lib.heldReasonLabel(comment({ status: 'held', heldBy: 'filter' })), 'Held by the filter');
+  assert.equal(lib.heldReasonLabel(comment({ status: 'held', heldBy: 'filter' })), 'Under review');
   assert.equal(lib.heldReasonLabel(comment({ status: 'held' })), 'Waiting on you', 'an unnamed hold still reads');
 });
 
