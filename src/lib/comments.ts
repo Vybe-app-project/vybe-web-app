@@ -192,7 +192,7 @@ export const HELD_REASON: Readonly<Record<string, string>> = Object.freeze({
   approval: 'Waiting on you',
   hidden_words: 'Matched a hidden word',
   restrict: 'From someone you restricted',
-  filter: 'Held by the filter',
+  filter: 'Under review',
 });
 
 export function heldReasonLabel(comment: PostComment): string {

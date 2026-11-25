@@ -134,6 +134,8 @@ export type Story = {
     font?: string;
     question?: string;
   };
+  /** Set when the pre-publication filter is holding this story. The author still sees it. */
+  underReview?: boolean;
 };
 
 export type StoryGroup = { author: StoryAuthor; stories: Story[] };
@@ -768,6 +770,11 @@ export function StoryViewer({
           onPointerCancel={() => setHoldPaused(false)}
         >
           <StoryStage story={story} paused={paused} muted={muted} onProgress={setProgress} onEnded={next} />
+          {story.underReview ? (
+            <div className="absolute left-4 top-4">
+              <Badge tone="warning">Under review</Badge>
+            </div>
+          ) : null}
 
           {story.type !== 'text' && story.content?.text ? (
             <p className="absolute bottom-4 left-4 right-4 rounded-md bg-scrim p-3 text-sm text-text-1">{story.content.text}</p>

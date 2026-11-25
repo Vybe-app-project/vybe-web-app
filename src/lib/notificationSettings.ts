@@ -13,7 +13,7 @@
 
 /* ------------------------------------------------------------------ push switches */
 
-/** The 18 booleans of `GET /notifications/settings` `settings`, in the API's order. */
+/** The booleans of `GET /notifications/settings` `settings`, in the API's order. */
 export const NOTIFICATION_SETTING_KEYS = [
   'pauseAll',
   'messagesFromFollowing',
@@ -33,12 +33,15 @@ export const NOTIFICATION_SETTING_KEYS = [
   'checkins',
   'hydration',
   'achievements',
+  'friendActivity',
+  'challenges',
+  'buddies',
 ] as const;
 
 export type NotificationSettingKey = (typeof NOTIFICATION_SETTING_KEYS)[number];
 export type NotificationSettings = Record<NotificationSettingKey, boolean>;
 
-/** The API defaults: only pauseAll, messagesFromOthers and hydration start off. */
+/** The API defaults: pauseAll, messagesFromOthers, hydration and friendActivity start off. */
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   pauseAll: false,
   messagesFromFollowing: true,
@@ -58,6 +61,9 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   checkins: true,
   hydration: false,
   achievements: true,
+  friendActivity: false,
+  challenges: true,
+  buddies: true,
 };
 
 /** Keep only the exact boolean keys the API accepts, defaults filled in. */
@@ -81,9 +87,9 @@ export type NotificationSettingGroup = {
  * except `pauseAll` sits in exactly one group (pinned by the test).
  */
 export const NOTIFICATION_SETTING_GROUPS: readonly NotificationSettingGroup[] = [
-  { id: 'activity', title: 'Activity', keys: ['newFollowers', 'friendRequests', 'likes', 'comments', 'mentions', 'workoutPosts'] },
+  { id: 'activity', title: 'Activity', keys: ['newFollowers', 'friendRequests', 'likes', 'comments', 'mentions', 'workoutPosts', 'friendActivity'] },
   { id: 'messages', title: 'Messages', keys: ['messagesFromFollowing', 'messagesFromOthers'] },
-  { id: 'community', title: 'Community and gyms', keys: ['gymCommunity', 'events', 'planShares', 'sessions'] },
+  { id: 'community', title: 'Community and gyms', keys: ['gymCommunity', 'events', 'planShares', 'sessions', 'challenges', 'buddies'] },
   { id: 'rhythm', title: 'Training rhythm and recaps', keys: ['rhythm', 'weeklyRecap', 'achievements'] },
   { id: 'reminders', title: 'Reminders', keys: ['checkins', 'hydration'] },
 ];
@@ -138,6 +144,18 @@ export const NOTIFICATION_LABELS: Record<NotificationSettingKey, SettingLabel> =
     hint: 'A reminder at the times you choose, skipped when you logged water in the last two hours or reached today’s goal.',
   },
   achievements: { title: 'Achievements', hint: 'When you earn an achievement.' },
+  friendActivity: {
+    title: 'Friend activity',
+    hint: 'A digest of training from people you opted in to follow.',
+  },
+  challenges: {
+    title: 'Challenges',
+    hint: 'Invites, joins, goals and standings for challenges you are in.',
+  },
+  buddies: {
+    title: 'Training buddies',
+    hint: 'Buddy invites, the Sunday nudge, and weeks you both trained.',
+  },
 };
 
 /* ------------------------------------------------------------------ hydration times */

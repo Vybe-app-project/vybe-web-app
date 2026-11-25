@@ -266,7 +266,7 @@ test('"Keep me signed in" is on by default and, when off, the token lives in the
   assert.match(auth, /tokenStore\.set\(data\.token, remember \? 'local' : 'session'\)/);
   const api = read('src/lib/api.ts');
   assert.match(api, /set: \(t: string, persistence: SessionPersistence = 'local'\)/);
-  assert.match(api, /readStorage\(localStorage, TOKEN_KEY\) \?\? readStorage\(sessionStorage, TOKEN_KEY\)/);
+  assert.match(api, /readStorage\(sessionStorage, TOKEN_KEY\) \?\? readStorage\(localStorage, TOKEN_KEY\)/);
   // Admin tokens are untouched by this (the admin contract test pins them too).
   assert.match(api, /getAdmin: \(\) => sessionStorage\.getItem\(ADMIN_TOKEN_KEY\)/);
 });

@@ -92,6 +92,7 @@ import {
   Image as ImageIcon,
   Inbox,
   LogOut,
+  MoreHorizontal,
   Plus,
   Search,
   Send,
