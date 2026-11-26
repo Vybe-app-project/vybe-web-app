@@ -39,6 +39,9 @@ const STATIC_BACKEND_DEFAULTS = {
   checkins: true,
   hydration: false,
   achievements: true,
+  friendActivity: false,
+  challenges: true,
+  buddies: true,
 };
 
 function backendDefaults() {
