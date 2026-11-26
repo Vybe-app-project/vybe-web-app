@@ -61,7 +61,14 @@ export default function AdminModeration() {
 
   const decide = useMutation({
     mutationFn: async ({ id, decision }: { id: string; decision: 'approve' | 'reject' }) => {
-      await adminApi.post(`/admin/moderation/${kind}/${id}/${decision}`, { note: note.trim() || undefined });
+      const body = { note: note.trim() || undefined };
+      // Literal paths so scripts/audit-api-contracts.cjs can match each call to
+      // POST /api/admin/moderation/:kind/:id/approve|reject.
+      if (decision === 'approve') {
+        await adminApi.post(`/admin/moderation/${kind}/${id}/approve`, body);
+      } else {
+        await adminApi.post(`/admin/moderation/${kind}/${id}/reject`, body);
+      }
     },
     onMutate: ({ id }) => setBusyId(id),
     onSuccess: (_data, { decision }) => {
